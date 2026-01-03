@@ -8,7 +8,7 @@ import websockets
 from websockets.server import WebSocketServerProtocol
 from core.job_manager import JobManager
 from database.base import AsyncSessionLocal
-from database.models import DeviceConnection
+from database.models import DeviceConnection, DeviceTelemetry
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ class WebSocketServer:
         self.job_manager = job_manager
         self.connected_clients: Set[WebSocketServerProtocol] = set()
         self.device_sessions: Dict[str, WebSocketServerProtocol] = {}  # device_id -> websocket
+        self.websocket_to_device: Dict[WebSocketServerProtocol, str] = {}  # websocket -> device_id
         self.server = None
         
     async def register_client(self, websocket: WebSocketServerProtocol, device_id: Optional[str] = None):
@@ -31,6 +32,7 @@ class WebSocketServer:
         
         if device_id:
             self.device_sessions[device_id] = websocket
+            self.websocket_to_device[websocket] = device_id
             # Update device connection in database
             await self._update_device_connection(device_id, is_connected=True)
             logger.info(f"Device connected: {device_id}")
@@ -43,9 +45,16 @@ class WebSocketServer:
         
         if device_id and device_id in self.device_sessions:
             del self.device_sessions[device_id]
+            if websocket in self.websocket_to_device:
+                del self.websocket_to_device[websocket]
             await self._update_device_connection(device_id, is_connected=False)
             logger.info(f"Device disconnected: {device_id}")
         else:
+            if websocket in self.websocket_to_device:
+                device_id = self.websocket_to_device[websocket]
+                del self.websocket_to_device[websocket]
+                if device_id in self.device_sessions:
+                    del self.device_sessions[device_id]
             logger.info(f"Client disconnected: {websocket.remote_address}")
     
     async def _update_device_connection(self, device_id: str, is_connected: bool):
@@ -130,13 +139,13 @@ class WebSocketServer:
                     "device_id": device_id
                 })
                 
-            elif message_type == "data":
-                # Raw data message (for future use)
-                data = message.get("data", {})
-                await self.send_response(websocket, {
-                    "type": "data_received",
-                    "message": "Data received successfully"
-                })
+            elif message_type in ("data", "telemetry"):
+                # Handle device telemetry data
+                await self._handle_telemetry_data(websocket, message)
+                
+            elif message_type is None:
+                # If no type specified, treat as raw telemetry data (simple JSON format)
+                await self._handle_telemetry_data(websocket, message, is_raw=True)
                 
             else:
                 await self.send_error(websocket, f"Unknown message type: {message_type}")
@@ -144,6 +153,71 @@ class WebSocketServer:
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
             await self.send_error(websocket, f"Error processing message: {str(e)}")
+    
+    async def _handle_telemetry_data(self, websocket: WebSocketServerProtocol, message: Dict[str, Any], is_raw: bool = False):
+        """Handle telemetry data from a device."""
+        try:
+            # Get device_id from websocket mapping or from message
+            device_id = self.websocket_to_device.get(websocket)
+            
+            if not device_id:
+                device_id = message.get("device_id")
+                if device_id:
+                    # Auto-register device if device_id is provided
+                    await self.register_client(websocket, device_id)
+                    device_name = message.get("device_name", device_id)
+                    device_type = message.get("device_type", "unknown")
+                    metadata = message.get("metadata", {})
+                    await self._update_device_info(device_id, device_name, device_type, metadata)
+                else:
+                    await self.send_error(websocket, "No device_id provided. Register device first or include device_id in message.")
+                    return
+            
+            # Handle different data formats
+            if is_raw:
+                # Raw JSON format - treat all top-level keys as metrics (except reserved fields)
+                reserved = {"device_id", "device_name", "device_type", "metadata", "type", "timestamp"}
+                data_dict = {k: v for k, v in message.items() if k not in reserved}
+            else:
+                # Structured format with "data" field
+                data_dict = message.get("data", {})
+            
+            # Store telemetry data
+            stored_count = 0
+            async with AsyncSessionLocal() as session:
+                for metric_name, metric_value in data_dict.items():
+                    # Handle different value formats
+                    if isinstance(metric_value, dict):
+                        # If value is a dict, extract value and unit
+                        value = metric_value.get("value", metric_value)
+                        unit = metric_value.get("unit")
+                    else:
+                        value = metric_value
+                        unit = None
+                    
+                    telemetry = DeviceTelemetry(
+                        device_id=device_id,
+                        metric_name=str(metric_name),
+                        value=value,
+                        unit=unit
+                    )
+                    session.add(telemetry)
+                    stored_count += 1
+                
+                await session.commit()
+            
+            logger.info(f"Stored {stored_count} telemetry metrics for device {device_id}")
+            
+            await self.send_response(websocket, {
+                "type": "data_received",
+                "device_id": device_id,
+                "metrics_stored": stored_count,
+                "message": f"Successfully stored {stored_count} metric(s)"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error handling telemetry data: {e}", exc_info=True)
+            await self.send_error(websocket, f"Error storing telemetry data: {str(e)}")
     
     async def _update_device_info(self, device_id: str, device_name: str, 
                                    device_type: Optional[str], metadata: Dict):
@@ -157,14 +231,14 @@ class WebSocketServer:
             if device:
                 device.device_name = device_name
                 device.device_type = device_type
-                device.metadata = metadata
+                device.device_metadata = metadata
                 device.last_seen = datetime.utcnow()
             else:
                 device = DeviceConnection(
                     device_id=device_id,
                     device_name=device_name,
                     device_type=device_type,
-                    metadata=metadata,
+                    device_metadata=metadata,
                     is_connected="true"
                 )
                 session.add(device)

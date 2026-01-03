@@ -55,7 +55,7 @@ pip install -r requirements.txt
 4. **Create a `.env` file** (optional, for custom configuration):
 ```env
 HOST=0.0.0.0
-PORT=8000
+PORT=1337
 WEBSOCKET_PORT=8765
 DATABASE_URL=sqlite+aiosqlite:///./dragonfly.db
 LOG_LEVEL=INFO
@@ -65,7 +65,14 @@ LOG_LEVEL=INFO
 
 ### Running the Application
 
+**Option 1: Using the run script**
 ```bash
+./run.sh
+```
+
+**Option 2: Manual activation**
+```bash
+source venv/bin/activate  # Activate virtual environment
 python main.py
 ```
 
@@ -111,7 +118,7 @@ Connect to `ws://localhost:8765` and send JSON messages:
 
 #### Submit a Job
 ```bash
-curl -X POST http://localhost:8000/api/jobs \
+curl -X POST http://localhost:1337/api/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "service_name": "ai_service",
@@ -121,7 +128,7 @@ curl -X POST http://localhost:8000/api/jobs \
 
 #### Get Job Status
 ```bash
-curl http://localhost:8000/api/jobs/{job_id}
+curl http://localhost:1337/api/jobs/{job_id}
 ```
 
 ## Architecture

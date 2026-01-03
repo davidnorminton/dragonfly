@@ -325,8 +325,6 @@ async def get_index(request: Request):
 </body>
 </html>
     """
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates."""
@@ -374,4 +372,6 @@ async def get_job(job_id: str):
 async def list_jobs():
     """List all jobs (placeholder)."""
     return {"jobs": []}
+
+
 

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test - Dragonfly</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #0f0;
+        }
+        #output {
+            background: #000;
+            padding: 10px;
+            border: 1px solid #0f0;
+            height: 400px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0a0;
+        }
+        input {
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 5px;
+            width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🪶 Dragonfly WebSocket Tester</h1>
+    <div>
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+        <button onclick="registerDevice()">Register Device</button>
+        <button onclick="submitJob()">Submit Job</button>
+        <button onclick="checkStatus()">Check Status</button>
+        <button onclick="clearOutput()">Clear</button>
+    </div>
+    <div>
+        <input type="text" id="jobIdInput" placeholder="Job ID (for status check)">
+    </div>
+    <div id="output"></div>
+
+    <script>
+        let ws = null;
+        let lastJobId = null;
+
+        function log(message) {
+            const output = document.getElementById('output');
+            const time = new Date().toLocaleTimeString();
+            output.innerHTML += `[${time}] ${message}<br>`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('Already connected!');
+                return;
+            }
+
+            log('Connecting to ws://localhost:8765...');
+            ws = new WebSocket('ws://localhost:8765');
+
+            ws.onopen = () => {
+                log('✓ Connected!');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    log('← Received: ' + JSON.stringify(data, null, 2));
+                    
+                    // Save job ID if we get a job_submitted response
+                    if (data.type === 'job_submitted' && data.job_id) {
+                        lastJobId = data.job_id;
+                        document.getElementById('jobIdInput').value = data.job_id;
+                    }
+                } catch (e) {
+                    log('← Received: ' + event.data);
+                }
+            };
+
+            ws.onerror = (error) => {
+                log('✗ Error: ' + error);
+            };
+
+            ws.onclose = () => {
+                log('✗ Disconnected');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                log('Disconnected');
+            }
+        }
+
+        function sendMessage(message) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('✗ Not connected! Click Connect first.');
+                return;
+            }
+            log('→ Sending: ' + JSON.stringify(message, null, 2));
+            ws.send(JSON.stringify(message));
+        }
+
+        function registerDevice() {
+            sendMessage({
+                type: 'device_register',
+                device_id: 'test-device-' + Date.now(),
+                device_name: 'Test Device',
+                device_type: 'sensor',
+                metadata: { test: true }
+            });
+        }
+
+        function submitJob() {
+            sendMessage({
+                type: 'job',
+                service_name: 'ai_service',
+                data: {
+                    question: 'Hello, what is 2+2?'
+                }
+            });
+        }
+
+        function checkStatus() {
+            const jobId = document.getElementById('jobIdInput').value || lastJobId;
+            if (!jobId) {
+                log('✗ Please enter a Job ID');
+                return;
+            }
+            sendMessage({
+                type: 'job_status',
+                job_id: jobId
+            });
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
+
