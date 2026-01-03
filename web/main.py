@@ -594,8 +594,8 @@ def get_frontend_html() -> str:
                     // Check if message has audio file
                     var audioFile = msg.message_metadata && msg.message_metadata.audio_file;
                     if (audioFile) {
-                        // Show audio player
-                        audioPlayer = '<div class="audio-player"><audio controls><source src="/' + audioFile + '" type="audio/mpeg">Your browser does not support audio.</audio></div>';
+                        // Show audio player (no autoplay, preload none)
+                        audioPlayer = '<div class="audio-player"><audio controls preload="none"><source src="/' + audioFile + '" type="audio/mpeg">Your browser does not support audio.</audio></div>';
                     }
                     
                     header = '<div class="chat-message-header">' +
@@ -653,29 +653,16 @@ def get_frontend_html() -> str:
                     throw new Error('TTS generation failed');
                 }
                 
-                // Get audio blob and play it
+                // Get audio blob (but don't play it)
                 const audioBlob = await response.blob();
-                const audioUrl = URL.createObjectURL(audioBlob);
-                const audio = new Audio(audioUrl);
+                URL.createObjectURL(audioBlob); // Create URL but don't use it for playback
                 
-                audio.onended = function() {
-                    URL.revokeObjectURL(audioUrl);
-                    button.disabled = false;
-                    button.textContent = '🔊';
-                };
-                
-                audio.onerror = function() {
-                    URL.revokeObjectURL(audioUrl);
-                    button.disabled = false;
-                    button.textContent = '🔊 Speak';
-                    alert('Error playing audio');
-                };
-                
-                await audio.play();
-                button.textContent = '🔊 Playing...';
-                
-                // Reload chat history to show the audio player
+                // Reload chat history to show the audio player controls
                 await loadChatHistory(false);
+                
+                // Reset button state
+                button.disabled = false;
+                button.textContent = '🔊';
                 
             } catch (error) {
                 console.error('Error generating TTS:', error);
