@@ -43,7 +43,7 @@ class DeviceConnection(Base):
     device_name = Column(String, nullable=False)
     device_type = Column(String, nullable=True)
     last_seen = Column(DateTime(timezone=True), server_default=func.now())
-    metadata = Column(JSON, nullable=True)
+    device_metadata = Column("metadata", JSON, nullable=True)  # Column name is "metadata" in DB
     is_connected = Column(String, default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -64,4 +64,35 @@ class CollectedData(Base):
     
     def __repr__(self):
         return f"<CollectedData {self.source} - {self.data_type}>"
+
+
+class ChatMessage(Base):
+    """Model for storing chat messages with AI."""
+    __tablename__ = "chat_messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True, nullable=True)  # Optional session grouping
+    role = Column(String, nullable=False)  # user, assistant, system
+    message = Column(Text, nullable=False)
+    service_name = Column(String, nullable=True)  # ai_service, rag_service, etc.
+    message_metadata = Column("metadata", JSON, nullable=True)  # Column name is "metadata" in DB
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<ChatMessage {self.role} - {self.id}>"
+
+
+class DeviceTelemetry(Base):
+    """Model for storing device telemetry data."""
+    __tablename__ = "device_telemetry"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, nullable=False, index=True)
+    metric_name = Column(String, nullable=False, index=True)
+    value = Column(JSON, nullable=False)
+    unit = Column(String, nullable=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    
+    def __repr__(self):
+        return f"<DeviceTelemetry {self.device_id} - {self.metric_name}>"
 

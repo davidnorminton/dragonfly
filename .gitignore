@@ -20,6 +20,10 @@ ENV/
 .env
 .env.local
 
+# API keys and sensitive config files
+config/api_keys.json
+config/current_persona.json
+
 # Database
 *.db
 *.sqlite
@@ -37,3 +41,6 @@ Thumbs.db
 config/local.yaml
 data/
 
+data/
+data/audio/
+data/transcripts/

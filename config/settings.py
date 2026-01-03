@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     
     # Server settings
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 1337  # Frontend web server port
     websocket_port: int = 8765
     
     # Database
@@ -23,10 +23,11 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = 10
     job_timeout: int = 300  # seconds
     
-    # AI/LLM settings (to be configured later)
+    # AI/LLM settings
     ai_api_key: Optional[str] = None
     ai_api_url: Optional[str] = None
-    ai_model: str = "claude-3-sonnet-20240229"
+    ai_model: str = "claude-3-5-haiku-20241022"  # Best value model for general questions
+    api_keys_file: str = "config/api_keys.json"
     
     # Logging
     log_level: str = "INFO"
