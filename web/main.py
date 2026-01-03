@@ -8,19 +8,23 @@ import logging
 import asyncio
 import json
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from core.processor import Processor
 from services.ai_service import AIService
 from database.base import AsyncSessionLocal
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData
 from sqlalchemy import select, desc, func
 from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config
+from config.location_loader import load_location_config, get_location_display_name
 from services.tts_service import TTSService
+from data_collectors.weather_collector import WeatherCollector
 from services.ai_service import AIService
 from fastapi.responses import Response
 from utils.transcript_saver import save_transcript
 from config.settings import settings
+import time
+import platform
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,42 @@ app.add_middleware(
 
 # This will be set by the main application
 processor: Optional[Processor] = None
+server_start_time: float = time.time()
+
+def get_system_uptime() -> float:
+    """Get system uptime in seconds using platform-specific methods."""
+    try:
+        import psutil
+        # psutil.boot_time() returns the system boot time as a timestamp
+        boot_time = psutil.boot_time()
+        return time.time() - boot_time
+    except (ImportError, AttributeError):
+        # Fallback: try platform-specific methods
+        system = platform.system().lower()
+        if system == 'linux':
+            try:
+                with open('/proc/uptime', 'r') as f:
+                    uptime_seconds = float(f.readline().split()[0])
+                    return uptime_seconds
+            except (IOError, ValueError, IndexError):
+                pass
+        elif system == 'darwin':  # macOS
+            try:
+                import subprocess
+                result = subprocess.run(['sysctl', '-n', 'kern.boottime'], 
+                                      capture_output=True, text=True, timeout=1)
+                if result.returncode == 0:
+                    # sysctl returns: { sec = 1234567890, usec = 0 }
+                    # Extract the timestamp
+                    boot_time_str = result.stdout.strip()
+                    # Parse the boot time
+                    boot_time = float(boot_time_str.split('=')[1].split(',')[0].strip())
+                    return time.time() - boot_time
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, 
+                    ValueError, IndexError, AttributeError):
+                pass
+        # Final fallback: return server uptime
+        return time.time() - server_start_time
 
 # Mount static files for audio
 project_root = Path(__file__).parent.parent
@@ -77,9 +117,10 @@ async def get_latest_telemetry():
         )
         all_telemetry = result.scalars().all()
         
+        # Get latest value for each device/metric combination
         latest = {}
         for t in all_telemetry:
-            key = f"{t.device_id}:{t.metric_name}"
+            key = (t.device_id, t.metric_name)
             if key not in latest:
                 latest[key] = {
                     "device_id": t.device_id,
@@ -90,6 +131,112 @@ async def get_latest_telemetry():
                 }
         
         return list(latest.values())
+
+
+@app.get("/api/system/stats")
+async def get_system_stats():
+    """Get system statistics (CPU, RAM, Disk) across all drives."""
+    try:
+        import psutil
+        # Get average CPU usage across all cores
+        cpu_percent = psutil.cpu_percent(interval=0.1, percpu=False)
+        memory = psutil.virtual_memory()
+        
+        # Calculate disk usage across ALL drives
+        total_disk_space = 0
+        total_disk_used = 0
+        total_disk_free = 0
+        
+        system = platform.system().lower()
+        partitions = psutil.disk_partitions()
+        
+        for partition in partitions:
+            try:
+                # Skip certain filesystem types that might cause errors
+                if system == 'linux' and partition.fstype in ['tmpfs', 'devtmpfs', 'sysfs', 'proc', 'devpts']:
+                    continue
+                if system == 'darwin' and partition.fstype in ['devfs', 'autofs']:
+                    continue
+                
+                usage = psutil.disk_usage(partition.mountpoint)
+                total_disk_space += usage.total
+                total_disk_used += usage.used
+                total_disk_free += usage.free
+            except (OSError, PermissionError):
+                # Skip partitions we can't access
+                continue
+        
+        # If no partitions were accessible, try root as fallback
+        if total_disk_space == 0:
+            try:
+                root_path = '/' if system != 'windows' else 'C:\\'
+                usage = psutil.disk_usage(root_path)
+                total_disk_space = usage.total
+                total_disk_used = usage.used
+                total_disk_free = usage.free
+            except (OSError, PermissionError):
+                logger.warning("Could not access disk usage, using placeholder data")
+                return {
+                    "cpu_percent": 0.0,
+                    "memory_total_gb": 0.0,
+                    "memory_used_gb": 0.0,
+                    "memory_percent": 0.0,
+                    "disk_total_gb": 0.0,
+                    "disk_used_gb": 0.0,
+                    "disk_free_gb": 0.0,
+                    "disk_percent": 0.0
+                }
+        
+        disk_percent = (total_disk_used / total_disk_space * 100) if total_disk_space > 0 else 0.0
+        
+        stats = {
+            "cpu_percent": cpu_percent,
+            "memory_total_gb": memory.total / (1024**3),
+            "memory_used_gb": memory.used / (1024**3),
+            "memory_percent": memory.percent,
+            "disk_total_gb": total_disk_space / (1024**3),
+            "disk_used_gb": total_disk_used / (1024**3),
+            "disk_free_gb": total_disk_free / (1024**3),
+            "disk_percent": disk_percent
+        }
+        
+        # Log the stats
+        logger.info(f"System stats updated: CPU={cpu_percent:.1f}%, Memory={memory.percent:.1f}%, Disk={disk_percent:.1f}%")
+        
+        return stats
+    except ImportError:
+        logger.error("psutil not available, cannot get system stats")
+        # Return zero data if psutil not available
+        return {
+            "cpu_percent": 0.0,
+            "memory_total_gb": 0.0,
+            "memory_used_gb": 0.0,
+            "memory_percent": 0.0,
+            "disk_total_gb": 0.0,
+            "disk_used_gb": 0.0,
+            "disk_free_gb": 0.0,
+            "disk_percent": 0.0
+        }
+    except Exception as e:
+        logger.error(f"Error getting system stats: {e}", exc_info=True)
+        # Return zero data on error
+        return {
+            "cpu_percent": 0.0,
+            "memory_total_gb": 0.0,
+            "memory_used_gb": 0.0,
+            "memory_percent": 0.0,
+            "disk_total_gb": 0.0,
+            "disk_used_gb": 0.0,
+            "disk_free_gb": 0.0,
+            "disk_percent": 0.0
+        }
+
+
+@app.get("/api/system/uptime")
+async def get_system_uptime_endpoint():
+    """Get system uptime in seconds."""
+    uptime_seconds = get_system_uptime()
+    return {"uptime_seconds": int(uptime_seconds)}
 
 
 @app.get("/api/chat")
@@ -254,13 +401,18 @@ async def generate_tts(request: Request):
         except Exception as e:
             logger.warning(f"Failed to update message metadata with audio file: {e}")
     
-    # Return audio file
+    # Return audio file with file path in headers
+    response_headers = {
+        "Content-Disposition": "attachment; filename=tts_output.mp3"
+    }
+    if audio_filepath:
+        # Return relative path for the audio file
+        response_headers["X-Audio-File-Path"] = str(audio_filepath.relative_to(project_root))
+    
     return Response(
         content=audio_data,
         media_type="audio/mpeg",
-        headers={
-            "Content-Disposition": "attachment; filename=tts_output.mp3"
-        }
+        headers=response_headers
     )
 
 
@@ -269,10 +421,87 @@ async def get_personas():
     """Get list of available personas and current persona."""
     personas = list_available_personas()
     current = get_current_persona_name()
+    current_config = load_persona_config(current)
+    current_title = "CYBER" if current == "default" else (current_config.get("title", current) if current_config else current)
     return {
         "personas": personas,
-        "current": current
+        "current": current,
+        "current_title": current_title
     }
+
+
+@app.get("/api/location")
+async def get_location():
+    """Get location configuration."""
+    location_config = load_location_config()
+    return location_config
+
+
+@app.get("/api/weather")
+async def get_weather():
+    """Get current weather data for the configured location."""
+    try:
+        # Try to get latest weather data from database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(CollectedData)
+                .where(CollectedData.source == "weather")
+                .where(CollectedData.data_type == "weather_current")
+                .order_by(desc(CollectedData.collected_at))
+                .limit(1)
+            )
+            latest_data = result.scalar_one_or_none()
+            
+            # If we have recent data (less than 10 minutes old), return it
+            if latest_data:
+                collected_at = latest_data.collected_at
+                if collected_at:
+                    age_seconds = (datetime.now(timezone.utc) - collected_at.replace(tzinfo=timezone.utc)).total_seconds()
+                    if age_seconds < 600:  # 10 minutes
+                        weather_data = latest_data.data
+                        return {
+                            "success": True,
+                            "data": weather_data.get("data", {}),
+                            "cached": True,
+                            "age_seconds": int(age_seconds)
+                        }
+        
+        # Otherwise, collect fresh data
+        collector = WeatherCollector()
+        result = await collector.collect()
+        
+        if "error" in result:
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error"),
+                "message": "Failed to collect weather data"
+            }
+        
+        # Store in database
+        weather_data = result.get("data", {})
+        async with AsyncSessionLocal() as session:
+            collected_data = CollectedData(
+                source=result.get("source", "weather"),
+                data_type=result.get("data_type", "weather_current"),
+                data=result,
+                expires_at=datetime.utcnow() + timedelta(minutes=10)  # Expire after 10 minutes
+            )
+            session.add(collected_data)
+            await session.commit()
+        
+        return {
+            "success": True,
+            "data": weather_data,  # Return the weather data dict directly (temperature, humidity, etc.)
+            "cached": False
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting weather data: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to get weather data"
+        }
 
 
 @app.post("/api/personas/select")
@@ -311,146 +540,546 @@ async def get_index(request: Request):
 
 
 def get_frontend_html() -> str:
-    """Return the frontend HTML with streaming chat."""
+    """Return the frontend HTML with C.Y.B.E.R interface."""
     return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dragonfly Home Assistant</title>
+    <title>C.Y.B.E.R</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #0f0f23;
+            background: #0a0a0f;
             color: #e0e0e0;
             min-height: 100vh;
+            overflow: hidden;
         }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 20px 40px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-        .header h1 {
-            font-size: 1.8em;
-            color: white;
-        }
-        .container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            padding: 20px;
-            max-width: 1800px;
-            margin: 0 auto;
-        }
-        .panel {
-            background: #1a1a2e;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-        }
-        .panel.full-width {
-            grid-column: 1 / -1;
-        }
-        .panel h2 {
-            font-size: 1.5em;
-            margin-bottom: 20px;
-            color: #667eea;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
-        }
-        .panel-header {
+        
+        /* Top Bar */
+        .top-bar {
+            background: #141420;
+            border-bottom: 1px solid #2a2a3a;
+            padding: 12px 24px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            height: 48px;
         }
-        .panel-header h2 {
-            margin: 0;
-            border-bottom: none;
-            padding-bottom: 0;
-        }
-        .persona-selector {
+        .top-bar-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
-        .persona-selector label {
-            color: #667eea;
-            font-size: 0.9em;
-        }
-        .persona-selector select {
-            padding: 8px 12px;
-            background: #0f0f23;
-            border: 2px solid #2d2d44;
-            border-radius: 6px;
+        .logo-text {
+            font-size: 1.2em;
+            font-weight: 600;
             color: #e0e0e0;
+            letter-spacing: 2px;
+        }
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4caf50;
+            box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+        }
+        .top-bar-center {
+            flex: 1;
+            text-align: center;
+            color: #a0a0a0;
             font-size: 0.9em;
+        }
+        .top-bar-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            color: #a0a0a0;
+            font-size: 0.9em;
+        }
+        .settings-icon {
             cursor: pointer;
+            font-size: 1.2em;
+            opacity: 0.7;
+            transition: opacity 0.2s;
         }
-        .persona-selector select:hover {
-            border-color: #667eea;
+        .settings-icon:hover {
+            opacity: 1;
         }
-        .persona-selector select:focus {
-            outline: none;
-            border-color: #667eea;
+        
+        /* Main Layout */
+        .main-container {
+            display: grid;
+            grid-template-columns: 320px 4px 1fr 4px 400px;
+            height: calc(100vh - 48px);
+            gap: 0;
+            padding: 20px;
+            overflow: hidden;
         }
-        .chat-container {
+        .panel-resizer {
+            background: #2a2a3a;
+            cursor: col-resize;
+            position: relative;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        .panel-resizer:hover {
+            background: #3a3a4a;
+        }
+        .panel-resizer::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #4a4a5a;
+            transform: translateX(-50%);
+        }
+        .panel-resizer.resizing {
+            background: #667eea;
+        }
+        
+        /* Left Panel - Widgets */
+        .left-panel {
             display: flex;
             flex-direction: column;
-            height: 600px;
+            gap: 16px;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+        .widget {
+            background: #141420;
+            border: 1px solid #2a2a3a;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .widget-title {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #a0a0a0;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #1a1a2a;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.85em;
+        }
+        .stat-label {
+            color: #a0a0a0;
+        }
+        .stat-value {
+            color: #e0e0e0;
+            font-weight: 500;
+        }
+        .stat-boxes {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .stat-box {
+            background: #1a1a2a;
+            border: 1px solid #2a2a3a;
+            border-radius: 6px;
+            padding: 8px;
+            text-align: center;
+        }
+        .stat-box-label {
+            font-size: 0.7em;
+            color: #808080;
+            margin-bottom: 4px;
+        }
+        .stat-box-value {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+        .weather-main {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .weather-temp {
+            font-size: 1.8em;
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+        .weather-location {
+            font-size: 0.85em;
+            color: #a0a0a0;
+        }
+        .weather-condition {
+            font-size: 0.85em;
+            color: #808080;
+        }
+        .camera-preview {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #0a0a0f;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #404040;
+            font-size: 0.8em;
+            margin-bottom: 8px;
+        }
+        .uptime-display {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: #e0e0e0;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+        
+        /* Center Panel - C.Y.B.E.R Graphic */
+        .center-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+        }
+        .cyber-graphic {
+            width: 280px;
+            height: 280px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .cyber-circle {
+            position: absolute;
+            border: 2px solid #2a2a3a;
+            border-radius: 50%;
+        }
+        .cyber-circle-outer {
+            width: 280px;
+            height: 280px;
+        }
+        .cyber-circle-mid {
+            width: 200px;
+            height: 200px;
+            border-color: #3a3a4a;
+        }
+        .cyber-circle-inner {
+            width: 120px;
+            height: 120px;
+            border-color: #4a4a5a;
+        }
+        .cyber-dots {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            gap: 4px;
+        }
+        .cyber-dot {
+            width: 6px;
+            height: 6px;
+            background: #667eea;
+            border-radius: 50%;
+            box-shadow: 0 0 4px rgba(102, 126, 234, 0.8);
+        }
+        .cyber-dot:nth-child(7),
+        .cyber-dot:nth-child(11),
+        .cyber-dot:nth-child(13),
+        .cyber-dot:nth-child(17),
+        .cyber-dot:nth-child(19) {
+            background: #764ba2;
+            box-shadow: 0 0 4px rgba(118, 75, 162, 0.8);
+        }
+        .cyber-text {
+            font-size: 1.8em;
+            font-weight: 600;
+            letter-spacing: 4px;
+            color: #e0e0e0;
+            margin-top: 16px;
+        }
+        .cyber-status {
+            font-size: 0.9em;
+            color: #4caf50;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .cyber-status-dot {
+            width: 6px;
+            height: 6px;
+            background: #4caf50;
+            border-radius: 50%;
+            box-shadow: 0 0 6px rgba(76, 175, 80, 0.8);
+        }
+        .cyber-audio-player {
+            margin-top: 16px;
+            width: 100%;
+            max-width: 300px;
+        }
+        .cyber-audio-player audio {
+            width: 100%;
+            outline: none;
+        }
+        .cyber-center-button {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: #667eea;
+            border: 2px solid #764ba2;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2em;
+            color: white;
+            box-shadow: 0 0 12px rgba(102, 126, 234, 0.6);
+            transition: all 0.3s;
+            z-index: 10;
+        }
+        .cyber-center-button:hover {
+            background: #764ba2;
+            border-color: #667eea;
+            box-shadow: 0 0 16px rgba(118, 75, 162, 0.8);
+            transform: scale(1.1);
+        }
+        
+        /* Persona Selection Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        .modal-content {
+            background: #141420;
+            border: 2px solid #2a2a3a;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            transform: scale(0.9);
+            transition: transform 0.3s;
+        }
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
+        .modal-header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .modal-title {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: #e0e0e0;
+            margin-bottom: 8px;
+        }
+        .modal-subtitle {
+            font-size: 0.9em;
+            color: #a0a0a0;
+        }
+        .persona-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+        }
+        .persona-item {
+            background: #1a1a2a;
+            border: 2px solid #2a2a3a;
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .persona-item:hover {
+            border-color: #667eea;
+            background: #1f1f2f;
+            transform: translateY(-2px);
+        }
+        .persona-item.selected {
+            border-color: #764ba2;
+            background: #1f1f2f;
+            box-shadow: 0 0 12px rgba(118, 75, 162, 0.4);
+        }
+        .persona-image-placeholder {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: #2a2a3a;
+            border: 2px solid #3a3a4a;
+            margin: 0 auto 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            color: #667eea;
+        }
+        .persona-name {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #e0e0e0;
+            margin-bottom: 4px;
+        }
+        .persona-title {
+            font-size: 0.75em;
+            color: #a0a0a0;
+        }
+        .modal-close {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: transparent;
+            border: none;
+            color: #a0a0a0;
+            font-size: 1.5em;
+            cursor: pointer;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        .modal-close:hover {
+            background: #2a2a3a;
+            color: #e0e0e0;
+        }
+        
+        /* Right Panel - Chat */
+        .right-panel {
+            background: #141420;
+            border: 1px solid #2a2a3a;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-header {
+            padding: 16px;
+            border-bottom: 1px solid #2a2a3a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-header-title {
+            font-size: 1em;
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+        .chat-header-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        .chat-header-btn {
+            background: transparent;
+            border: 1px solid #2a2a3a;
+            color: #a0a0a0;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: all 0.2s;
+        }
+        .chat-header-btn:hover {
+            background: #1a1a2a;
+            border-color: #3a3a4a;
+            color: #e0e0e0;
         }
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 15px;
-            background: #0f0f23;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #2d2d44;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
         }
         .chat-message {
-            margin-bottom: 15px;
-            padding: 12px;
-            border-radius: 10px;
-            max-width: 80%;
+            max-width: 75%;
+            padding: 10px 14px;
+            border-radius: 12px;
             word-wrap: break-word;
+            font-size: 0.9em;
+            line-height: 1.5;
         }
         .chat-message.user {
             background: #667eea;
-            margin-left: auto;
-            text-align: right;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
         }
         .chat-message.assistant {
-            background: #2d2d44;
-            border-left: 3px solid #764ba2;
-        }
-        .chat-message .role {
-            font-size: 0.8em;
-            opacity: 0.7;
-            margin-bottom: 5px;
+            background: #1a1a2a;
+            border: 1px solid #2a2a3a;
+            color: #e0e0e0;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
         }
         .chat-message-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
+        }
+        .chat-message .role {
+            font-size: 0.75em;
+            opacity: 0.7;
+            margin-bottom: 4px;
         }
         .tts-button {
             padding: 4px 8px;
-            background: #2d2d44;
-            border: 1px solid #667eea;
+            background: #2a2a3a;
+            border: 1px solid #3a3a4a;
             border-radius: 4px;
             color: #667eea;
-            font-size: 0.75em;
+            font-size: 0.7em;
             cursor: pointer;
             opacity: 0.7;
             transition: opacity 0.2s;
         }
         .tts-button:hover {
             opacity: 1;
-            background: #3d3d54;
+            background: #3a3a4a;
         }
         .tts-button:disabled {
             opacity: 0.4;
@@ -459,63 +1088,70 @@ def get_frontend_html() -> str:
         .audio-player {
             margin-top: 8px;
             width: 100%;
-            max-width: 300px;
         }
         .audio-player audio {
             width: 100%;
             outline: none;
         }
         .chat-input-container {
+            padding: 16px;
+            border-top: 1px solid #2a2a3a;
             display: flex;
             gap: 10px;
         }
         .chat-input {
             flex: 1;
-            padding: 12px;
-            background: #0f0f23;
-            border: 2px solid #2d2d44;
+            padding: 10px 14px;
+            background: #1a1a2a;
+            border: 1px solid #2a2a3a;
             border-radius: 8px;
             color: #e0e0e0;
-            font-size: 1em;
+            font-size: 0.9em;
         }
         .chat-input:focus {
             outline: none;
             border-color: #667eea;
         }
-        .btn {
-            padding: 12px 24px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .chat-input::placeholder {
+            color: #606060;
+        }
+        .send-button {
+            padding: 10px 20px;
+            background: #667eea;
             color: white;
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 1em;
+            font-size: 0.9em;
+            transition: background 0.2s;
         }
-        .btn:hover {
-            opacity: 0.9;
-        }
-        .devices-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 15px;
-        }
-        .device-card {
-            background: #0f0f23;
-            border: 1px solid #2d2d44;
-            border-radius: 10px;
-            padding: 15px;
-        }
-        .device-card.connected {
-            border-color: #4caf50;
-        }
-        .device-name {
-            font-weight: bold;
-            color: #667eea;
+        .send-button:hover {
+            background: #764ba2;
         }
         .empty-state {
             text-align: center;
             padding: 40px;
-            opacity: 0.5;
+            color: #606060;
+            font-size: 0.9em;
+        }
+        
+        /* Scrollbar */
+        .left-panel::-webkit-scrollbar,
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        .left-panel::-webkit-scrollbar-track,
+        .chat-messages::-webkit-scrollbar-track {
+            background: #0a0a0f;
+        }
+        .left-panel::-webkit-scrollbar-thumb,
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #2a2a3a;
+            border-radius: 3px;
+        }
+        .left-panel::-webkit-scrollbar-thumb:hover,
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #3a3a4a;
         }
     </style>
     <script>
@@ -528,11 +1164,206 @@ def get_frontend_html() -> str:
         let chatOffset = 0;
         let chatHasMore = true;
         let isLoadingMore = false;
+        let lastAudioFile = null;
+        let currentLocation = 'Unknown Location';
+        
+        // Update time and date
+        function updateTime() {
+            const element = document.getElementById('currentTime');
+            if (element) {
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+                const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                element.textContent = timeStr + ' | ' + dateStr;
+            }
+        }
+        
+        // Update system stats
+        async function updateSystemStats() {
+            try {
+                const response = await fetch('/api/system/stats');
+                const stats = await response.json();
+                
+                // CPU Usage
+                const cpuPercent = document.getElementById('cpuPercent');
+                const cpuProgress = document.getElementById('cpuProgress');
+                const cpuBox = document.getElementById('cpuBox');
+                if (cpuPercent) cpuPercent.textContent = stats.cpu_percent.toFixed(1) + '%';
+                if (cpuProgress) cpuProgress.style.width = stats.cpu_percent + '%';
+                if (cpuBox) cpuBox.textContent = 'CPU ' + stats.cpu_percent.toFixed(0) + '%';
+                
+                // Memory
+                const ramUsage = document.getElementById('ramUsage');
+                const ramProgress = document.getElementById('ramProgress');
+                const memoryBox = document.getElementById('memoryBox');
+                if (ramUsage) ramUsage.textContent = stats.memory_used_gb.toFixed(1) + 'GB';
+                if (ramProgress) ramProgress.style.width = stats.memory_percent + '%';
+                if (memoryBox) memoryBox.textContent = 'Memory ' + stats.memory_percent.toFixed(0) + '%';
+                
+                // Disk
+                const diskBox = document.getElementById('diskBox');
+                if (diskBox) diskBox.textContent = 'Disk ' + Math.round(stats.disk_used_gb) + '/' + Math.round(stats.disk_total_gb) + ' GB';
+            } catch (error) {
+                console.error('Error updating system stats:', error);
+            }
+        }
+        
+        // Update uptime
+        async function updateUptime() {
+            try {
+                const response = await fetch('/api/system/uptime');
+                const data = await response.json();
+                const seconds = data.uptime_seconds;
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                const uptimeDisplay = document.getElementById('uptimeDisplay');
+                if (uptimeDisplay) {
+                    uptimeDisplay.textContent = 
+                        String(hours).padStart(2, '0') + ':' + 
+                        String(minutes).padStart(2, '0') + ':' + 
+                        String(secs).padStart(2, '0');
+                }
+            } catch (error) {
+                console.error('Error updating uptime:', error);
+            }
+        }
+        
+        // Update weather
+        async function updateWeather() {
+            try {
+                const response = await fetch('/api/weather');
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    const weather = data.data;
+                    
+                    // Log all possible fields from BBC Weather API
+                    console.log('=== BBC Weather API Data ===');
+                    console.log('Temperature:', weather.temperature);
+                    console.log('Temperature (F):', weather.temperature_f);
+                    console.log('Humidity:', weather.humidity);
+                    console.log('Pressure:', weather.pressure);
+                    console.log('Pressure Direction:', weather.pressure_direction);
+                    console.log('Description:', weather.description);
+                    console.log('Weather Type:', weather.weather_type);
+                    console.log('Wind Speed (m/s):', weather.wind_speed);
+                    console.log('Wind Speed (mph):', weather.wind_speed_mph);
+                    console.log('Wind Speed (kph):', weather.wind_speed_kph);
+                    console.log('Wind Direction:', weather.wind_direction);
+                    console.log('Wind Direction Full:', weather.wind_direction_full);
+                    console.log('Visibility:', weather.visibility);
+                    console.log('Feels Like:', weather.feels_like);
+                    console.log('Observed At:', weather.observed_at);
+                    console.log('Collected At:', weather.collected_at);
+                    console.log('Location:', weather.location);
+                    if (weather.location) {
+                        console.log('  - City:', weather.location.city);
+                        console.log('  - Region:', weather.location.region);
+                        console.log('  - Postcode:', weather.location.postcode);
+                        console.log('  - Location ID:', weather.location.location_id);
+                        console.log('  - Station Name:', weather.location.station_name);
+                        console.log('  - Station Distance (km):', weather.location.station_distance_km);
+                    }
+                    console.log('Raw Data:', weather.raw_data);
+                    console.log('========================');
+                    
+                    // Update temperature (always available from BBC)
+                    const weatherTemp = document.getElementById('weatherTemp');
+                    if (weatherTemp && weather.temperature !== null && weather.temperature !== undefined) {
+                        weatherTemp.textContent = weather.temperature + '°C';
+                    }
+                    
+                    // Update condition and description (replacing location)
+                    const weatherCondition = document.getElementById('weatherCondition');
+                    if (weatherCondition) {
+                        let conditionText = '';
+                        if (weather.description && weather.description !== 'null' && weather.description !== null) {
+                            conditionText = weather.description;
+                        }
+                        if (weather.weather_type && weather.weather_type !== null) {
+                            if (conditionText) {
+                                conditionText += ' (' + weather.weather_type + ')';
+                            } else {
+                                conditionText = weather.weather_type;
+                            }
+                        }
+                        if (!conditionText) {
+                            conditionText = 'Data unavailable';
+                        }
+                        weatherCondition.textContent = conditionText;
+                    }
+                    
+                    // Remove location display (it's in the header now)
+                    const weatherLocation = document.getElementById('weatherLocation');
+                    if (weatherLocation) {
+                        weatherLocation.style.display = 'none';
+                    }
+                    
+                    // Update stat boxes - only show if data is available
+                    const humidityBox = document.getElementById('humidityBox');
+                    if (humidityBox) {
+                        if (weather.humidity !== null && weather.humidity !== undefined) {
+                            humidityBox.textContent = weather.humidity + '%';
+                            humidityBox.parentElement.style.display = '';
+                        } else {
+                            humidityBox.parentElement.style.display = 'none';
+                        }
+                    }
+                    
+                    const windSpeedBox = document.getElementById('windSpeedBox');
+                    if (windSpeedBox) {
+                        if (weather.wind_speed_kph !== null && weather.wind_speed_kph !== undefined && weather.wind_speed_kph > 0) {
+                            windSpeedBox.textContent = weather.wind_speed_kph + ' km/h';
+                            windSpeedBox.parentElement.style.display = '';
+                        } else {
+                            windSpeedBox.parentElement.style.display = 'none';
+                        }
+                    }
+                    
+                    const windDirectionBox = document.getElementById('windDirectionBox');
+                    if (windDirectionBox) {
+                        if (weather.wind_direction && weather.wind_direction !== '-99' && weather.wind_direction !== 'Direction not available' && weather.wind_direction_full && weather.wind_direction_full !== 'Direction not available') {
+                            windDirectionBox.textContent = weather.wind_direction;
+                            windDirectionBox.parentElement.style.display = '';
+                        } else {
+                            windDirectionBox.parentElement.style.display = 'none';
+                        }
+                    }
+                    
+                    const pressureBox = document.getElementById('pressureBox');
+                    if (pressureBox) {
+                        if (weather.pressure !== null && weather.pressure !== undefined) {
+                            pressureBox.textContent = weather.pressure + ' mb';
+                            if (weather.pressure_direction && weather.pressure_direction !== 'Not available') {
+                                pressureBox.textContent += ' (' + weather.pressure_direction + ')';
+                            }
+                            pressureBox.parentElement.style.display = '';
+                        } else {
+                            pressureBox.parentElement.style.display = 'none';
+                        }
+                    }
+                } else {
+                    console.error('Error loading weather:', data.error || 'Unknown error');
+                    // Show error state
+                    const weatherTemp = document.getElementById('weatherTemp');
+                    if (weatherTemp) weatherTemp.textContent = '--°C';
+                    const weatherCondition = document.getElementById('weatherCondition');
+                    if (weatherCondition) weatherCondition.textContent = 'Error loading data';
+                }
+            } catch (error) {
+                console.error('Error updating weather:', error);
+                // Show error state
+                const weatherTemp = document.getElementById('weatherTemp');
+                if (weatherTemp) weatherTemp.textContent = '--°C';
+                const weatherCondition = document.getElementById('weatherCondition');
+                if (weatherCondition) weatherCondition.textContent = 'Error loading data';
+            }
+        }
         
         async function loadChatHistory(resetScroll) {
             try {
                 chatOffset = 0;
-                // Load all previous chats (no session_id filter)
                 const response = await fetch('/api/chat?limit=50&offset=0');
                 const data = await response.json();
                 chatHasMore = data.has_more;
@@ -551,7 +1382,6 @@ def get_frontend_html() -> str:
                 const container = document.getElementById('chatMessages');
                 const oldScrollHeight = container.scrollHeight;
                 
-                // Load all previous chats (no session_id filter)
                 const response = await fetch('/api/chat?limit=50&offset=' + chatOffset);
                 const data = await response.json();
                 
@@ -560,7 +1390,6 @@ def get_frontend_html() -> str:
                     chatHasMore = data.has_more;
                     chatOffset += data.messages.length;
                     
-                    // Maintain scroll position
                     const newScrollHeight = container.scrollHeight;
                     container.scrollTop = newScrollHeight - oldScrollHeight;
                 } else {
@@ -585,40 +1414,30 @@ def get_frontend_html() -> str:
             }
             
             messages.forEach(function(msg) {
-                var header = '<div class="role">' + (msg.role === 'user' ? 'You' : 'Assistant') + '</div>';
-                var audioPlayer = '';
-                
                 if (msg.role === 'assistant') {
                     var messageTextEscaped = escapeHtml(msg.message).replace(/'/g, "\\'").replace(/\\n/g, ' ').replace(/"/g, '&quot;');
                     
-                    // Check if message has audio file
                     var audioFile = msg.message_metadata && msg.message_metadata.audio_file;
-                    if (audioFile) {
-                        // Show audio player (no autoplay, preload none)
-                        audioPlayer = '<div class="audio-player"><audio controls preload="none"><source src="/' + audioFile + '" type="audio/mpeg">Your browser does not support audio.</audio></div>';
-                    }
-                    
-                    header = '<div class="chat-message-header">' +
-                             '<div class="role">Assistant</div>' +
-                             '<button class="tts-button" data-msg-id="' + msg.id + '" data-msg-text="' + messageTextEscaped + '">' + (audioFile ? '🔊' : '🔊 Speak') + '</button>' +
-                             '</div>';
+                    var header = '<div class="chat-message-header">' +
+                                 '<div class="role">Assistant</div>' +
+                                 '<button class="tts-button" data-msg-id="' + msg.id + '" data-msg-text="' + messageTextEscaped + '">🔊 Speak</button>' +
+                                 '</div>';
+                } else {
+                    var header = '<div class="role">You</div>';
                 }
                 
                 var messageHtml = '<div class="chat-message ' + msg.role + '" data-message-id="' + msg.id + '">' +
                        header +
                        '<div>' + escapeHtml(msg.message) + '</div>' +
-                       audioPlayer +
                        '</div>';
                 
                 if (replace) {
                     container.innerHTML += messageHtml;
                 } else {
-                    // Prepend for loading older messages
                     container.insertAdjacentHTML('afterbegin', messageHtml);
                 }
             });
             
-            // Attach click handlers to all TTS buttons
             container.querySelectorAll('.tts-button').forEach(function(button) {
                 if (!button.hasAttribute('data-listener-attached')) {
                     button.setAttribute('data-listener-attached', 'true');
@@ -653,14 +1472,27 @@ def get_frontend_html() -> str:
                     throw new Error('TTS generation failed');
                 }
                 
-                // Get audio blob (but don't play it)
                 const audioBlob = await response.blob();
-                URL.createObjectURL(audioBlob); // Create URL but don't use it for playback
+                const audioUrl = URL.createObjectURL(audioBlob);
                 
-                // Reload chat history to show the audio player controls
+                // Update the center panel audio player
+                const audioSource = document.getElementById('cyberAudioSource');
+                const audioPlayer = document.getElementById('cyberAudioPlayer');
+                const audioElement = document.getElementById('cyberAudio');
+                
+                if (audioSource && audioElement) {
+                    // Store the audio file path from the response if available
+                    // For now, use the blob URL
+                    lastAudioFile = audioUrl;
+                    audioSource.src = audioUrl;
+                    audioElement.load();
+                    if (audioPlayer) {
+                        audioPlayer.style.display = 'block';
+                    }
+                }
+                
                 await loadChatHistory(false);
                 
-                // Reset button state
                 button.disabled = false;
                 button.textContent = '🔊';
                 
@@ -774,7 +1606,6 @@ def get_frontend_html() -> str:
             
             container.appendChild(messageDiv);
             
-            // Attach click handler to button if it's an assistant message
             if (role === 'assistant') {
                 var button = messageDiv.querySelector('.tts-button');
                 if (button) {
@@ -797,7 +1628,6 @@ def get_frontend_html() -> str:
                 if (contentDiv) {
                     contentDiv.textContent = content;
                     
-                    // Update the TTS button data attribute with the new content
                     var button = messageDiv.querySelector('.tts-button');
                     if (button && messageDiv.classList.contains('assistant')) {
                         var messageTextEscaped = content.replace(/'/g, "\\'").replace(/\\n/g, ' ').replace(/"/g, '&quot;');
@@ -816,32 +1646,97 @@ def get_frontend_html() -> str:
             return div.innerHTML;
         }
         
+        // Location management
+        async function loadLocation() {
+            try {
+                const response = await fetch('/api/location');
+                const location = await response.json();
+                currentLocation = location.display_name || location.city || 'Unknown Location';
+                
+                // Update top bar location
+                const topBarLocation = document.getElementById('topBarLocation');
+                if (topBarLocation) {
+                    topBarLocation.textContent = currentLocation;
+                }
+            } catch (error) {
+                console.error('Error loading location:', error);
+            }
+        }
+        
         // Persona management
+        let availablePersonas = [];
+        let currentPersonaName = '';
+        
         async function loadPersonas() {
             try {
                 const response = await fetch('/api/personas');
                 const data = await response.json();
-                const select = document.getElementById('personaSelect');
                 
-                // Clear existing options
-                select.innerHTML = '';
+                // Store personas globally
+                availablePersonas = data.personas || [];
+                currentPersonaName = data.current || 'default';
                 
-                // Add options
-                data.personas.forEach(function(persona) {
-                    const option = document.createElement('option');
-                    option.value = persona.name;
-                    option.textContent = persona.title;
-                    if (persona.name === data.current) {
-                        option.selected = true;
-                    }
-                    select.appendChild(option);
-                });
+                // Update center panel title
+                const cyberTitle = document.getElementById('cyberTitle');
+                if (cyberTitle && data.current_title) {
+                    cyberTitle.textContent = data.current_title;
+                }
+                
+                // Update modal persona list if modal exists
+                updatePersonaModalList();
             } catch (error) {
                 console.error('Error loading personas:', error);
             }
         }
         
-        async function changePersona(personaName) {
+        function updatePersonaModalList() {
+            const personaList = document.getElementById('personaList');
+            if (!personaList) return;
+            
+            personaList.innerHTML = '';
+            
+            availablePersonas.forEach(function(persona) {
+                const personaItem = document.createElement('div');
+                personaItem.className = 'persona-item';
+                if (persona.name === currentPersonaName) {
+                    personaItem.classList.add('selected');
+                }
+                
+                personaItem.innerHTML = 
+                    '<div class="persona-image-placeholder">👤</div>' +
+                    '<div class="persona-name">' + escapeHtml(persona.title) + '</div>' +
+                    '<div class="persona-title">' + escapeHtml(persona.name) + '</div>';
+                
+                personaItem.onclick = function() {
+                    selectPersona(persona.name);
+                };
+                
+                personaList.appendChild(personaItem);
+            });
+        }
+        
+        function openPersonaModal() {
+            const modal = document.getElementById('personaModal');
+            if (modal) {
+                updatePersonaModalList();
+                modal.classList.add('active');
+            }
+        }
+        
+        function closePersonaModal() {
+            const modal = document.getElementById('personaModal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        }
+        
+        function closePersonaModalOnOverlay(event) {
+            if (event.target.id === 'personaModal') {
+                closePersonaModal();
+            }
+        }
+        
+        async function selectPersona(personaName) {
             try {
                 const response = await fetch('/api/personas/select', {
                     method: 'POST',
@@ -852,29 +1747,120 @@ def get_frontend_html() -> str:
                 if (response.ok) {
                     const data = await response.json();
                     console.log('Persona changed:', data.message);
-                    // Optionally show a notification
+                    // Close modal
+                    closePersonaModal();
+                    // Reload personas to update title
+                    await loadPersonas();
                 } else {
                     const error = await response.json();
                     console.error('Error changing persona:', error.detail);
-                    // Reload to reset dropdown
-                    loadPersonas();
+                    alert('Error changing persona: ' + error.detail);
                 }
             } catch (error) {
                 console.error('Error changing persona:', error);
-                // Reload to reset dropdown
-                loadPersonas();
+                alert('Error changing persona: ' + error.message);
             }
         }
         
-        // Initialize when DOM is ready
-        document.addEventListener('DOMContentLoaded', function() {
-            loadChatHistory();
-            loadPersonas();
+        // Panel resizing functionality
+        function initPanelResizers() {
+            const resizer1 = document.getElementById('resizer1');
+            const resizer2 = document.getElementById('resizer2');
+            const leftPanel = document.getElementById('leftPanel');
+            const centerPanel = document.getElementById('centerPanel');
+            const rightPanel = document.getElementById('rightPanel');
+            const container = document.querySelector('.main-container');
             
-            // Add infinite scroll for chat
+            let isResizing1 = false;
+            let isResizing2 = false;
+            let startX = 0;
+            let startLeftWidth = 0;
+            let startRightWidth = 0;
+            
+            // Resizer 1 (between left and center)
+            if (resizer1 && leftPanel && centerPanel) {
+                resizer1.addEventListener('mousedown', function(e) {
+                    isResizing1 = true;
+                    resizer1.classList.add('resizing');
+                    startX = e.clientX;
+                    startLeftWidth = leftPanel.offsetWidth;
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                    e.preventDefault();
+                });
+            }
+            
+            // Resizer 2 (between center and right)
+            if (resizer2 && centerPanel && rightPanel) {
+                resizer2.addEventListener('mousedown', function(e) {
+                    isResizing2 = true;
+                    resizer2.classList.add('resizing');
+                    startX = e.clientX;
+                    startRightWidth = rightPanel.offsetWidth;
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                    e.preventDefault();
+                });
+            }
+            
+            document.addEventListener('mousemove', function(e) {
+                if (isResizing1 && leftPanel && centerPanel) {
+                    const diff = e.clientX - startX;
+                    const newLeftWidth = Math.max(200, Math.min(600, startLeftWidth + diff));
+                    leftPanel.style.width = newLeftWidth + 'px';
+                    container.style.gridTemplateColumns = newLeftWidth + 'px 4px 1fr 4px ' + (rightPanel ? rightPanel.offsetWidth : 400) + 'px';
+                } else if (isResizing2 && centerPanel && rightPanel) {
+                    const diff = startX - e.clientX; // Inverted for right panel
+                    const newRightWidth = Math.max(300, Math.min(800, startRightWidth + diff));
+                    rightPanel.style.width = newRightWidth + 'px';
+                    container.style.gridTemplateColumns = (leftPanel ? leftPanel.offsetWidth : 320) + 'px 4px 1fr 4px ' + newRightWidth + 'px';
+                }
+            });
+            
+            document.addEventListener('mouseup', function() {
+                if (isResizing1) {
+                    isResizing1 = false;
+                    resizer1.classList.remove('resizing');
+                }
+                if (isResizing2) {
+                    isResizing2 = false;
+                    resizer2.classList.remove('resizing');
+                }
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            });
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize panel resizers
+            initPanelResizers();
+            
+            // Start updating time, stats, and uptime
+            updateTime();
+            setInterval(updateTime, 1000);
+            
+            updateSystemStats();
+            setInterval(updateSystemStats, 15000);
+            
+            updateUptime();
+            setInterval(updateUptime, 1000);
+            
+            // Load location
+            loadLocation();
+            
+            // Load and update weather
+            updateWeather();
+            setInterval(updateWeather, 600000); // Update every 10 minutes
+                   
+                   // Load personas (this will also set the center title)
+                   loadPersonas();
+                   
+                   // Load chat history
+                   loadChatHistory();
+            
             const chatContainer = document.getElementById('chatMessages');
             chatContainer.addEventListener('scroll', function() {
-                // Load more when scrolled to top (within 100px)
                 if (chatContainer.scrollTop < 100 && chatHasMore && !isLoadingMore) {
                     loadMoreChatHistory();
                 }
@@ -883,28 +1869,165 @@ def get_frontend_html() -> str:
     </script>
 </head>
 <body>
-    <div class="header">
-        <h1>🪶 Dragonfly Home Assistant</h1>
+    <!-- Top Bar -->
+    <div class="top-bar">
+        <div class="top-bar-left">
+            <div class="logo-text">C.Y.B.E.R</div>
+            <div class="status-indicator"></div>
+            <span style="color: #4caf50; font-size: 0.85em;">Online</span>
+        </div>
+        <div class="top-bar-center" id="currentTime">3:20:51 PM | July 23, 2025</div>
+        <div class="top-bar-right">
+            <span id="topBarLocation">Loading...</span>
+            <span class="settings-icon">⚙️</span>
+        </div>
     </div>
     
-    <div class="container">
-        <div class="panel full-width">
-            <div class="panel-header">
-                <h2>💬 Chat with AI</h2>
-                <div class="persona-selector">
-                    <label for="personaSelect">Persona:</label>
-                    <select id="personaSelect" onchange="changePersona(this.value)">
-                    </select>
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Left Panel -->
+        <div class="left-panel" id="leftPanel">
+            <!-- System Stats Widget -->
+            <div class="widget">
+                <div class="widget-title">System Stats</div>
+                <div class="stat-row">
+                    <span class="stat-label">CPU Usage</span>
+                    <span class="stat-value" id="cpuPercent">5%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="cpuProgress" style="width: 5%;"></div>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">RAM Usage</span>
+                    <span class="stat-value" id="ramUsage">9.5GB</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="ramProgress" style="width: 71%;"></div>
+                </div>
+                <div class="stat-boxes">
+                    <div class="stat-box">
+                        <div class="stat-box-label">CPU</div>
+                        <div class="stat-box-value" id="cpuBox">CPU 5%</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-box-label">Memory</div>
+                        <div class="stat-box-value" id="memoryBox">Memory 71%</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-box-label">Disk</div>
+                        <div class="stat-box-value" id="diskBox">Disk 383/476 GB</div>
+                    </div>
                 </div>
             </div>
-            <div class="chat-container">
-                <div class="chat-messages scrollbar-custom" id="chatMessages">
-                    <div class="empty-state">Start a conversation...</div>
+            
+            <!-- Weather Widget -->
+            <div class="widget">
+                <div class="widget-title">Weather</div>
+                <div class="weather-main">
+                    <div class="weather-temp" id="weatherTemp">--°C</div>
+                    <div>
+                        <div class="weather-condition" id="weatherCondition">Loading...</div>
+                    </div>
                 </div>
-                <div class="chat-input-container">
-                    <input type="text" class="chat-input" id="chatInput" placeholder="Ask a question..." onkeypress="handleChatKeyPress(event)">
-                    <button class="btn" onclick="sendMessage()">Send</button>
+                <div class="stat-boxes">
+                    <div class="stat-box">
+                        <div class="stat-box-label">Humidity</div>
+                        <div class="stat-box-value" id="humidityBox">--%</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-box-label">Wind Speed</div>
+                        <div class="stat-box-value" id="windSpeedBox">-- km/h</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-box-label">Wind Direction</div>
+                        <div class="stat-box-value" id="windDirectionBox">--</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-box-label">Pressure</div>
+                        <div class="stat-box-value" id="pressureBox">-- mb</div>
+                    </div>
                 </div>
+            </div>
+            
+            <!-- Camera Widget -->
+            <div class="widget">
+                <div class="widget-title">Camera</div>
+                <div class="camera-preview">Camera preview</div>
+                <div style="font-size: 0.8em; color: #808080; text-align: center;">
+                    Screen sharing active, C.Y.B.E.R will analyze your screen.
+                </div>
+            </div>
+            
+            <!-- System Uptime Widget -->
+            <div class="widget">
+                <div class="widget-title">System Uptime</div>
+                <div class="uptime-display" id="uptimeDisplay">00:00:00</div>
+            </div>
+        </div>
+        
+        <!-- Resizer 1 -->
+        <div class="panel-resizer" id="resizer1"></div>
+        
+        <!-- Center Panel -->
+        <div class="center-panel" id="centerPanel">
+            <div class="cyber-graphic">
+                <div class="cyber-circle cyber-circle-outer"></div>
+                <div class="cyber-circle cyber-circle-mid"></div>
+                <div class="cyber-circle cyber-circle-inner"></div>
+                <div class="cyber-dots">
+                    <div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div>
+                    <div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div>
+                    <div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div>
+                    <div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div>
+                    <div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div><div class="cyber-dot"></div>
+                </div>
+                <button class="cyber-center-button" id="cyberCenterButton" onclick="openPersonaModal()">⚙</button>
+            </div>
+            <div class="cyber-text" id="cyberTitle">C.Y.B.E.R</div>
+            <div class="cyber-audio-player" id="cyberAudioPlayer" style="display: none;">
+                <audio controls id="cyberAudio" preload="none">
+                    <source id="cyberAudioSource" src="" type="audio/mpeg">
+                    Your browser does not support audio.
+                </audio>
+            </div>
+            <div class="cyber-status">
+                <div class="cyber-status-dot"></div>
+                <span>Screen mode active</span>
+            </div>
+        </div>
+        
+        <!-- Resizer 2 -->
+        <div class="panel-resizer" id="resizer2"></div>
+        
+        <!-- Right Panel - Chat -->
+        <div class="right-panel" id="rightPanel">
+            <div class="chat-header">
+                <div class="chat-header-title">Conversation</div>
+                <div class="chat-header-buttons">
+                    <button class="chat-header-btn">Clear</button>
+                    <button class="chat-header-btn">Extract Conversation</button>
+                </div>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+                <div class="empty-state">Start a conversation...</div>
+            </div>
+            <div class="chat-input-container">
+                <input type="text" class="chat-input" id="chatInput" placeholder="Type a message..." onkeypress="handleChatKeyPress(event)">
+                <button class="send-button" onclick="sendMessage()">➤</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Persona Selection Modal -->
+    <div class="modal-overlay" id="personaModal" onclick="closePersonaModalOnOverlay(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closePersonaModal()">×</button>
+            <div class="modal-header">
+                <div class="modal-title">Select AI Persona</div>
+                <div class="modal-subtitle">Choose your AI assistant personality</div>
+            </div>
+            <div class="persona-list" id="personaList">
+                <!-- Personas will be loaded here -->
             </div>
         </div>
     </div>

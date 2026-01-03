@@ -9,5 +9,8 @@
     "api_key": "your-fish-audio-api-key-here",
     "voice_id": "your-voice-id-here",
     "voice_engine": "s1"
+  },
+  "bbc_weather": {
+    "location_id": "2637891"
   }
 }
