@@ -82,6 +82,11 @@ def get_system_uptime() -> float:
 project_root = Path(__file__).parent.parent
 app.mount("/data", StaticFiles(directory=str(project_root / "data")), name="data")
 
+# Mount static files for React build
+static_path = Path(__file__).parent / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
 
 @app.get("/api/devices")
 async def get_devices():
@@ -533,10 +538,14 @@ async def select_persona(request: Request):
     }
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def get_index(request: Request):
-    """Serve the main web interface."""
-    return get_frontend_html()
+    """Serve the React app."""
+    static_file = static_path / "index.html"
+    if static_file.exists():
+        return FileResponse(static_file)
+    # Fallback to old HTML if React build doesn't exist
+    return HTMLResponse(get_frontend_html())
 
 
 def get_frontend_html() -> str:
