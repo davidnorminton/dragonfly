@@ -58,3 +58,25 @@ def get_location_postcode() -> str:
     config = load_location_config()
     return config.get("postcode", "")
 
+
+def save_location_config(config: Dict[str, Any]) -> bool:
+    """Save location configuration to JSON file.
+    
+    Args:
+        config: Dictionary with location configuration.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        # Ensure the config directory exists
+        LOCATION_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(LOCATION_CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        logger.info(f"Location config saved: {config.get('display_name', 'Unknown')}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving location config: {e}", exc_info=True)
+        return False
+

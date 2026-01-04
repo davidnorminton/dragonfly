@@ -24,6 +24,8 @@ export function usePersonas() {
     try {
       await personaAPI.selectPersona(personaName);
       await loadPersonas();
+      // Trigger a custom event so other components can refresh
+      window.dispatchEvent(new CustomEvent('personaChanged'));
     } catch (error) {
       console.error('Error selecting persona:', error);
       throw error;
@@ -32,6 +34,17 @@ export function usePersonas() {
 
   useEffect(() => {
     loadPersonas();
+    
+    // Listen for persona changes from other components
+    const handlePersonaChange = () => {
+      loadPersonas();
+    };
+    
+    window.addEventListener('personaChanged', handlePersonaChange);
+    
+    return () => {
+      window.removeEventListener('personaChanged', handlePersonaChange);
+    };
   }, []);
 
   return { personas, currentPersona, currentTitle, loading, selectPersona, reload: loadPersonas };

@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from fish_audio_sdk import AsyncWebSocketSession, TTSRequest
+from utils.text_cleaner import clean_text_for_tts
 
 logger = logging.getLogger(__name__)
 
@@ -53,25 +54,28 @@ class TTSService:
         """
         if not self.fish_api_key:
             logger.error("Fish Audio API key not configured")
-            return None
+            return (None, None)
         
         try:
+            # Clean the text before sending to TTS
+            cleaned_text = clean_text_for_tts(text)
             logger.info(f"Generating audio with Fish Audio SDK (voice_id: {voice_id}, backend: {voice_engine})")
             
             # Create session
             async with AsyncWebSocketSession(apikey=self.fish_api_key) as session:
-                # Create TTS request
+                # Create TTS request without text (text will come from text_stream only)
                 request = TTSRequest(
-                    text=text,
+                    text="",  # Empty - text comes only from text_stream
                     reference_id=voice_id,
                     format="mp3"
                 )
                 
-                # Create async generator for text chunks
+                # Create async generator that yields the text once
                 async def text_stream():
-                    yield text
+                    yield cleaned_text
                 
                 # Generate audio (returns async generator of bytes)
+                # Use text_stream only, not the text parameter, to avoid duplication
                 audio_data = bytearray()
                 async for audio_chunk in session.tts(request, text_stream(), backend=voice_engine):
                     audio_data.extend(audio_chunk)

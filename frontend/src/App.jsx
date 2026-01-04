@@ -5,7 +5,10 @@ import { CenterPanel } from './components/CenterPanel';
 import { Chat } from './components/Chat';
 import { PanelResizer } from './components/PanelResizer';
 import { PersonaModal } from './components/PersonaModal';
+import { Settings } from './components/Settings';
+import { BottomToolbar } from './components/BottomToolbar';
 import { usePersonas } from './hooks/usePersonas';
+import { useAudioQueue } from './hooks/useAudioQueue';
 import './styles/index.css';
 
 function App() {
@@ -20,7 +23,9 @@ function App() {
   const [leftWidth, setLeftWidth] = useState(320);
   const [rightWidth, setRightWidth] = useState(400);
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { selectPersona } = usePersonas();
+  const audioQueue = useAudioQueue();
 
   useEffect(() => {
     // Initialize session ID in localStorage if not present
@@ -51,7 +56,10 @@ function App() {
 
   return (
     <>
-      <TopBar onSwitchAI={handleSwitchAI} />
+      <TopBar 
+        onSwitchAI={handleSwitchAI}
+        onSettingsClick={() => setSettingsOpen(true)}
+      />
       <div 
         className="main-container"
         style={{
@@ -68,6 +76,7 @@ function App() {
         <Chat 
           sessionId={sessionId}
           onAudioGenerated={setAudioUrl}
+          audioQueue={audioQueue}
         />
       </div>
       <PersonaModal 
@@ -75,6 +84,11 @@ function App() {
         onClose={() => setPersonaModalOpen(false)}
         onSelect={handlePersonaSelect}
       />
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
+      <BottomToolbar sessionId={sessionId} audioQueue={audioQueue} />
     </>
   );
 }

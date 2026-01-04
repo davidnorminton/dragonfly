@@ -14,17 +14,25 @@ from core.processor import Processor
 from services.ai_service import AIService
 from database.base import AsyncSessionLocal
 from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData
-from sqlalchemy import select, desc, func
-from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config
-from config.location_loader import load_location_config, get_location_display_name
+from sqlalchemy import select, desc, func, or_
+from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config, save_persona_config, create_persona_config
+from config.location_loader import load_location_config, get_location_display_name, save_location_config
+from config.api_key_loader import load_api_keys, save_api_keys
+from config.expert_types_loader import list_expert_types
+from services.rag_service import RAGService
 from services.tts_service import TTSService
 from data_collectors.weather_collector import WeatherCollector
+from data_collectors.news_collector import NewsCollector
+from data_collectors.traffic_collector import TrafficCollector
 from services.ai_service import AIService
+from services.article_summarizer import ArticleSummarizer
 from fastapi.responses import Response
 from utils.transcript_saver import save_transcript
 from config.settings import settings
 import time
 import platform
+import socket
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -237,24 +245,86 @@ async def get_system_stats():
         }
 
 
+def get_local_ip() -> str:
+    """Get the local IP address of the system."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            ip = '127.0.0.1'
+        finally:
+            s.close()
+        return ip
+    except Exception:
+        return '127.0.0.1'
+
+async def get_remote_ip() -> str:
+    """Get the remote/public IP address of the system."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get('https://api.ipify.org?format=json')
+            return response.json()['ip']
+    except Exception:
+        return 'Unable to determine'
+
 @app.get("/api/system/uptime")
 async def get_system_uptime_endpoint():
     """Get system uptime in seconds."""
     uptime_seconds = get_system_uptime()
     return {"uptime_seconds": int(uptime_seconds)}
 
+@app.get("/api/system/ips")
+async def get_system_ips():
+    """Get system local and remote IP addresses."""
+    local_ip = get_local_ip()
+    remote_ip = await get_remote_ip()
+    return {
+        "local_ip": local_ip,
+        "remote_ip": remote_ip
+    }
+
 
 @app.get("/api/chat")
-async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optional[str] = None):
-    """Get chat history with pagination."""
+async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optional[str] = None, mode: Optional[str] = None, persona: Optional[str] = None):
+    """Get chat history with pagination, filtered by mode and optionally persona."""
     async with AsyncSessionLocal() as session:
         # Build base query
         query = select(ChatMessage)
         count_query = select(func.count(ChatMessage.id))
         
+        # Filter by mode if provided
+        if mode:
+            query = query.where(ChatMessage.mode == mode)
+            count_query = count_query.where(ChatMessage.mode == mode)
+        
+        # Filter by persona if provided (especially important for conversational mode)
+        if persona:
+            query = query.where(ChatMessage.persona == persona)
+            count_query = count_query.where(ChatMessage.persona == persona)
+        
         if session_id:
-            query = query.where(ChatMessage.session_id == session_id)
-            count_query = count_query.where(ChatMessage.session_id == session_id)
+            # For backward compatibility: Q&A mode should also show old chats with base session ID
+            if mode == "qa" and session_id.endswith('_qa_general'):
+                # Q&A mode: include old chats with just the base session ID
+                base_session_id = session_id.rsplit('_qa_general', 1)[0]
+                query = query.where(
+                    or_(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.session_id == base_session_id
+                    )
+                )
+                count_query = count_query.where(
+                    or_(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.session_id == base_session_id
+                    )
+                )
+            else:
+                # Conversational mode or other: exact match only
+                query = query.where(ChatMessage.session_id == session_id)
+                count_query = count_query.where(ChatMessage.session_id == session_id)
         
         # Get total count
         count_result = await session.execute(count_query)
@@ -291,25 +361,40 @@ async def send_chat_message(request: Request):
     data = await request.json()
     message = data.get("message")
     session_id = data.get("session_id")
-    service_name = data.get("service_name", "ai_service")
+    mode = data.get("mode", "qa")  # "qa" or "conversational"
+    expert_type = data.get("expert_type", "general")  # Expert type for conversational mode
+    service_name = data.get("service_name")  # Deprecated, use mode instead
     stream = data.get("stream", True)
     
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")
     
+    # Determine service based on mode
+    if mode == "conversational":
+        actual_service_name = "rag_service"
+    else:
+        actual_service_name = "ai_service"
+    
+    # Backward compatibility: if service_name is explicitly set, use it
+    if service_name:
+        actual_service_name = service_name
+    
     # Save user message
     async with AsyncSessionLocal() as session:
+        current_persona = get_current_persona_name()
         user_msg = ChatMessage(
             session_id=session_id,
             role="user",
             message=message,
-            service_name=service_name
+            service_name=actual_service_name,
+            mode=mode,
+            persona=current_persona
         )
         session.add(user_msg)
         await session.commit()
     
-    # For streaming responses (AI service)
-    if stream and service_name == "ai_service":
+    # For streaming responses (AI service - Q&A mode)
+    if stream and actual_service_name == "ai_service":
         ai_service = AIService()
         ai_service.reload_persona_config()  # Ensure we have the latest persona
         input_data = {"question": message}
@@ -330,21 +415,86 @@ async def send_chat_message(request: Request):
                 
                 # Save complete response
                 async with AsyncSessionLocal() as session:
+                    current_persona = get_current_persona_name()
                     assistant_msg = ChatMessage(
                         session_id=session_id,
                         role="assistant",
                         message=full_response,
-                        service_name=service_name
+                        service_name=service_name,
+                        mode=mode,
+                        persona=current_persona
                     )
                     session.add(assistant_msg)
                     await session.commit()
                     
                     # Save transcript
                     try:
-                        current_persona = get_current_persona_name()
                         persona_config = load_persona_config(current_persona)
                         model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
-                        save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id)
+                        # Get audio file path from message metadata if available
+                        audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg.message_metadata else None
+                        save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="qa", expert_type="general")
+                    except Exception as e:
+                        logger.warning(f"Failed to save transcript: {e}")
+                
+                yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
+            except Exception as e:
+                logger.error(f"Error in streaming response: {e}", exc_info=True)
+                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+        
+        return StreamingResponse(generate_response(), media_type="text/event-stream")
+    
+    # For streaming responses (RAG service - Conversational mode)
+    if stream and actual_service_name == "rag_service":
+        rag_service = RAGService()
+        rag_service.reload_persona_config()  # Ensure we have the latest persona
+        
+        async def generate_response():
+            full_response = ""
+            try:
+                # Load conversation history (increased limit for better context)
+                conversation_history = await rag_service._load_conversation_history(session_id, limit=50)
+                
+                # Build input data for RAG service
+                input_data = {
+                    "query": message,
+                    "session_id": session_id,
+                    "expert_type": expert_type,
+                    "messages": conversation_history
+                }
+                
+                loop = asyncio.get_event_loop()
+                
+                def run_generator():
+                    return list(rag_service.stream_execute(input_data))
+                
+                chunks = await loop.run_in_executor(None, run_generator)
+                
+                for chunk in chunks:
+                    full_response += chunk
+                    yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
+                
+                # Save complete response
+                async with AsyncSessionLocal() as session:
+                    current_persona = get_current_persona_name()
+                    assistant_msg = ChatMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        message=full_response,
+                        service_name=actual_service_name,
+                        mode=mode,
+                        persona=current_persona
+                    )
+                    session.add(assistant_msg)
+                    await session.commit()
+                    
+                    # Save transcript
+                    try:
+                        persona_config = load_persona_config(current_persona)
+                        model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
+                        # Get audio file path from message metadata if available
+                        audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg.message_metadata else None
+                        save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="conversational", expert_type=expert_type)
                     except Exception as e:
                         logger.warning(f"Failed to save transcript: {e}")
                 
@@ -421,6 +571,196 @@ async def generate_tts(request: Request):
     )
 
 
+@app.post("/api/audio/last-message")
+async def play_last_message_audio(request: Request):
+    """Get or generate audio for the last assistant message in the chat."""
+    data = await request.json()
+    session_id = data.get("session_id")
+    
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get the last assistant message
+            query = select(ChatMessage).where(ChatMessage.role == "assistant")
+            if session_id:
+                query = query.where(ChatMessage.session_id == session_id)
+            query = query.order_by(desc(ChatMessage.created_at)).limit(1)
+            
+            result = await session.execute(query)
+            last_message = result.scalar_one_or_none()
+            
+            if not last_message:
+                raise HTTPException(status_code=404, detail="No assistant messages found")
+            
+            # Check if audio file already exists in metadata
+            metadata = last_message.message_metadata or {}
+            audio_file = metadata.get("audio_file")
+            
+            # If audio file exists and file exists, return it
+            if audio_file:
+                audio_path = project_root / audio_file
+                if audio_path.exists():
+                    # Return relative URL for the audio file
+                    if audio_file.startswith('data/'):
+                        audio_url = f"/{audio_file}"
+                    else:
+                        audio_url = f"/data/audio/{Path(audio_file).name}"
+                    return {
+                        "success": True,
+                        "audio_url": audio_url,
+                        "message_id": last_message.id
+                    }
+            
+            # Generate audio for the message
+            current_persona = get_current_persona_name()
+            persona_config = load_persona_config(current_persona)
+            if not persona_config:
+                raise HTTPException(status_code=404, detail="Persona config not found")
+            
+            fish_audio_config = persona_config.get("fish_audio")
+            if not fish_audio_config:
+                raise HTTPException(status_code=400, detail="Fish Audio config not found in persona")
+            
+            voice_id = fish_audio_config.get("voice_id")
+            voice_engine = fish_audio_config.get("voice_engine", "s1")
+            
+            if not voice_id:
+                raise HTTPException(status_code=400, detail="Voice ID not found in persona config")
+            
+            # Generate audio
+            tts_service = TTSService()
+            audio_data, audio_filepath = await tts_service.generate_audio(
+                last_message.message, 
+                voice_id, 
+                voice_engine, 
+                save_to_file=True
+            )
+            
+            if audio_data is None or not audio_filepath:
+                raise HTTPException(status_code=500, detail="Failed to generate audio")
+            
+            # Update message metadata with audio file path
+            metadata["audio_file"] = audio_filepath
+            last_message.message_metadata = metadata
+            await session.commit()
+            
+            # Return relative URL for the audio file
+            # audio_filepath is a string (relative path from project_root)
+            if audio_filepath.startswith('data/'):
+                audio_url = f"/{audio_filepath}"
+            else:
+                audio_url = f"/data/audio/{Path(audio_filepath).name}"
+            
+            return {
+                "success": True,
+                "audio_url": audio_url,
+                "message_id": last_message.id,
+                "generated": True
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting/generating audio for last message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/audio/message")
+async def generate_audio_for_message(request: Request):
+    """Get or generate audio for a specific message by message ID."""
+    data = await request.json()
+    session_id = data.get("session_id")
+    message_id = data.get("message_id")
+    
+    if not message_id:
+        raise HTTPException(status_code=400, detail="Message ID is required")
+    
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get the specific message
+            result = await session.execute(
+                select(ChatMessage).where(ChatMessage.id == message_id)
+            )
+            message = result.scalar_one_or_none()
+            
+            if not message:
+                raise HTTPException(status_code=404, detail="Message not found")
+            
+            if message.role != "assistant":
+                raise HTTPException(status_code=400, detail="Can only generate audio for assistant messages")
+            
+            # Check if audio file already exists in metadata
+            metadata = message.message_metadata or {}
+            audio_file = metadata.get("audio_file")
+            
+            # If audio file exists and file exists, return it
+            if audio_file:
+                audio_path = project_root / audio_file
+                if audio_path.exists():
+                    # Return relative URL for the audio file
+                    if audio_file.startswith('data/'):
+                        audio_url = f"/{audio_file}"
+                    else:
+                        audio_url = f"/data/audio/{Path(audio_file).name}"
+                    return {
+                        "success": True,
+                        "audio_url": audio_url,
+                        "message_id": message.id
+                    }
+            
+            # Generate audio for the message
+            current_persona = get_current_persona_name()
+            persona_config = load_persona_config(current_persona)
+            if not persona_config:
+                raise HTTPException(status_code=404, detail="Persona config not found")
+            
+            fish_audio_config = persona_config.get("fish_audio")
+            if not fish_audio_config:
+                raise HTTPException(status_code=400, detail="Fish Audio config not found in persona")
+            
+            voice_id = fish_audio_config.get("voice_id")
+            voice_engine = fish_audio_config.get("voice_engine", "s1")
+            
+            if not voice_id:
+                raise HTTPException(status_code=400, detail="Voice ID not found in persona config")
+            
+            # Generate audio
+            tts_service = TTSService()
+            audio_data, audio_filepath = await tts_service.generate_audio(
+                message.message, 
+                voice_id, 
+                voice_engine, 
+                save_to_file=True
+            )
+            
+            if audio_data is None or not audio_filepath:
+                raise HTTPException(status_code=500, detail="Failed to generate audio")
+            
+            # Update message metadata with audio file path
+            metadata["audio_file"] = audio_filepath
+            message.message_metadata = metadata
+            await session.commit()
+            
+            # Return relative URL for the audio file
+            # audio_filepath is a string (relative path from project_root)
+            if audio_filepath.startswith('data/'):
+                audio_url = f"/{audio_filepath}"
+            else:
+                audio_url = f"/data/audio/{Path(audio_filepath).name}"
+            
+            return {
+                "success": True,
+                "audio_url": audio_url,
+                "message_id": message.id,
+                "generated": True
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting/generating audio for message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/personas")
 async def get_personas():
     """Get list of available personas and current persona."""
@@ -435,11 +775,109 @@ async def get_personas():
     }
 
 
+@app.get("/api/expert-types")
+async def get_expert_types_endpoint():
+    """Get list of available expert types."""
+    expert_types = list_expert_types()
+    return {
+        "expert_types": expert_types
+    }
+
+
+@app.get("/api/expert-types")
+async def get_expert_types():
+    """Get list of available expert types."""
+    expert_types = list_expert_types()
+    return {
+        "expert_types": expert_types
+    }
+
+
 @app.get("/api/location")
 async def get_location():
     """Get location configuration."""
     location_config = load_location_config()
     return location_config
+
+
+# Config editing endpoints
+@app.get("/api/config/persona/{persona_name}")
+async def get_persona_config_endpoint(persona_name: str):
+    """Get a specific persona configuration."""
+    config = load_persona_config(persona_name)
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
+    return config
+
+
+@app.put("/api/config/persona/{persona_name}")
+async def save_persona_config_endpoint(persona_name: str, request: Request):
+    """Save a persona configuration."""
+    try:
+        config = await request.json()
+        success = save_persona_config(persona_name, config)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save persona config")
+        return {"success": True, "message": f"Persona '{persona_name}' config saved"}
+    except Exception as e:
+        logger.error(f"Error saving persona config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/config/persona/{persona_name}")
+async def create_persona_config_endpoint(persona_name: str, request: Request):
+    """Create a new persona configuration."""
+    try:
+        config = await request.json()
+        success = create_persona_config(persona_name, config)
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Persona '{persona_name}' already exists")
+        return {"success": True, "message": f"Persona '{persona_name}' created"}
+    except Exception as e:
+        logger.error(f"Error creating persona config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/config/location")
+async def get_location_config_endpoint():
+    """Get location configuration."""
+    location_config = load_location_config()
+    return location_config
+
+
+@app.put("/api/config/location")
+async def save_location_config_endpoint(request: Request):
+    """Save location configuration."""
+    try:
+        config = await request.json()
+        success = save_location_config(config)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save location config")
+        return {"success": True, "message": "Location config saved"}
+    except Exception as e:
+        logger.error(f"Error saving location config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/config/api_keys")
+async def get_api_keys_config_endpoint():
+    """Get API keys configuration."""
+    api_keys_config = load_api_keys()
+    return api_keys_config
+
+
+@app.put("/api/config/api_keys")
+async def save_api_keys_config_endpoint(request: Request):
+    """Save API keys configuration."""
+    try:
+        config = await request.json()
+        success = save_api_keys(config)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save API keys config")
+        return {"success": True, "message": "API keys config saved"}
+    except Exception as e:
+        logger.error(f"Error saving API keys config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/weather")
@@ -482,17 +920,21 @@ async def get_weather():
                 "message": "Failed to collect weather data"
             }
         
-        # Store in database
+        # Store in database (with timeout handling for SQLite locks)
         weather_data = result.get("data", {})
-        async with AsyncSessionLocal() as session:
-            collected_data = CollectedData(
-                source=result.get("source", "weather"),
-                data_type=result.get("data_type", "weather_current"),
-                data=result,
-                expires_at=datetime.utcnow() + timedelta(minutes=10)  # Expire after 10 minutes
-            )
-            session.add(collected_data)
-            await session.commit()
+        try:
+            async with AsyncSessionLocal() as session:
+                collected_data = CollectedData(
+                    source=result.get("source", "weather"),
+                    data_type=result.get("data_type", "weather_current"),
+                    data=result,
+                    expires_at=datetime.utcnow() + timedelta(minutes=10)  # Expire after 10 minutes
+                )
+                session.add(collected_data)
+                await session.commit()
+        except Exception as db_error:
+            # Log but don't fail if database is locked - we still have the data
+            logger.warning(f"Could not store weather data in database (may be locked): {db_error}")
         
         return {
             "success": True,
@@ -506,6 +948,184 @@ async def get_weather():
             "success": False,
             "error": str(e),
             "message": "Failed to get weather data"
+        }
+
+
+@app.get("/api/traffic")
+async def get_traffic(radius_miles: int = 30):
+    """Get traffic conditions within the specified radius of the configured location."""
+    try:
+        # Try to get latest traffic data from database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(CollectedData)
+                .where(CollectedData.source == "traffic")
+                .where(CollectedData.data_type == "traffic_conditions")
+                .order_by(desc(CollectedData.collected_at))
+                .limit(1)
+            )
+            latest_data = result.scalar_one_or_none()
+            
+            # If we have recent data (less than 15 minutes old), return it
+            if latest_data:
+                collected_at = latest_data.collected_at
+                if collected_at:
+                    age_seconds = (datetime.now(timezone.utc) - collected_at.replace(tzinfo=timezone.utc)).total_seconds()
+                    if age_seconds < 900:  # 15 minutes
+                        traffic_data = latest_data.data
+                        return {
+                            "success": True,
+                            "data": traffic_data.get("data", {}),
+                            "cached": True,
+                            "age_seconds": int(age_seconds)
+                        }
+        
+        # Otherwise, collect fresh data
+        collector = TrafficCollector()
+        result = await collector.collect(radius_miles=radius_miles)
+        
+        if "error" in result:
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error"),
+                "message": "Failed to collect traffic data"
+            }
+        
+        # Store in database (with timeout handling for SQLite locks)
+        traffic_data = result.get("data", {})
+        try:
+            async with AsyncSessionLocal() as session:
+                collected_data = CollectedData(
+                    source=result.get("source", "traffic"),
+                    data_type=result.get("data_type", "traffic_conditions"),
+                    data=result,
+                    expires_at=datetime.utcnow() + timedelta(minutes=15)  # Expire after 15 minutes
+                )
+                session.add(collected_data)
+                await session.commit()
+        except Exception as db_error:
+            # Log but don't fail if database is locked - we still have the data
+            logger.warning(f"Could not store traffic data in database (may be locked): {db_error}")
+        
+        return {
+            "success": True,
+            "data": traffic_data,
+            "cached": False
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting traffic data: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to get traffic data"
+        }
+
+
+@app.get("/api/news")
+async def get_news(feed_type: str = "top_stories", limit: int = 50):
+    """Get news data from BBC RSS feeds."""
+    try:
+        # Try to get latest news data from database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(CollectedData)
+                .where(CollectedData.source == "news")
+                .where(CollectedData.data_type == "news_feed")
+                .order_by(desc(CollectedData.collected_at))
+                .limit(1)
+            )
+            latest_data = result.scalar_one_or_none()
+            
+            # If we have recent data (less than 15 minutes old) and same feed type, return it
+            if latest_data:
+                collected_at = latest_data.collected_at
+                data_dict = latest_data.data
+                if collected_at and data_dict:
+                    age_seconds = (datetime.now(timezone.utc) - collected_at.replace(tzinfo=timezone.utc)).total_seconds()
+                    stored_feed_type = data_dict.get("data", {}).get("feed_type")
+                    if age_seconds < 900 and stored_feed_type == feed_type:  # 15 minutes cache
+                        news_data = data_dict.get("data", {})
+                        return {
+                            "success": True,
+                            "data": news_data,
+                            "cached": True,
+                            "age_seconds": int(age_seconds)
+                        }
+        
+        # Otherwise, collect fresh data
+        collector = NewsCollector()
+        result = await collector.collect(feed_type=feed_type, limit=limit)
+        
+        if "error" in result:
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error"),
+                "message": "Failed to collect news data"
+            }
+        
+        # Store in database (with timeout handling for SQLite locks)
+        news_data = result.get("data", {})
+        try:
+            async with AsyncSessionLocal() as session:
+                collected_data = CollectedData(
+                    source=result.get("source", "news"),
+                    data_type=result.get("data_type", "news_feed"),
+                    data=result,
+                    expires_at=datetime.utcnow() + timedelta(minutes=15)  # Expire after 15 minutes
+                )
+                session.add(collected_data)
+                await session.commit()
+        except Exception as db_error:
+            # Log but don't fail if database is locked - we still have the data
+            logger.warning(f"Could not store news data in database (may be locked): {db_error}")
+        
+        return {
+            "success": True,
+            "data": news_data,
+            "cached": False
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting news data: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to get news data"
+        }
+
+
+
+
+@app.post("/api/news/summarize")
+async def summarize_article(request: Request):
+    """Summarize a news article from its URL."""
+    try:
+        data = await request.json()
+        url = data.get("url")
+        
+        if not url:
+            raise HTTPException(status_code=400, detail="URL is required")
+        
+        summarizer = ArticleSummarizer()
+        result = await summarizer.summarize_article_from_url(url)
+        
+        if result.get("success"):
+            return {
+                "success": True,
+                "summary": result.get("summary")
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error")
+            }
+            
+    except Exception as e:
+        logger.error(f"Error summarizing article: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 
@@ -536,6 +1156,104 @@ async def select_persona(request: Request):
         "persona": persona_name,
         "message": f"Persona changed to {persona_name}"
     }
+
+@app.get("/api/devices/health")
+async def get_devices_health():
+    """Get device health statistics."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(DeviceConnection)
+            )
+            devices = result.scalars().all()
+            
+            total = len(devices)
+            online = sum(1 for d in devices if d.is_connected == "true")
+            offline = total - online
+            
+            return {
+                "total": total,
+                "online": online,
+                "offline": offline
+            }
+    except Exception as e:
+        logger.error(f"Error getting device health: {e}", exc_info=True)
+        return {
+            "total": 0,
+            "online": 0,
+            "offline": 0
+        }
+
+@app.get("/api/network/activity")
+async def get_network_activity():
+    """Get network activity statistics."""
+    try:
+        if not processor:
+            return {
+                "websocket_connections": 0,
+                "bytes_sent": 0,
+                "bytes_received": 0
+            }
+        
+        # Get active WebSocket connections count
+        ws_connections = len(processor.websocket_server.connections) if hasattr(processor.websocket_server, 'connections') else 0
+        
+        return {
+            "websocket_connections": ws_connections,
+            "bytes_sent": 0,  # Placeholder - would need to track this
+            "bytes_received": 0  # Placeholder - would need to track this
+        }
+    except Exception as e:
+        logger.error(f"Error getting network activity: {e}", exc_info=True)
+        return {
+            "websocket_connections": 0,
+            "bytes_sent": 0,
+            "bytes_received": 0
+        }
+
+@app.get("/api/stats/quick")
+async def get_quick_stats():
+    """Get quick system statistics."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Count total messages
+            messages_result = await session.execute(
+                select(func.count(ChatMessage.id))
+            )
+            total_messages = messages_result.scalar() or 0
+            
+            # Count total data points
+            data_result = await session.execute(
+                select(func.count(CollectedData.id))
+            )
+            total_data_points = data_result.scalar() or 0
+            
+            # Count total devices
+            devices_result = await session.execute(
+                select(func.count(DeviceConnection.id))
+            )
+            total_devices = devices_result.scalar() or 0
+            
+            # Count AI queries (assistant messages)
+            ai_queries_result = await session.execute(
+                select(func.count(ChatMessage.id)).where(ChatMessage.role == "assistant")
+            )
+            ai_queries = ai_queries_result.scalar() or 0
+            
+            return {
+                "total_messages": total_messages,
+                "total_data_points": total_data_points,
+                "ai_queries": ai_queries,
+                "connected_devices": total_devices
+            }
+    except Exception as e:
+        logger.error(f"Error getting quick stats: {e}", exc_info=True)
+        return {
+            "total_messages": 0,
+            "total_data_points": 0,
+            "ai_queries": 0,
+            "connected_devices": 0
+        }
 
 
 @app.get("/")

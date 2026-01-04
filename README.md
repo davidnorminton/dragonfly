@@ -10,6 +10,8 @@ An always-listening home assistant with local AI processing, modular data collec
 - **Database**: SQL database (SQLite by default, easily switchable to PostgreSQL)
 - **Web GUI**: Real-time web interface for monitoring and control
 - **Device Connectivity**: WebSocket-based communication with home devices
+- **AI Chat**: Interactive chat interface with multiple personas and conversational modes
+- **Text-to-Speech**: Audio generation for AI responses using Fish Audio
 
 ## Project Structure
 
@@ -22,20 +24,46 @@ dragonfly/
 ├── services/          # Service modules
 │   ├── base_service.py
 │   ├── ai_service.py  # General AI questions
-│   └── rag_service.py # RAG for personal/device data
+│   ├── rag_service.py # RAG for personal/device data
+│   ├── tts_service.py # Text-to-speech service
+│   └── article_summarizer.py # News article summarization
 ├── data_collectors/   # Modular data collectors
-│   └── base_collector.py
+│   ├── base_collector.py
+│   ├── weather_collector.py
+│   ├── news_collector.py
+│   └── traffic_collector.py
 ├── database/          # Database models and setup
 │   ├── base.py
 │   └── models.py
-├── web/              # Web GUI
-│   └── main.py       # FastAPI application
+├── web/              # Web GUI (FastAPI backend)
+│   ├── main.py       # FastAPI application
+│   └── static/       # Frontend build output
+├── frontend/         # React frontend
+│   ├── src/          # React source code
+│   └── package.json  # Frontend dependencies
 ├── config/           # Configuration
-│   └── settings.py
+│   ├── settings.py
+│   ├── personas/     # AI persona configurations
+│   ├── api_keys.json # API keys (not in git)
+│   └── location.json # Location configuration
+├── data/             # Application data
+│   ├── audio/        # Generated audio files
+│   └── transcripts/  # Chat transcripts
+├── tests/            # Test suite
+│   ├── unit/         # Unit tests
+│   └── integration/  # Integration tests
 └── main.py           # Application entry point
 ```
 
 ## Installation
+
+### Prerequisites
+
+- Python 3.9 or higher
+- Node.js 16 or higher (for frontend)
+- npm or yarn (for frontend dependencies)
+
+### Backend Setup
 
 1. **Clone the repository** (or navigate to the project directory)
 
@@ -47,12 +75,17 @@ source venv/bin/activate  # On macOS/Linux
 venv\Scripts\activate  # On Windows
 ```
 
-3. **Install dependencies**:
+3. **Install Python dependencies**:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **Create a `.env` file** (optional, for custom configuration):
+4. **Set up configuration files**:
+   - Copy `config/api_keys.json.example` to `config/api_keys.json` and add your API keys
+   - Configure location in `config/location.json` (created on first run if not exists)
+   - Persona configurations are in `config/personas/` (default, cortana, rick_sanchez, etc.)
+
+5. **Create a `.env` file** (optional, for custom configuration):
 ```env
 HOST=0.0.0.0
 PORT=1337
@@ -61,24 +94,264 @@ DATABASE_URL=sqlite+aiosqlite:///./dragonfly.db
 LOG_LEVEL=INFO
 ```
 
-## Usage
+### Frontend Setup
 
-### Running the Application
+1. **Navigate to the frontend directory**:
+```bash
+cd frontend
+```
 
-**Option 1: Using the run script**
+2. **Install frontend dependencies**:
+```bash
+npm install
+```
+
+3. **Build the frontend** (required before running the server):
+```bash
+npm run build
+```
+
+4. **Return to the project root**:
+```bash
+cd ..
+```
+
+## Running the System
+
+### Starting the Server
+
+**Option 1: Using the run script** (if available)
 ```bash
 ./run.sh
 ```
 
 **Option 2: Manual activation**
 ```bash
-source venv/bin/activate  # Activate virtual environment
+source venv/bin/activate  # Activate virtual environment (if not already active)
 python main.py
 ```
 
 The application will start:
-- **Web GUI**: http://localhost:8000
+- **Web GUI**: http://localhost:1337
 - **WebSocket Server**: ws://localhost:8765
+
+### Development Mode (Frontend)
+
+For frontend development with hot-reload:
+
+1. **In one terminal**, start the backend:
+```bash
+source venv/bin/activate
+python main.py
+```
+
+2. **In another terminal**, start the frontend dev server:
+```bash
+cd frontend
+npm run dev
+```
+
+The frontend dev server will typically run on a different port (e.g., http://localhost:5173). Update API calls to point to the backend server (http://localhost:1337).
+
+## Testing
+
+### Running Tests
+
+The project uses `pytest` for testing. Tests are organized into unit tests and integration tests.
+
+**Run all tests**:
+```bash
+source venv/bin/activate  # Ensure virtual environment is active
+pytest
+```
+
+**Run only unit tests**:
+```bash
+pytest tests/unit/
+```
+
+**Run only integration tests**:
+```bash
+pytest tests/integration/
+```
+
+**Run a specific test file**:
+```bash
+pytest tests/unit/test_ai_service.py
+```
+
+**Run with verbose output**:
+```bash
+pytest -v
+```
+
+**Run with coverage report**:
+```bash
+pytest --cov=services --cov=data_collectors --cov=web --cov=config --cov-report=html
+```
+
+Coverage reports will be generated in:
+- Terminal output (summary)
+- `htmlcov/index.html` (detailed HTML report)
+- `coverage.xml` (XML format)
+
+**View HTML coverage report**:
+```bash
+open htmlcov/index.html  # macOS
+# or
+xdg-open htmlcov/index.html  # Linux
+# or
+start htmlcov/index.html  # Windows
+```
+
+### Test Configuration
+
+Test configuration is in `pytest.ini`. The test suite includes:
+- Unit tests for services, data collectors, and config loaders
+- Integration tests for API endpoints and WebSocket connections
+- Fixtures for test database and mock configurations (see `tests/conftest.py`)
+
+## Clearing Cache and Data
+
+### Database Cache
+
+The application caches collected data (weather, traffic, news) in the database's `collected_data` table. To clear cached data:
+
+**Option 1: Delete specific cached data via Python**:
+```bash
+python3 -c "
+from database.base import AsyncSessionLocal
+from database.models import CollectedData
+from sqlalchemy import delete
+import asyncio
+
+async def clear_cache():
+    async with AsyncSessionLocal() as session:
+        await session.execute(delete(CollectedData))
+        await session.commit()
+        print('Cache cleared')
+
+asyncio.run(clear_cache())
+"
+```
+
+**Option 2: Delete the entire database** (will remove all data including chat history):
+```bash
+rm dragonfly.db
+# Database will be recreated on next startup
+```
+
+### Python Cache
+
+Clear Python bytecode cache (`__pycache__` directories):
+```bash
+find . -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true
+find . -type f -name "*.pyc" -delete
+find . -type f -name "*.pyo" -delete
+```
+
+### Frontend Build Cache
+
+Clear frontend build cache and rebuild:
+```bash
+cd frontend
+rm -rf dist/ .vite/ node_modules/.vite/
+npm run build
+cd ..
+```
+
+### Test Coverage Cache
+
+Clear test coverage files:
+```bash
+rm -rf htmlcov/ .coverage coverage.xml .pytest_cache/
+```
+
+### Application Data
+
+Clear generated audio files:
+```bash
+rm -rf data/audio/*.mp3
+```
+
+Clear chat transcripts:
+```bash
+rm -rf data/transcripts/*/
+```
+
+Clear all application data (audio + transcripts):
+```bash
+rm -rf data/audio/* data/transcripts/*/
+```
+
+### Complete Clean (All Caches and Generated Files)
+
+To clear everything (cache, database, build files, test coverage):
+
+```bash
+# Database
+rm -f dragonfly.db
+
+# Python cache
+find . -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true
+find . -type f -name "*.pyc" -delete
+
+# Frontend build
+rm -rf frontend/dist/ frontend/.vite/ frontend/node_modules/.vite/
+
+# Test coverage
+rm -rf htmlcov/ .coverage coverage.xml .pytest_cache/
+
+# Application data (optional - removes audio and transcripts)
+# rm -rf data/audio/* data/transcripts/*/
+```
+
+**Note**: Clearing the database will remove all chat history, device connections, and cached data. The database will be recreated automatically on next startup.
+
+## Configuration
+
+### API Keys
+
+API keys are stored in `config/api_keys.json` (not in git). Copy `config/api_keys.json.example` and add your keys:
+
+```json
+{
+  "anthropic": {
+    "api_key": "your-anthropic-key"
+  },
+  "fish_audio": {
+    "api_key": "your-fish-audio-key",
+    "voice_id": "voice-id",
+    "voice_engine": "s1"
+  },
+  "bbc_weather": {
+    "location_id": "location-id"
+  },
+  "waze": {
+    "api_key": "your-waze-api-key"
+  }
+}
+```
+
+### Location Configuration
+
+Location is configured in `config/location.json`. Edit this file or use the Settings page in the web GUI.
+
+### Persona Configuration
+
+AI personas are configured in `config/personas/`. Each persona has its own configuration file (e.g., `default.config`, `cortana.config`, `rick_sanchez.config`). Edit these files or use the Settings page in the web GUI.
+
+## Usage
+
+### Web GUI
+
+Access the web interface at http://localhost:1337 after starting the server. The GUI provides:
+- Real-time system monitoring (CPU, RAM, Disk, Uptime)
+- Weather and traffic information
+- News feed
+- Interactive AI chat with multiple personas
+- Device management
+- Settings configuration
 
 ### WebSocket API
 
@@ -131,6 +404,22 @@ curl -X POST http://localhost:1337/api/jobs \
 curl http://localhost:1337/api/jobs/{job_id}
 ```
 
+#### Get Chat History
+```bash
+curl "http://localhost:1337/api/chat?limit=50&offset=0&session_id=your-session-id&mode=qa"
+```
+
+#### Send Chat Message
+```bash
+curl -X POST http://localhost:1337/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Hello!",
+    "session_id": "your-session-id",
+    "mode": "qa"
+  }'
+```
+
 ## Architecture
 
 ### Core Components
@@ -138,8 +427,8 @@ curl http://localhost:1337/api/jobs/{job_id}
 1. **Processor**: Main coordinator that manages all components
 2. **Job Manager**: Handles job queue and asynchronous execution
 3. **WebSocket Server**: Receives data and commands from clients
-4. **Services**: Execute specific tasks (AI, RAG, etc.)
-5. **Database**: Stores jobs, device connections, and collected data
+4. **Services**: Execute specific tasks (AI, RAG, TTS, etc.)
+5. **Database**: Stores jobs, device connections, collected data, and chat messages
 
 ### Service System
 
@@ -177,13 +466,13 @@ class MyService(BaseService):
 2. Extend `BaseCollector`
 3. Implement `collect()` and `get_data_type()` methods
 
-## Configuration
+### Running in Development
 
-Configuration is managed through environment variables or a `.env` file. See `config/settings.py` for all available options.
+For frontend development with hot-reload, run the frontend dev server separately (see "Development Mode (Frontend)" section above).
 
 ## Database
 
-The application uses SQLAlchemy with async support. By default, it uses SQLite, but can be configured to use PostgreSQL or other databases by changing the `DATABASE_URL` in settings.
+The application uses SQLAlchemy with async support. By default, it uses SQLite (`dragonfly.db`), but can be configured to use PostgreSQL or other databases by changing the `DATABASE_URL` in settings or `.env` file.
 
 ## Platform Support
 
@@ -192,15 +481,35 @@ The application uses SQLAlchemy with async support. By default, it uses SQLite, 
 - ✅ Linux
 - ✅ Windows (with adjustments)
 
-## Roadmap
+## Troubleshooting
 
-- [ ] Audio processing for always-listening functionality
-- [ ] Local AI model integration (Whisper for speech, local LLM)
-- [ ] RAG implementation with vector database
-- [ ] Data collector implementations (weather, traffic, news)
-- [ ] Device integration examples
-- [ ] Authentication and security
-- [ ] Docker support
+### Port Already in Use
+
+If port 1337 is already in use, either:
+- Stop the process using the port
+- Change the port in `.env` file: `PORT=1338`
+
+### Database Locked Errors
+
+If you see "database is locked" errors:
+- Ensure only one instance of the server is running
+- Wait a moment and retry (SQLite has a 30-second timeout)
+- If persistent, restart the server
+
+### Frontend Not Updating
+
+If frontend changes aren't appearing:
+- Rebuild the frontend: `cd frontend && npm run build && cd ..`
+- Clear browser cache
+- Restart the server
+
+### Tests Failing
+
+If tests are failing:
+- Ensure virtual environment is activated
+- Reinstall dependencies: `pip install -r requirements.txt`
+- Clear test cache: `rm -rf .pytest_cache/`
+- Check that the database file isn't locked (stop the server if running)
 
 ## License
 
@@ -209,4 +518,3 @@ The application uses SQLAlchemy with async support. By default, it uses SQLite, 
 ## Contributing
 
 [Add contributing guidelines here]
-

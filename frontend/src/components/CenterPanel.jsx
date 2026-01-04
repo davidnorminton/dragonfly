@@ -1,4 +1,54 @@
+import { useState } from 'react';
+import { useNews } from '../hooks/useNews';
+import { newsAPI } from '../services/api';
+
 export function CenterPanel({ audioUrl, onAudioUrlChange }) {
+  const { news, loading, error } = useNews('top_stories', 50);
+  const [summaries, setSummaries] = useState({});
+  const [loadingSummaries, setLoadingSummaries] = useState({});
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        hour: 'numeric', 
+        minute: '2-digit' 
+      });
+    } catch (e) {
+      return dateString;
+    }
+  };
+
+  const handleSummarize = async (articleLink, articleIndex) => {
+    if (!articleLink || summaries[articleIndex] || loadingSummaries[articleIndex]) {
+      return;
+    }
+
+    setLoadingSummaries(prev => ({ ...prev, [articleIndex]: true }));
+
+    try {
+      const result = await newsAPI.summarizeArticle(articleLink);
+      if (result.success && result.summary) {
+        setSummaries(prev => ({ ...prev, [articleIndex]: result.summary }));
+      } else {
+        console.error('Error summarizing article:', result.error);
+        setSummaries(prev => ({ ...prev, [articleIndex]: `Error: ${result.error || 'Failed to generate summary'}` }));
+      }
+    } catch (err) {
+      console.error('Error summarizing article:', err);
+      setSummaries(prev => ({ ...prev, [articleIndex]: `Error: ${err.message || 'Failed to generate summary'}` }));
+    } finally {
+      setLoadingSummaries(prev => {
+        const newState = { ...prev };
+        delete newState[articleIndex];
+        return newState;
+      });
+    }
+  };
+
   return (
     <div className="center-panel">
       <div className="news-container">
@@ -6,10 +56,74 @@ export function CenterPanel({ audioUrl, onAudioUrlChange }) {
           <div className="news-title">News</div>
         </div>
         <div className="news-content">
-          {/* News content will be added here */}
-          <div className="news-placeholder">
-            News feed will be displayed here
-          </div>
+          {loading && (
+            <div className="news-placeholder">Loading news...</div>
+          )}
+          {error && (
+            <div className="news-error">Error loading news: {error}</div>
+          )}
+          {!loading && !error && news && news.articles && news.articles.length > 0 ? (
+            <div className="news-articles">
+              {news.articles.map((article, index) => (
+                <div key={index} className="news-article">
+                  {article.image_url && (
+                    <div className="news-article-image">
+                      <img 
+                        src={article.image_url} 
+                        alt={article.title}
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
+                  <div className="news-article-content">
+                    <div className="news-article-header">
+                      <h3 className="news-article-title">
+                        <a 
+                          href={article.link} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="news-article-link"
+                        >
+                          {article.title}
+                        </a>
+                      </h3>
+                      {article.published_date && (
+                        <div className="news-article-date">
+                          {formatDate(article.published_date)}
+                        </div>
+                      )}
+                    </div>
+                    {article.description && (
+                      <div className="news-article-description">
+                        {article.description.replace(/<[^>]*>/g, '').substring(0, 200)}
+                        {article.description.length > 200 ? '...' : ''}
+                      </div>
+                    )}
+                    {article.link && (
+                      <button
+                        className="news-summarize-button"
+                        onClick={() => handleSummarize(article.link, index)}
+                        disabled={loadingSummaries[index] || !!summaries[index]}
+                      >
+                        {loadingSummaries[index] ? 'Summarizing...' : summaries[index] ? 'Summary' : 'Summarize Article'}
+                      </button>
+                    )}
+                    {summaries[index] && (
+                      <div className="news-article-summary">
+                        {summaries[index]}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : !loading && !error && (
+            <div className="news-placeholder">
+              No news available
+            </div>
+          )}
         </div>
       </div>
       {audioUrl && (

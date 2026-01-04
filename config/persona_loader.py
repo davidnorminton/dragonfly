@@ -80,3 +80,46 @@ def list_available_personas() -> list:
     
     return sorted(personas, key=lambda x: x["name"])
 
+
+def save_persona_config(persona_name: str, config: Dict[str, Any]) -> bool:
+    """Save a persona configuration file.
+    
+    Args:
+        persona_name: Name of the persona (without .config extension).
+        config: Dictionary with persona configuration.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    config_file = get_personas_directory() / f"{persona_name}.config"
+    
+    try:
+        # Ensure the personas directory exists
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"Error saving persona config {persona_name}: {e}")
+        return False
+
+
+def create_persona_config(persona_name: str, config: Dict[str, Any]) -> bool:
+    """Create a new persona configuration file.
+    
+    Args:
+        persona_name: Name of the persona (without .config extension).
+        config: Dictionary with persona configuration.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    config_file = get_personas_directory() / f"{persona_name}.config"
+    
+    # Check if persona already exists
+    if config_file.exists():
+        return False
+    
+    return save_persona_config(persona_name, config)
+

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { locationAPI } from '../services/api';
 import { usePersonas } from '../hooks/usePersonas';
 
-export function TopBar({ onSwitchAI }) {
+export function TopBar({ onSwitchAI, onSettingsClick }) {
   const [currentTime, setCurrentTime] = useState('');
   const [location, setLocation] = useState('Loading...');
   const { currentTitle } = usePersonas();
@@ -71,7 +71,13 @@ export function TopBar({ onSwitchAI }) {
       <div className="top-bar-center">{currentTime}</div>
       <div className="top-bar-right">
         <span>{location}</span>
-        <span className="settings-icon">⚙️</span>
+        <button
+          onClick={onSettingsClick}
+          className="settings-icon-button"
+          title="Settings"
+        >
+          ⚙️
+        </button>
       </div>
     </div>
   );

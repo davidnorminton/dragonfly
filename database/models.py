@@ -75,6 +75,8 @@ class ChatMessage(Base):
     role = Column(String, nullable=False)  # user, assistant, system
     message = Column(Text, nullable=False)
     service_name = Column(String, nullable=True)  # ai_service, rag_service, etc.
+    mode = Column(String, nullable=True)  # qa, conversational
+    persona = Column(String, nullable=True)  # default, cortana, rick_sanchez, etc.
     message_metadata = Column("metadata", JSON, nullable=True)  # Column name is "metadata" in DB
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

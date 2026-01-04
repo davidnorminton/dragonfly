@@ -1,13 +1,23 @@
 """Database base setup."""
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy import text
 from config.settings import settings
 
 # Create async engine
+# For SQLite, add connection args for better concurrency handling
+connect_args = {}
+if settings.database_url.startswith("sqlite"):
+    connect_args = {
+        "timeout": 30.0,  # Increase timeout for locked database
+    }
+
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    future=True
+    future=True,
+    connect_args=connect_args if connect_args else {},
+    pool_pre_ping=True  # Verify connections before using them
 )
 
 # Create async session factory
