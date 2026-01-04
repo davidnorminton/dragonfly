@@ -57,6 +57,118 @@ dragonfly/
 
 ## Installation
 
+### Raspberry Pi (ARM) Quick Start with PostgreSQL
+
+#### 1) System prep (Pi OS / Debian)
+- Update packages:
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+- Install build essentials and Python tooling:
+```bash
+sudo apt install -y python3 python3-venv python3-pip git curl build-essential
+```
+- Install Node.js (for frontend build):
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+- Install PostgreSQL:
+```bash
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+```
+
+#### 2) Database setup (Postgres)
+```bash
+sudo -u postgres psql -c "CREATE ROLE dragonfly WITH LOGIN PASSWORD 'dragonfly';"
+sudo -u postgres psql -c "CREATE DATABASE dragonfly OWNER dragonfly;"
+```
+Connection string (use in `.env`):  
+`DATABASE_URL=postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly`
+
+#### 3) Project setup
+```bash
+git clone https://github.com/davidnorminton/dragonfly.git
+cd dragonfly
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+#### 4) Configure environment
+Create `.env` in project root (minimum):
+```env
+HOST=0.0.0.0
+PORT=1337
+WEBSOCKET_PORT=8765
+DATABASE_URL=postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly
+LOG_LEVEL=INFO
+```
+Add API keys in `config/api_keys.json` (copy from `config/api_keys.json.example`).
+
+Minimal `.env` example (copy/paste):
+```env
+HOST=0.0.0.0
+PORT=1337
+WEBSOCKET_PORT=8765
+DATABASE_URL=postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly
+LOG_LEVEL=INFO
+```
+
+ARM build tips (Pi):
+- If `asyncpg` build fails, ensure: `sudo apt install -y build-essential python3-dev libpq-dev` then rerun `pip install -r requirements.txt`.
+- If Node installs slow, use official NodeSource repo (already shown) or install the `nodejs` package from Debian backports if on older Pi OS.
+
+#### 5) Frontend build (on the Pi)
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+#### 6) Run the server
+```bash
+source venv/bin/activate
+python main.py
+```
+Access:
+- Web GUI: `http://<pi-ip>:1337`
+- WebSocket: `ws://<pi-ip>:8765`
+
+#### 7) Optional: system service
+Create `/etc/systemd/system/dragonfly.service` (edit paths as needed):
+```
+[Unit]
+Description=Dragonfly Home Assistant
+After=network.target postgresql.service
+
+[Service]
+WorkingDirectory=/home/pi/dragonfly
+ExecStart=/home/pi/dragonfly/venv/bin/python /home/pi/dragonfly/main.py
+Environment=DATABASE_URL=postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly
+Environment=HOST=0.0.0.0
+Environment=PORT=1337
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable dragonfly
+sudo systemctl start dragonfly
+```
+
+#### 8) Troubleshooting on Pi
+- If `asyncpg` fails to build, ensure `build-essential` is installed and rerun `pip install -r requirements.txt`.
+- If port 1337 is in use, set `PORT` in `.env`.
+- If frontend is slow to build, consider `npm ci --omit=dev` after an initial build.
+
 ### Prerequisites
 
 - Python 3.9 or higher
