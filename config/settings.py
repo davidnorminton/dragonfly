@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     port: int = 1337  # Frontend web server port
     websocket_port: int = 8765
     
-    # Database
-    database_url: str = "sqlite+aiosqlite:///./dragonfly.db"
+    # Database (switch to Postgres by default; override via .env)
+    database_url: str = "postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly"
     
     # WebSocket settings
     websocket_max_connections: int = 100

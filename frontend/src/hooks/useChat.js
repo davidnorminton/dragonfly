@@ -30,18 +30,16 @@ export function useChat(sessionId, mode, persona) {
   }, [offset, sessionId, mode, persona]);
 
   const reloadHistory = useCallback(async () => {
-    setMessages([]);
     setOffset(0);
     setHasMore(true);
     setLoading(true);
     try {
       const data = await chatAPI.getHistory(50, 0, sessionId, mode, persona);
-      if (data.messages) {
-        setMessages(data.messages.reverse());
-        setHasMore(data.messages.length === 50);
-      }
+      setMessages(data.messages || []);
+      setHasMore((data.messages?.length || 0) === 50);
     } catch (error) {
       console.error('Error loading chat history:', error);
+      // Don't clear messages on error - keep what we have
     } finally {
       setLoading(false);
     }

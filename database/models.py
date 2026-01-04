@@ -19,7 +19,7 @@ class Job(Base):
     """Job model for tracking service execution."""
     __tablename__ = "jobs"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     job_id = Column(String, unique=True, index=True, nullable=False)
     service_name = Column(String, nullable=False)
     status = Column(SQLEnum(JobStatus), default=JobStatus.PENDING, nullable=False)
@@ -38,7 +38,7 @@ class DeviceConnection(Base):
     """Model for tracking connected devices."""
     __tablename__ = "device_connections"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     device_id = Column(String, unique=True, index=True, nullable=False)
     device_name = Column(String, nullable=False)
     device_type = Column(String, nullable=True)
@@ -55,7 +55,7 @@ class CollectedData(Base):
     """Model for storing collected data from various sources."""
     __tablename__ = "collected_data"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     source = Column(String, nullable=False, index=True)  # weather, traffic, news, etc.
     data_type = Column(String, nullable=False)  # weather_current, weather_forecast, etc.
     data = Column(JSON, nullable=False)
@@ -70,7 +70,7 @@ class ChatMessage(Base):
     """Model for storing chat messages with AI."""
     __tablename__ = "chat_messages"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     session_id = Column(String, index=True, nullable=True)  # Optional session grouping
     role = Column(String, nullable=False)  # user, assistant, system
     message = Column(Text, nullable=False)
@@ -88,7 +88,7 @@ class DeviceTelemetry(Base):
     """Model for storing device telemetry data."""
     __tablename__ = "device_telemetry"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     device_id = Column(String, nullable=False, index=True)
     metric_name = Column(String, nullable=False, index=True)
     value = Column(JSON, nullable=False)
