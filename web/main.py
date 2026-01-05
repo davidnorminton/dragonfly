@@ -12,6 +12,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from core.processor import Processor
 from services.ai_service import AIService
+from openai import AsyncOpenAI
+import tempfile
+import subprocess
+import os
+import soundfile as sf
+import numpy as np
 from database.base import AsyncSessionLocal
 from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData
 from sqlalchemy import select, desc, func, or_
@@ -1211,17 +1217,129 @@ async def summarize_article(request: Request):
 @app.post("/api/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
     """
-    Placeholder transcription endpoint.
-    Receives audio and returns dummy transcript for now.
+    Transcribe audio offline using Vosk if a model is present at models/vosk/*.
+    If Vosk model is missing, falls back to Whisper if openai_api_key is set.
+    Otherwise returns a placeholder transcript.
     """
     try:
         content = await file.read()
-        size_kb = len(content) / 1024
-        transcript = f"Transcribed {size_kb:.1f} KB of audio (placeholder)."
-        return {"success": True, "transcript": transcript}
+
+        # Try Vosk offline first
+        transcript_text = None
+        placeholder = False
+
+        try:
+            from vosk import Model, KaldiRecognizer
+            model_root = os.path.join(os.path.dirname(__file__), "..", "models", "vosk")
+            preferred = os.path.join(model_root, "vosk-model-en-us-0.22")
+            selected_model = None
+            if os.path.isdir(preferred):
+                selected_model = preferred
+            elif os.path.isdir(model_root):
+                entries = [os.path.join(model_root, d) for d in os.listdir(model_root)]
+                dirs = [d for d in entries if os.path.isdir(d)]
+                if dirs:
+                    selected_model = dirs[0]
+            if selected_model and os.path.isdir(selected_model):
+                model = Model(selected_model)
+                # Convert to 16k mono PCM using ffmpeg or soundfile
+                wav_bytes = await _ensure_wav_16k_mono(content, file.filename or "audio.webm")
+                import wave
+                wf = wave.open(io.BytesIO(wav_bytes), "rb")
+                rec = KaldiRecognizer(model, wf.getframerate())
+                while True:
+                    data = wf.readframes(4000)
+                    if len(data) == 0:
+                        break
+                    rec.AcceptWaveform(data)
+                result = rec.FinalResult()
+                try:
+                    import json as _json
+                    transcript_text = _json.loads(result).get("text", "").strip()
+                except Exception:
+                    transcript_text = None
+        except Exception as e:
+            logger.warning(f"Vosk transcription failed or model missing: {e}")
+
+        # Fallback to Whisper API if Vosk not available and key present
+        if not transcript_text and settings.openai_api_key:
+            client = AsyncOpenAI(api_key=settings.openai_api_key)
+            import io
+            audio_file = io.BytesIO(content)
+            audio_file.name = file.filename or "audio.webm"
+
+            resp = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+            )
+            transcript_text = getattr(resp, "text", None) or resp.get("text") if isinstance(resp, dict) else None
+            placeholder = False
+
+        # Last resort placeholder
+        if not transcript_text:
+            size_kb = len(content) / 1024
+            transcript_text = f"Transcribed {size_kb:.1f} KB of audio (placeholder - no Vosk model or API key)."
+            placeholder = True
+
+        return {"success": True, "transcript": transcript_text, "placeholder": placeholder}
     except Exception as e:
         logger.error(f"Error transcribing audio: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Transcription failed")
+
+
+async def _ensure_wav_16k_mono(raw_bytes: bytes, filename: str) -> bytes:
+    """
+    Convert arbitrary audio bytes to 16k mono WAV.
+    Uses ffmpeg if available, else tries soundfile resample.
+    """
+    # Try ffmpeg first
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1] or ".bin") as inp, \
+         tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as outp:
+        inp.write(raw_bytes)
+        inp.flush()
+        cmd = [
+            "ffmpeg", "-y", "-i", inp.name,
+            "-ar", "16000", "-ac", "1",
+            "-f", "wav", outp.name
+        ]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with open(outp.name, "rb") as f:
+                data = f.read()
+            return data
+        except Exception:
+            pass
+        finally:
+            try:
+                os.unlink(inp.name)
+            except Exception:
+                pass
+            try:
+                os.unlink(outp.name)
+            except Exception:
+                pass
+
+    # Fallback: try soundfile to read and resample
+    import io
+    try:
+        audio, sr = sf.read(io.BytesIO(raw_bytes))
+        if audio.ndim > 1:
+            audio = np.mean(audio, axis=1)
+        target_sr = 16000
+        if sr != target_sr:
+            # Simple linear resample
+            import numpy as np
+            ratio = target_sr / sr
+            n_samples = int(len(audio) * ratio)
+            audio = np.interp(np.linspace(0, len(audio), n_samples, endpoint=False),
+                              np.arange(len(audio)), audio)
+        # write wav to bytes
+        buf = io.BytesIO()
+        sf.write(buf, audio, target_sr, format="WAV", subtype="PCM_16")
+        return buf.getvalue()
+    except Exception as e:
+        logger.error(f"Failed to convert audio to wav: {e}")
+        raise HTTPException(status_code=400, detail="Unsupported audio format for transcription")
 
 
 @app.post("/api/personas/select")
