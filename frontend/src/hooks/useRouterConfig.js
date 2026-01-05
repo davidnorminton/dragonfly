@@ -35,7 +35,7 @@ const DEFAULT_RULES = [
   },
 ];
 
-// Parse rules from prompt_context by scanning lines for trigger/type/value triplets.
+// Parse rules from prompt_context by scanning lines for trigger/type/value[/reason] triplets.
 function extractRules(prompt) {
   const rules = [];
   if (!prompt) return { rules, basePrompt: prompt || '' };
@@ -50,7 +50,8 @@ function extractRules(prompt) {
       // Look ahead for type and value
       let type = '';
       let value = '';
-      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      let reason = '';
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
         const n = (lines[j] || '').trim().replace(/^•\s*/, '').toLowerCase();
         if (n.startsWith('type:') && !type) {
           type = lines[j].replace(/^•\s*/, '').split(':').slice(1).join(':').trim();
@@ -58,9 +59,12 @@ function extractRules(prompt) {
         } else if (n.startsWith('value:') && !value) {
           value = lines[j].replace(/^•\s*/, '').split(':').slice(1).join(':').trim();
           used.add(j);
+        } else if (n.startsWith('reason:') && !reason) {
+          reason = lines[j].replace(/^•\s*/, '').split(':').slice(1).join(':').trim();
+          used.add(j);
         }
       }
-      rules.push({ trigger, type, value });
+      rules.push({ trigger, type, value, reason });
       used.add(i);
     }
   }
@@ -78,7 +82,11 @@ function buildPrompt(basePrompt, rules) {
     rules.forEach((r) => {
       prompt += `trigger: ${r.trigger || ''}\n`;
       prompt += `type: ${r.type || ''}\n`;
-      prompt += `value: ${r.value || ''}\n\n`;
+      prompt += `value: ${r.value || ''}\n`;
+      if (r.reason) {
+        prompt += `reason: ${r.reason}\n`;
+      }
+      prompt += '\n';
     });
     prompt = prompt.trimEnd();
   }
