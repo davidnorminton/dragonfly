@@ -591,7 +591,7 @@ async def get_music_popular(artist: str):
             select(MusicArtist).where(func.lower(MusicArtist.name) == artist.lower())
         )
         if not artist_row:
-            raise HTTPException(status_code=404, detail="Artist not found")
+            return {"success": False, "error": "Artist not found"}
         meta = artist_row.extra_metadata or {}
         popular = meta.get("popular_songs") or []
         return {"success": True, "popular": popular}
@@ -605,14 +605,14 @@ async def generate_music_popular(req: PopularRequest):
     """
     artist_name = req.artist.strip()
     if not artist_name:
-        raise HTTPException(status_code=400, detail="artist is required")
+        return {"success": False, "error": "artist is required"}
 
     async with AsyncSessionLocal() as session:
         artist_row = await session.scalar(
             select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
         )
         if not artist_row:
-            raise HTTPException(status_code=404, detail="Artist not found")
+            return {"success": False, "error": "Artist not found"}
 
         result = await session.execute(
             select(MusicSong, MusicAlbum)
