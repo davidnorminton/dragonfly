@@ -224,7 +224,9 @@ export function Settings({ open, onClose }) {
     setMusicLoading(true);
     setMusicMessage('');
     try {
+      console.log('Music scan: starting request to /api/music/scan');
       const res = await musicAPI.scanMusic();
+      console.log('Music scan: response', res);
       if (res?.success) {
         setMusicMessage('Music library scanned successfully.');
       } else {
