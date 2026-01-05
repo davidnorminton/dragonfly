@@ -66,7 +66,7 @@ sudo apt update && sudo apt upgrade -y
 ```
 - Install build essentials and Python tooling:
 ```bash
-sudo apt install -y python3 python3-venv python3-pip git curl build-essential
+sudo apt install -y python3 python3-venv python3-pip git curl build-essential libasound2-dev unzip
 ```
 - Install Node.js (for frontend build):
 ```bash
@@ -78,6 +78,10 @@ sudo apt install -y nodejs
 sudo apt install -y postgresql postgresql-contrib
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
+```
+- Install ffmpeg (for audio conversion to Vosk):
+```bash
+sudo apt install -y ffmpeg
 ```
 
 #### 2) Database setup (Postgres)
@@ -138,6 +142,18 @@ python main.py
 Access:
 - Web GUI: `http://<pi-ip>:1337`
 - WebSocket: `ws://<pi-ip>:8765`
+
+#### 7) Offline transcription (Vosk) on Pi
+- A Vosk model is required. The install script downloads `vosk-model-en-us-0.22` to `models/vosk/`.
+- If you need to download manually:
+```bash
+mkdir -p models/vosk
+cd models/vosk
+wget https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
+unzip vosk-model-en-us-0.22.zip
+```
+- Ensure ffmpeg is installed (`sudo apt install -y ffmpeg`).
+- The backend uses the model at `models/vosk/vosk-model-en-us-0.22` for local transcription.
 
 #### 7) Optional: system service
 Create `/etc/systemd/system/dragonfly.service` (edit paths as needed):

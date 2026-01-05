@@ -12,7 +12,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from core.processor import Processor
 from services.ai_service import AIService
-from openai import AsyncOpenAI
 import tempfile
 import subprocess
 import os
@@ -1224,7 +1223,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
     try:
         content = await file.read()
 
-        # Try Vosk offline first
+        # Try Vosk offline (local-only)
         transcript_text = None
         placeholder = False
         vosk_raw = None
@@ -1268,30 +1267,16 @@ async def transcribe_audio(file: UploadFile = File(...)):
         except Exception as e:
             logger.warning(f"Vosk transcription failed or model missing: {e}")
 
-        # Fallback to Whisper API if Vosk not available and key present
-        if not transcript_text and settings.openai_api_key:
-            client = AsyncOpenAI(api_key=settings.openai_api_key)
-            import io
-            audio_file = io.BytesIO(content)
-            audio_file.name = file.filename or "audio.webm"
-
-            resp = await client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-            )
-            transcript_text = getattr(resp, "text", None) or resp.get("text") if isinstance(resp, dict) else None
-            placeholder = False
-
         # Last resort
         if not transcript_text:
             return {
                 "success": False,
-                "error": "No transcript available (no Vosk text and no OpenAI key).",
+                "error": "No transcript available (Vosk returned no text).",
                 "model_used": selected_model,
                 "vosk_raw": vosk_raw,
             }
 
-        return {"success": True, "transcript": transcript_text, "placeholder": placeholder, "model_used": selected_model, "vosk_raw": vosk_raw}
+        return {"success": True, "transcript": transcript_text, "placeholder": False, "model_used": selected_model, "vosk_raw": vosk_raw}
     except Exception as e:
         logger.error(f"Error transcribing audio: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Transcription failed")
