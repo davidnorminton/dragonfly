@@ -28,6 +28,7 @@ function App() {
   const [micStream, setMicStream] = useState(null);
   const [micStatus, setMicStatus] = useState('idle'); // idle | listening | error
   const [micError, setMicError] = useState('');
+  const [transcript, setTranscript] = useState('');
   const { selectPersona } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -63,9 +64,23 @@ function App() {
   // Manage microphone capture in AI focus mode
   useEffect(() => {
     let cancelled = false;
+    let mediaRecorder;
+    let analyser;
+    let audioContext;
+    let silenceStart = 0;
+    let silenceTimer;
+    let chunks = [];
+
+    const stopRecording = async () => {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+    };
+
     const startMic = async () => {
       setMicError('');
       setMicStatus('listening');
+      setTranscript('');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (cancelled) {
@@ -73,13 +88,77 @@ function App() {
           return;
         }
         setMicStream(stream);
-        setMicStatus('listening');
+
+        audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+
+        mediaRecorder = new MediaRecorder(stream);
+        chunks = [];
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data);
+        };
+        mediaRecorder.onstop = async () => {
+          if (chunks.length === 0) return;
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          await sendForTranscription(blob);
+        };
+        mediaRecorder.start();
+
+        const detectSilence = () => {
+          const buffer = new Uint8Array(analyser.fftSize);
+          analyser.getByteTimeDomainData(buffer);
+          let sum = 0;
+          for (let i = 0; i < buffer.length; i++) {
+            const v = (buffer[i] - 128) / 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / buffer.length);
+          const threshold = 0.02; // silence threshold
+          const now = performance.now();
+
+          if (rms < threshold) {
+            if (silenceStart === 0) silenceStart = now;
+            if (now - silenceStart > 2000) {
+              stopRecording();
+              return;
+            }
+          } else {
+            silenceStart = 0;
+          }
+          silenceTimer = requestAnimationFrame(detectSilence);
+        };
+        silenceTimer = requestAnimationFrame(detectSilence);
       } catch (err) {
         setMicStatus('error');
         setMicError(err?.message || 'Microphone access denied');
       }
     };
 
+    const sendForTranscription = async (blob) => {
+      setMicStatus('processing');
+      try {
+        const fd = new FormData();
+        fd.append('file', blob, 'audio.webm');
+        const resp = await fetch('/api/transcribe', {
+          method: 'POST',
+          body: fd,
+        });
+        const data = await resp.json();
+        if (data.success) {
+          setTranscript(data.transcript || '');
+          setMicStatus('done');
+        } else {
+          setMicStatus('error');
+          setMicError(data.error || 'Transcription failed');
+        }
+      } catch (err) {
+        setMicStatus('error');
+        setMicError(err?.message || 'Transcription failed');
+      }
+    };
     if (aiFocusMode) {
       startMic();
     } else {
@@ -90,12 +169,20 @@ function App() {
       }
       setMicStatus('idle');
       setMicError('');
+      setTranscript('');
+      if (silenceTimer) cancelAnimationFrame(silenceTimer);
+      if (audioContext) audioContext.close().catch(() => {});
     }
 
     return () => {
       cancelled = true;
       if (micStream) {
         micStream.getTracks().forEach((t) => t.stop());
+      }
+      if (silenceTimer) cancelAnimationFrame(silenceTimer);
+      if (audioContext) audioContext.close().catch(() => {});
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,7 +233,14 @@ function App() {
           <div className="ai-focus-status">
             {micStatus === 'listening' && 'Listening...'}
             {micStatus === 'error' && `Mic error: ${micError}`}
+            {micStatus === 'processing' && 'Transcribing...'}
+            {micStatus === 'done' && transcript && 'Transcription complete'}
           </div>
+          {transcript && (
+            <div className="ai-focus-transcript">
+              {transcript}
+            </div>
+          )}
           <button
             className="ai-focus-revert"
             onClick={toggleAiFocus}

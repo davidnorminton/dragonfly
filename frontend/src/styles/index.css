@@ -1566,6 +1566,19 @@ body {
   min-height: 20px;
 }
 
+.ai-focus-transcript {
+  margin-top: 16px;
+  max-width: 720px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
 @keyframes pulseMic {
   0% { transform: scale(1); box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(127, 90, 240, 0.7); }
   50% { transform: scale(1.05); box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 50px rgba(127, 90, 240, 0.9); }

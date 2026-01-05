@@ -1,5 +1,5 @@
 """FastAPI application for the web GUI."""
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,13 +23,16 @@ from config.api_key_loader import load_api_keys, save_api_keys
 from config.expert_types_loader import list_expert_types
 from services.rag_service import RAGService
 from services.tts_service import TTSService
+from services.ai_service import AIService
 from data_collectors.weather_collector import WeatherCollector
 from data_collectors.news_collector import NewsCollector
 from data_collectors.traffic_collector import TrafficCollector
 from services.ai_service import AIService
 from services.article_summarizer import ArticleSummarizer
 from fastapi.responses import Response
+from sqlalchemy.orm.attributes import flag_modified
 from utils.transcript_saver import save_transcript
+import io
 from config.settings import settings
 import time
 import platform
@@ -1203,6 +1206,22 @@ async def summarize_article(request: Request):
             "success": False,
             "error": str(e)
         }
+
+
+@app.post("/api/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """
+    Placeholder transcription endpoint.
+    Receives audio and returns dummy transcript for now.
+    """
+    try:
+        content = await file.read()
+        size_kb = len(content) / 1024
+        transcript = f"Transcribed {size_kb:.1f} KB of audio (placeholder)."
+        return {"success": True, "transcript": transcript}
+    except Exception as e:
+        logger.error(f"Error transcribing audio: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Transcription failed")
 
 
 @app.post("/api/personas/select")
