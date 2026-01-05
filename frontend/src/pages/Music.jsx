@@ -614,7 +614,23 @@ export function MusicPage() {
                   onClick={() => handleAlbumSelect(album.artistName, album.name)}
                 >
                   <div className="music-row-title">
-                    <strong>{album.name}</strong>
+                    <div className="music-row-title-line">
+                      {(() => {
+                        const albumImg =
+                          album.image ||
+                          album.cover_path ||
+                          album.coverPath ||
+                          (album.songs?.[0]?.path ? guessCoverFromSongPath(album.songs?.[0]?.path) : null);
+                        return albumImg ? (
+                          <img
+                            src={`/api/music/stream?path=${encodeURIComponent(albumImg)}`}
+                            alt={`${album.name} cover`}
+                            className="album-thumb"
+                          />
+                        ) : null;
+                      })()}
+                      <strong>{album.name}</strong>
+                    </div>
                     <div className="music-row-sub">{album.artistName}</div>
                   </div>
                   <div className="music-row-meta">

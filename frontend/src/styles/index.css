@@ -2019,6 +2019,12 @@ body {
   gap: 2px;
 }
 
+.music-row-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .music-row-sub {
   font-size: 0.8em;
   color: #9da7b8;
