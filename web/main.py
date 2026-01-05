@@ -53,6 +53,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dragonfly Home Assistant")
 
+# Vosk model path (warn if missing)
+VOSK_MODEL_PREFERRED = Path(__file__).parent / ".." / "models" / "vosk" / "vosk-model-en-us-0.22"
+if not VOSK_MODEL_PREFERRED.exists():
+    logger.warning(
+        "Vosk model missing at %s. Download from https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip and unzip into models/vosk/",
+        VOSK_MODEL_PREFERRED,
+    )
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
