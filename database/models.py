@@ -156,6 +156,40 @@ class MusicSong(Base):
         return f"<Song {self.title} - album_id={self.album_id}>"
 
 
+class MusicPlaylist(Base):
+    """User playlists."""
+    __tablename__ = "music_playlists"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    songs = relationship("MusicPlaylistSong", back_populates="playlist", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Playlist {self.name}>"
+
+
+class MusicPlaylistSong(Base):
+    """Songs inside playlists."""
+    __tablename__ = "music_playlist_songs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    playlist_id = Column(Integer, ForeignKey("music_playlists.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_path = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    artist = Column(String, nullable=True)
+    album = Column(String, nullable=True)
+    track_number = Column(Integer, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    playlist = relationship("MusicPlaylist", back_populates="songs")
+
+    def __repr__(self):
+        return f"<PlaylistSong {self.title} - playlist_id={self.playlist_id}>"
+
+
 class DeviceTelemetry(Base):
     """Model for storing device telemetry data."""
     __tablename__ = "device_telemetry"

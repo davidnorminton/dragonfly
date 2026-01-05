@@ -60,6 +60,9 @@ export const musicAPI = {
   getMetadata: (path) => api.get('/music/metadata', { params: { path } }).then(res => res.data),
   getPopular: (artist) => api.get('/music/popular', { params: { artist } }).then(res => res.data),
   generatePopular: (artist) => api.post('/music/popular', { artist }).then(res => res.data),
+  getPlaylists: () => api.get('/music/playlists').then(res => res.data),
+  createPlaylist: (name) => api.post('/music/playlists', { name }).then(res => res.data),
+  addToPlaylist: (payload) => api.post('/music/playlists/add', payload).then(res => res.data),
 };
 
 export const weatherAPI = {

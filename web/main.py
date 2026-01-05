@@ -23,7 +23,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong
 from sqlalchemy import select, desc, func, or_
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
@@ -692,6 +692,117 @@ async def generate_music_popular(req: PopularRequest):
         await session.commit()
 
         return {"success": True, "popular": matched}
+
+
+async def _ensure_playlist_tables():
+    # Ensure playlist tables exist (lightweight guard)
+    async with engine.begin() as conn:
+        await conn.run_sync(MusicPlaylist.__table__.create, checkfirst=True)
+        await conn.run_sync(MusicPlaylistSong.__table__.create, checkfirst=True)
+
+
+class PlaylistCreate(BaseModel):
+    name: str
+
+
+class PlaylistAddSong(BaseModel):
+    playlist_id: Optional[int] = None
+    name: Optional[str] = None
+    path: str
+    title: str
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    track_number: Optional[int] = None
+    duration_seconds: Optional[int] = None
+
+
+@app.get("/api/music/playlists")
+async def list_playlists():
+    await _ensure_playlist_tables()
+    async with AsyncSessionLocal() as session:
+        playlists = await session.execute(select(MusicPlaylist))
+        playlists = playlists.scalars().all()
+        result = []
+        for pl in playlists:
+            songs_res = await session.execute(
+                select(MusicPlaylistSong).where(MusicPlaylistSong.playlist_id == pl.id).order_by(MusicPlaylistSong.id)
+            )
+            songs = songs_res.scalars().all()
+            result.append(
+                {
+                    "id": pl.id,
+                    "name": pl.name,
+                    "songs": [
+                        {
+                            "id": s.id,
+                            "path": s.file_path,
+                            "name": s.title,
+                            "title": s.title,
+                            "artist": s.artist,
+                            "album": s.album,
+                            "track_number": s.track_number,
+                            "duration": s.duration_seconds,
+                        }
+                        for s in songs
+                    ],
+                }
+            )
+        return {"success": True, "playlists": result}
+
+
+@app.post("/api/music/playlists")
+async def create_playlist(payload: PlaylistCreate):
+    await _ensure_playlist_tables()
+    name = payload.name.strip()
+    if not name:
+        return {"success": False, "error": "name is required"}
+    async with AsyncSessionLocal() as session:
+        exists = await session.scalar(select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower()))
+        if exists:
+            return {"success": True, "playlist": {"id": exists.id, "name": exists.name}}
+        pl = MusicPlaylist(name=name)
+        session.add(pl)
+        await session.commit()
+        await session.refresh(pl)
+        return {"success": True, "playlist": {"id": pl.id, "name": pl.name}}
+
+
+@app.post("/api/music/playlists/add")
+async def add_song_to_playlist(payload: PlaylistAddSong):
+    await _ensure_playlist_tables()
+    name = (payload.name or "").strip()
+    playlist_id = payload.playlist_id
+    if not playlist_id and not name:
+        return {"success": False, "error": "playlist_id or name required"}
+    async with AsyncSessionLocal() as session:
+        playlist = None
+        if playlist_id:
+            playlist = await session.get(MusicPlaylist, playlist_id)
+        if not playlist and name:
+            playlist = await session.scalar(select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower()))
+        if not playlist:
+            playlist = MusicPlaylist(name=name or "New Playlist")
+            session.add(playlist)
+            await session.flush()
+        # Deduplicate by file_path
+        existing = await session.scalar(
+            select(MusicPlaylistSong).where(
+                MusicPlaylistSong.playlist_id == playlist.id, MusicPlaylistSong.file_path == payload.path
+            )
+        )
+        if not existing:
+            ps = MusicPlaylistSong(
+                playlist_id=playlist.id,
+                file_path=payload.path,
+                title=payload.title,
+                artist=payload.artist,
+                album=payload.album,
+                track_number=payload.track_number,
+                duration_seconds=payload.duration_seconds,
+            )
+            session.add(ps)
+        await session.commit()
+        return {"success": True, "playlist_id": playlist.id}
 
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""

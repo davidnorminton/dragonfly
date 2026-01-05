@@ -24,6 +24,7 @@ export function MusicPage() {
   const [playlistModalName, setPlaylistModalName] = useState('');
   const [playlistModalExisting, setPlaylistModalExisting] = useState('');
   const [pendingSong, setPendingSong] = useState(null);
+  const [playlistLoading, setPlaylistLoading] = useState(false);
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
 
@@ -55,29 +56,24 @@ export function MusicPage() {
     }
   };
 
-  useEffect(() => {
-    scanLibrary();
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('music_playlists');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          setPlaylists(Array.isArray(parsed) ? parsed : []);
-        }
-      } catch (e) {
-        console.error('Failed to load playlists', e);
+  const loadPlaylists = async () => {
+    setPlaylistLoading(true);
+    try {
+      const res = await musicAPI.getPlaylists();
+      if (res?.success) {
+        setPlaylists(res.playlists || []);
       }
+    } catch (e) {
+      console.error('Failed to load playlists', e);
+    } finally {
+      setPlaylistLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem('music_playlists', JSON.stringify(playlists));
-    } catch (e) {
-      console.error('Failed to persist playlists', e);
-    }
-  }, [playlists]);
+    scanLibrary();
+    loadPlaylists();
+  }, []);
 
   useEffect(() => {
     // Auto-select a playlist when switching to playlists view or when playlists load
@@ -209,19 +205,31 @@ export function MusicPage() {
     );
   };
 
-  const confirmPlaylistAdd = () => {
+  const confirmPlaylistAdd = async () => {
     const name = (playlistModalExisting || playlistModalName).trim();
     if (!name) return;
     const song = pendingSong;
     if (song) {
-      if (!playlists.some((p) => p.name === name)) {
-        setPlaylists((prev) => [...prev, { name, songs: [song] }]);
-      } else {
-        upsertPlaylistWithSong(name, song);
+      try {
+        await musicAPI.addToPlaylist({
+          name,
+          path: song.path,
+          title: song.title || song.name,
+          artist: song.artist,
+          album: song.album,
+          track_number: song.track_number,
+          duration_seconds: song.duration ?? song.duration_seconds,
+        });
+        await loadPlaylists();
+      } catch (e) {
+        console.error('Failed to add to playlist', e);
       }
     } else {
-      if (!playlists.some((p) => p.name === name)) {
-        setPlaylists((prev) => [...prev, { name, songs: [] }]);
+      try {
+        await musicAPI.createPlaylist(name);
+        await loadPlaylists();
+      } catch (e) {
+        console.error('Failed to create playlist', e);
       }
     }
     setSelectedPlaylist(name);
