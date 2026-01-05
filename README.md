@@ -83,6 +83,13 @@ sudo systemctl start postgresql
 ```bash
 sudo apt install -y ffmpeg
 ```
+- Download Vosk model (for offline transcription):
+```bash
+mkdir -p models/vosk
+cd models/vosk
+wget https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
+unzip vosk-model-en-us-0.22.zip
+```
 
 #### 2) Database setup (Postgres)
 ```bash
