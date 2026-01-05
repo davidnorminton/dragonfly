@@ -114,3 +114,4 @@ echo '{"type":"device_register","device_id":"test-001","device_name":"Test"}' | 
 - **data**: `{"type": "data_received", "message": "Data received successfully"}`
 - **error**: `{"type": "error", "message": "Error description"}`
 
+

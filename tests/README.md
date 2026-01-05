@@ -60,3 +60,4 @@ Common fixtures are defined in `conftest.py`:
 - API keys are mocked to avoid making real API calls
 - Some integration tests may require a running server instance
 
+

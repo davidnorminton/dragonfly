@@ -26,9 +26,10 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiFocusMode, setAiFocusMode] = useState(false);
   const [micStream, setMicStream] = useState(null);
-  const [micStatus, setMicStatus] = useState('idle'); // idle | listening | error
+  const [micStatus, setMicStatus] = useState('idle'); // idle | listening | processing | done | error
   const [micError, setMicError] = useState('');
   const [transcript, setTranscript] = useState('');
+  const [routerText, setRouterText] = useState('');
   const { selectPersona } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -147,8 +148,30 @@ function App() {
           body: fd,
         });
         const data = await resp.json();
+        console.log('Transcribe response', data);
+        if (data.router_model || data.router_prompt || data.router_input) {
+          console.log('Router meta', {
+            model: data.router_model,
+            prompt: data.router_prompt,
+            input: data.router_input,
+            output_raw: data.router_answer,
+            output_parsed: data.router_parsed,
+            error: data.router_error,
+          });
+        }
         if (data.success) {
-          setTranscript(data.transcript || '');
+          const routedParsed = data.router_parsed;
+          const routedRaw = data.router_answer;
+          const routedError = data.router_error;
+          const fallback = data.transcript || '';
+          const routerDisplay =
+            (routedParsed && (routedParsed.value || routedParsed.type || JSON.stringify(routedParsed))) ||
+            (routedRaw && routedRaw.trim()) ||
+            (routedError && `Router error: ${routedError}`) ||
+            '(no router output)';
+          console.log('Router display:', routerDisplay, 'Transcript:', fallback);
+          setTranscript(fallback);
+          setRouterText(routerDisplay);
           setMicStatus('done');
         } else {
           setMicStatus('error');
@@ -170,6 +193,7 @@ function App() {
       setMicStatus('idle');
       setMicError('');
       setTranscript('');
+      setRouterText('');
       if (silenceTimer) cancelAnimationFrame(silenceTimer);
       if (audioContext) audioContext.close().catch(() => {});
     }
@@ -234,11 +258,20 @@ function App() {
             {micStatus === 'listening' && 'Listening...'}
             {micStatus === 'error' && `Mic error: ${micError}`}
             {micStatus === 'processing' && 'Transcribing...'}
-            {micStatus === 'done' && transcript && 'Transcription complete'}
+            {micStatus === 'done' && (transcript || routerText) && 'Transcription complete'}
           </div>
-          {transcript && (
+          {(routerText || transcript) && (
             <div className="ai-focus-transcript">
-              {transcript}
+              {routerText && (
+                <div className="ai-focus-router">
+                  <strong>AI Router:</strong> {routerText}
+                </div>
+              )}
+              {transcript && (
+                <div className="ai-focus-raw">
+                  <strong>Transcript:</strong> {transcript}
+                </div>
+              )}
             </div>
           )}
           <button

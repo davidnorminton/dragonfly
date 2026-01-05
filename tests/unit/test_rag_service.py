@@ -28,17 +28,24 @@ class TestRAGService:
         # Create test messages
         session_id = "test_session_123"
         
+        # Import datetime for explicit timestamps
+        from datetime import datetime, timedelta
+        
+        # Create messages with explicit timestamps to ensure ordering
+        base_time = datetime.now()
         user_msg = ChatMessage(
             session_id=session_id,
             role="user",
             message="Hello",
-            service_name="rag_service"
+            service_name="rag_service",
+            created_at=base_time
         )
         assistant_msg = ChatMessage(
             session_id=session_id,
             role="assistant",
             message="Hi there!",
-            service_name="rag_service"
+            service_name="rag_service",
+            created_at=base_time + timedelta(seconds=1)  # Ensure assistant is created after user
         )
         
         db_session.add(user_msg)
@@ -58,6 +65,8 @@ class TestRAGService:
             history = await rag_service._load_conversation_history(session_id, limit=50)
             
             assert len(history) == 2
+            # Messages are reversed to chronological order (oldest first)
+            # So user message (created first) should be first, assistant second
             assert history[0]["role"] == "user"
             assert history[0]["content"] == "Hello"
             assert history[1]["role"] == "assistant"

@@ -43,6 +43,7 @@ import time
 import platform
 import socket
 import httpx
+from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,88 @@ app.add_middleware(
 # This will be set by the main application
 processor: Optional[Processor] = None
 server_start_time: float = time.time()
+
+
+def _load_router_config() -> Optional[Dict[str, Any]]:
+    """Load router.config if present."""
+    cfg_path = Path(__file__).parent / ".." / "config" / "router.config"
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.warning("router.config not found at %s", cfg_path)
+    except Exception as e:
+        logger.warning("Failed to load router.config: %s", e)
+    return None
+
+
+def _get_anthropic_api_key() -> Optional[str]:
+    """Fetch Anthropic API key from settings, api_keys.json, or env."""
+    api_key = settings.ai_api_key or os.getenv("ANTHROPIC_API_KEY")
+    if api_key:
+        return api_key
+    try:
+        api_keys = load_api_keys()
+        return api_keys.get("anthropic", {}).get("api_key")
+    except Exception as e:
+        logger.warning("Failed to load Anthropic API key from config: %s", e)
+        return None
+
+
+async def _run_router_inference(user_text: str) -> Optional[str]:
+    """Run Anthropic router model on the given text."""
+    cfg = _load_router_config() or {}
+    anth_cfg = cfg.get("anthropic", {}) if isinstance(cfg, dict) else {}
+    api_key = _get_anthropic_api_key()
+    if not api_key:
+        raise RuntimeError("Anthropic API key not configured")
+    client = AsyncAnthropic(api_key=api_key)
+
+    model = anth_cfg.get("anthropic_model", settings.ai_model)
+    system_prompt = anth_cfg.get("prompt_context")
+    max_tokens = anth_cfg.get("max_tokens", 256)
+    temperature = anth_cfg.get("temperature")
+    top_p = anth_cfg.get("top_p")
+
+    params = {
+        "model": model,
+        "messages": [{"role": "user", "content": user_text}],
+        "max_tokens": max_tokens,
+    }
+    if system_prompt:
+        params["system"] = system_prompt
+    if temperature is not None:
+        params["temperature"] = temperature
+    if top_p is not None:
+        params["top_p"] = top_p
+
+    msg = await client.messages.create(**params)
+    if not msg.content:
+        return None
+    output = ""
+    for block in msg.content:
+        if getattr(block, "type", None) == "text":
+            output += block.text or ""
+    output = output.strip()
+    return output or None
+
+
+def _parse_router_answer(answer: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Best-effort parse of router answer as JSON; returns None on failure."""
+    if not answer:
+        return None
+    try:
+        return json.loads(answer)
+    except Exception:
+        # Some models may wrap in code fences; strip simple fences and retry
+        trimmed = answer.strip()
+        if trimmed.startswith("```"):
+            trimmed = trimmed.strip("`").strip()
+            try:
+                return json.loads(trimmed)
+            except Exception:
+                return None
+        return None
 
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""
@@ -298,7 +381,10 @@ async def get_system_ips():
 
 @app.get("/api/chat")
 async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optional[str] = None, mode: Optional[str] = None, persona: Optional[str] = None):
-    """Get chat history with pagination, filtered by mode and optionally persona."""
+    """
+    Get chat history with pagination, filtered by mode and persona.
+    Session IDs are ignored; history is grouped by persona + mode instead.
+    """
     async with AsyncSessionLocal() as session:
         # Build base query
         query = select(ChatMessage)
@@ -313,28 +399,6 @@ async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optiona
         if persona:
             query = query.where(ChatMessage.persona == persona)
             count_query = count_query.where(ChatMessage.persona == persona)
-        
-        if session_id:
-            # For backward compatibility: Q&A mode should also show old chats with base session ID
-            if mode == "qa" and session_id.endswith('_qa_general'):
-                # Q&A mode: include old chats with just the base session ID
-                base_session_id = session_id.rsplit('_qa_general', 1)[0]
-                query = query.where(
-                    or_(
-                        ChatMessage.session_id == session_id,
-                        ChatMessage.session_id == base_session_id
-                    )
-                )
-                count_query = count_query.where(
-                    or_(
-                        ChatMessage.session_id == session_id,
-                        ChatMessage.session_id == base_session_id
-                    )
-                )
-            else:
-                # Conversational mode or other: exact match only
-                query = query.where(ChatMessage.session_id == session_id)
-                count_query = count_query.where(ChatMessage.session_id == session_id)
         
         # Get total count
         count_result = await session.execute(count_query)
@@ -423,10 +487,11 @@ async def send_chat_message(request: Request):
         
         # Save user message (retry on transient DB locks)
         current_persona = get_current_persona_name()
+        session_key = f"{current_persona}_{mode}"
         try:
             await asyncio.wait_for(
                 save_chat_message_with_retry(
-                    session_id=session_id,
+                    session_id=session_key,
                     role="user",
                     message_text=message,
                     service_name=actual_service_name,
@@ -459,7 +524,7 @@ async def send_chat_message(request: Request):
                     try:
                         assistant_msg = await asyncio.wait_for(
                             save_chat_message_with_retry(
-                                session_id=session_id,
+                                session_id=session_key,
                                 role="assistant",
                                 message_text=full_response,
                                 service_name=actual_service_name,
@@ -479,7 +544,7 @@ async def send_chat_message(request: Request):
                             model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
                             # Get audio file path from message metadata if available
                             audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
-                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="qa", expert_type="general")
+                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_key, audio_file=audio_file_path, mode="qa", expert_type="general")
                         except Exception as e:
                             logger.warning(f"Failed to save transcript: {e}")
                     
@@ -500,12 +565,12 @@ async def send_chat_message(request: Request):
                 message_id = None
                 try:
                     # Load conversation history (increased limit for better context)
-                    conversation_history = await rag_service._load_conversation_history(session_id, limit=50)
+                    conversation_history = await rag_service._load_conversation_history(session_key, limit=50)
                     
                     # Build input data for RAG service
                     input_data = {
                         "query": message,
-                        "session_id": session_id,
+                        "session_id": session_key,
                         "expert_type": expert_type,
                         "messages": conversation_history
                     }
@@ -520,7 +585,7 @@ async def send_chat_message(request: Request):
                     try:
                         assistant_msg = await asyncio.wait_for(
                             save_chat_message_with_retry(
-                                session_id=session_id,
+                                session_id=session_key,
                                 role="assistant",
                                 message_text=full_response,
                                 service_name=actual_service_name,
@@ -540,7 +605,7 @@ async def send_chat_message(request: Request):
                             model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
                             # Get audio file path from message metadata if available
                             audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
-                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="conversational", expert_type=expert_type)
+                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_key, audio_file=audio_file_path, mode="conversational", expert_type=expert_type)
                         except Exception as e:
                             logger.warning(f"Failed to save transcript: {e}")
                     
@@ -1228,6 +1293,11 @@ async def transcribe_audio(file: UploadFile = File(...)):
         placeholder = False
         vosk_raw = None
         selected_model = None
+        router_answer = None
+        router_parsed = None
+        router_error = None
+        router_model = None
+        router_prompt = None
 
         try:
             from vosk import Model, KaldiRecognizer
@@ -1276,7 +1346,44 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 "vosk_raw": vosk_raw,
             }
 
-        return {"success": True, "transcript": transcript_text, "placeholder": False, "model_used": selected_model, "vosk_raw": vosk_raw}
+        # Run router model on the transcript (Anthropic)
+        try:
+            cfg = _load_router_config() or {}
+            anth_cfg = cfg.get("anthropic", {}) if isinstance(cfg, dict) else {}
+            router_model = anth_cfg.get("anthropic_model", settings.ai_model)
+            router_prompt = anth_cfg.get("prompt_context")
+            logger.info(
+                "Router call: model=%s, prompt_snippet=%s, input=%s",
+                router_model,
+                (router_prompt[:200] + "...") if router_prompt and len(router_prompt) > 200 else router_prompt,
+                transcript_text,
+            )
+            router_answer = await _run_router_inference(transcript_text)
+            router_parsed = _parse_router_answer(router_answer)
+            logger.info(
+                "Router result: output=%s parsed=%s",
+                router_answer,
+                router_parsed,
+            )
+            if not router_answer:
+                router_error = router_error or "Router returned no content"
+        except Exception as e:
+            logger.warning(f"Router inference failed: {e}")
+            router_error = str(e)
+
+        return {
+            "success": True,
+            "transcript": transcript_text,
+            "placeholder": False,
+            "model_used": selected_model,
+            "vosk_raw": vosk_raw,
+            "router_answer": router_answer,
+            "router_parsed": router_parsed,
+            "router_error": router_error,
+            "router_model": router_model,
+            "router_prompt": router_prompt,
+            "router_input": transcript_text,
+        }
     except Exception as e:
         logger.error(f"Error transcribing audio: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Transcription failed")

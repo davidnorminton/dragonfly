@@ -120,17 +120,13 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue })
           }
         }
       },
-      async (error) => {
-        console.error('Error:', error);
+      async       (error) => {
+        console.error('Error sending message:', error);
         setStreamingMessage(null);
         setIsWaiting(false);
         setPendingUserMessage(null);
-        // Reload history to ensure messages are displayed
-        try {
-          await reloadHistory();
-        } catch (err) {
-          console.error('Error reloading history after error:', err);
-        }
+        // Don't reload history on error - just keep existing messages visible
+        // The messages state is managed by useChat hook, so we don't need to do anything here
       },
       mode,
       expertType  // Send the original expert type ID, not the formatted version

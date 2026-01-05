@@ -22,14 +22,19 @@ class TestTTSService:
         """Test loading API key from config file."""
         import json
         import os
+        from unittest.mock import mock_open, patch
+        
         config_file = tmp_path / "api_keys.json"
         with open(config_file, 'w') as f:
             json.dump(mock_api_keys, f)
         
-        with patch('services.tts_service.settings') as mock_settings:
+        # Patch config.settings.settings to use our test config file
+        with patch('config.settings.settings') as mock_settings:
             mock_settings.api_keys_file = str(config_file)
+            # Also patch os.path.exists and open to use our test file
             with patch('os.path.exists', return_value=True):
                 with patch('builtins.open', mock_open(read_data=json.dumps(mock_api_keys))):
+                    # Create a new service instance to test loading
                     service = TTSService()
                     # Should attempt to load the key
                     assert service.fish_api_key is not None or service.fish_api_key is None  # Either is valid

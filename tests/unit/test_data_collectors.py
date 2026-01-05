@@ -24,25 +24,36 @@ class TestWeatherCollector:
     @patch('data_collectors.weather_collector.httpx.AsyncClient')
     async def test_collect_weather_data(self, mock_client, weather_collector, mock_api_keys):
         """Test collecting weather data."""
-        # Mock API response
+        # Mock API response - httpx.AsyncClient.get() returns an awaitable response
+        # response.json() is a synchronous method that returns the JSON data directly
         mock_response = AsyncMock()
-        mock_response.json.return_value = {
-            "data": {
-                "temperature": 20,
-                "description": "Sunny"
-            }
-        }
+        # Make json() a regular method (not async) that returns the data directly
+        mock_response.json = Mock(return_value={
+            "observations": [{
+                "temperature": {"C": 20, "F": 68},
+                "humidityPercent": 70,
+                "pressureMb": 1012,
+                "weatherTypeText": "Sunny",
+                "wind": {"windSpeedMph": 10, "windSpeedKph": 16, "windDirection": "N", "windDirectionFull": "North"},
+                "localDate": "2024-01-01",
+                "localTime": "12:00"
+            }],
+            "station": {"name": "Test Station", "distance": {"km": 5}}
+        })
         mock_response.status_code = 200
+        mock_response.raise_for_status = Mock()  # Synchronous method
         
         mock_client_instance = AsyncMock()
-        mock_client_instance.get.return_value = mock_response
-        mock_client.return_value.__aenter__.return_value = mock_client_instance
+        mock_client_instance.get = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client.return_value.__aexit__ = AsyncMock(return_value=None)
         
         with patch('config.api_key_loader.load_api_keys', return_value=mock_api_keys):
-            result = await weather_collector.collect()
-            
-            assert result is not None
-            assert "data" in result or "temperature" in str(result)
+            with patch('config.location_loader.load_location_config', return_value={"location_id": "test_location"}):
+                result = await weather_collector.collect()
+                
+                assert result is not None
+                assert "data" in result or "temperature" in str(result)
 
 
 class TestNewsCollector:
@@ -110,23 +121,40 @@ class TestTrafficCollector:
     @patch('data_collectors.traffic_collector.httpx.AsyncClient')
     async def test_collect_traffic_data(self, mock_client, traffic_collector, mock_api_keys):
         """Test collecting traffic data."""
-        # Mock API response
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {
-            "alerts": [],
+        # Mock geocoding response
+        mock_geocode_response = AsyncMock()
+        mock_geocode_response.json = AsyncMock(return_value=[{
+            "lat": "53.0",
+            "lon": "-1.0",
+            "display_name": "Test Location"
+        }])
+        mock_geocode_response.status_code = 200
+        mock_geocode_response.raise_for_status = AsyncMock()
+        
+        # Mock Waze API response
+        mock_waze_response = AsyncMock()
+        mock_waze_response.json = AsyncMock(return_value={
+            "alerts": [{"uuid": "alert1", "type": "JAM", "location": {"x": -1.0, "y": 53.0}, "description": "Traffic jam"}],
             "jams": [],
-            "total_incidents": 0
-        }
-        mock_response.status_code = 200
+            "total_incidents": 1,
+            "total_alerts": 1,
+            "total_jams": 0
+        })
+        mock_waze_response.status_code = 200
+        mock_waze_response.raise_for_status = AsyncMock()
         
         mock_client_instance = AsyncMock()
-        mock_client_instance.get.return_value = mock_response
-        mock_client.return_value.__aenter__.return_value = mock_client_instance
+        # First call is for geocoding, second is for Waze API
+        mock_client_instance.get = AsyncMock(side_effect=[mock_geocode_response, mock_waze_response])
+        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client.return_value.__aexit__ = AsyncMock(return_value=None)
         
         with patch('config.api_key_loader.load_api_keys', return_value=mock_api_keys):
-            with patch('data_collectors.traffic_collector.load_location_config', return_value={"location": "Test"}):
+            with patch('config.location_loader.load_location_config', return_value={"city": "Test City", "latitude": 53.0, "longitude": -1.0}):
                 result = await traffic_collector.collect()
                 
                 assert result is not None
-                assert "alerts" in result or "jams" in result
+                # Check that result has the expected structure
+                assert "data" in result
+                assert "conditions" in result.get("data", {}) or "summary" in result.get("data", {})
 

@@ -233,3 +233,71 @@ class AIService(BaseService):
         except Exception as e:
             self.logger.error(f"Error calling Anthropic API: {e}", exc_info=True)
             yield f"Error: {str(e)}"
+    
+    async def async_stream_execute(self, input_data: Dict[str, Any]):
+        """
+        Execute AI service with streaming response (async generator).
+        
+        Expected input:
+            - question: str - The question to ask
+        
+        Yields:
+            - str - Chunks of the AI's response
+        """
+        self.validate_input(input_data, ["question"])
+        
+        question = input_data["question"]
+        
+        if not self.async_client:
+            yield "AI service is not configured. Please add your Anthropic API key."
+            return
+        
+        try:
+            self.logger.info(f"Processing AI question with async streaming: {question}")
+            
+            # Get persona settings or use defaults
+            persona_settings = {}
+            system_prompt = None
+            if self.persona_config and "anthropic" in self.persona_config:
+                anthropic_cfg = self.persona_config["anthropic"]
+                persona_settings = {
+                    "model": anthropic_cfg.get("anthropic_model", settings.ai_model),
+                    "max_tokens": anthropic_cfg.get("max_tokens", 1024),
+                    "temperature": anthropic_cfg.get("temperature"),
+                    "top_p": anthropic_cfg.get("top_p"),
+                }
+                # Filter out None values
+                persona_settings = {k: v for k, v in persona_settings.items() if v is not None}
+                
+                # Get system prompt if present
+                system_prompt = anthropic_cfg.get("prompt_context")
+                
+                messages = [{
+                    "role": "user",
+                    "content": question
+                }]
+            else:
+                messages = [{
+                    "role": "user",
+                    "content": question
+                }]
+                persona_settings = {
+                    "model": settings.ai_model,
+                    "max_tokens": 1024
+                }
+            
+            # Add system parameter if we have a system prompt
+            if system_prompt:
+                persona_settings["system"] = system_prompt
+            
+            # Stream response from Claude API (async iterator)
+            async with self.async_client.messages.stream(
+                messages=messages,
+                **persona_settings
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+                    
+        except Exception as e:
+            self.logger.error(f"Error calling Anthropic API: {e}", exc_info=True)
+            yield f"Error: {str(e)}"

@@ -1,7 +1,15 @@
+import { useEffect } from 'react';
 import { usePersonas } from '../hooks/usePersonas';
 
 export function PersonaModal({ open, onClose, onSelect }) {
-  const { personas, currentPersona } = usePersonas();
+  const { personas, currentPersona, reload } = usePersonas();
+
+  // Refresh persona list each time the modal is opened so new configs appear without full page reload
+  useEffect(() => {
+    if (open) {
+      reload();
+    }
+  }, [open]); // reload latest list when modal opens
 
   if (!open) return null;
 
@@ -30,4 +38,5 @@ export function PersonaModal({ open, onClose, onSelect }) {
     </div>
   );
 }
+
 

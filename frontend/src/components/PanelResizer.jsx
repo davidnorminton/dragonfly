@@ -44,3 +44,4 @@ export function PanelResizer({ onResize }) {
   return <div className="panel-resizer" ref={resizerRef}></div>;
 }
 
+
