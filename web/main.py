@@ -1227,12 +1227,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
         # Try Vosk offline first
         transcript_text = None
         placeholder = False
+        vosk_raw = None
+        selected_model = None
 
         try:
             from vosk import Model, KaldiRecognizer
             model_root = os.path.join(os.path.dirname(__file__), "..", "models", "vosk")
             preferred = os.path.join(model_root, "vosk-model-en-us-0.22")
-            selected_model = None
             if os.path.isdir(preferred):
                 selected_model = preferred
             elif os.path.isdir(model_root):
@@ -1241,6 +1242,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 if dirs:
                     selected_model = dirs[0]
             if selected_model and os.path.isdir(selected_model):
+                logger.info(f"Using Vosk model: {selected_model}")
                 model = Model(selected_model)
                 # Convert to 16k mono PCM using ffmpeg or soundfile
                 wav_bytes = await _ensure_wav_16k_mono(content, file.filename or "audio.webm")
@@ -1253,6 +1255,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
                         break
                     rec.AcceptWaveform(data)
                 result = rec.FinalResult()
+                vosk_raw = result
                 try:
                     import json as _json
                     transcript_text = _json.loads(result).get("text", "").strip()
@@ -1279,11 +1282,16 @@ async def transcribe_audio(file: UploadFile = File(...)):
             transcript_text = getattr(resp, "text", None) or resp.get("text") if isinstance(resp, dict) else None
             placeholder = False
 
-        # Last resort placeholder
+        # Last resort
         if not transcript_text:
-            return {"success": False, "error": "No transcript available (no Vosk model or OpenAI key, or empty audio)."}
+            return {
+                "success": False,
+                "error": "No transcript available (no Vosk text and no OpenAI key).",
+                "model_used": selected_model,
+                "vosk_raw": vosk_raw,
+            }
 
-        return {"success": True, "transcript": transcript_text, "placeholder": placeholder}
+        return {"success": True, "transcript": transcript_text, "placeholder": placeholder, "model_used": selected_model, "vosk_raw": vosk_raw}
     except Exception as e:
         logger.error(f"Error transcribing audio: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Transcription failed")
