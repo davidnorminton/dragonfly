@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
 import { routerAPI } from '../services/api';
 
-const DEFAULT_BASE_PROMPT =
-  '# === System message ===\\n' +
-  'You are an AI assistant designed to classify input and return a JSON object describing the type of request. You only output JSON. Do not add extra text.\\n\\n' +
-  'Rules:\\n  • Each rule has a trigger (the input text or pattern) and a type (task or question).\\n  • When input matches a rule, return a JSON object with type and value.\\n  • If input does not match any rule, classify it as a question by default.\\n\\n' +
-  'Rules list (example):\\n';
+const DEFAULT_BASE_PROMPT = [
+  '# === System message ===',
+  'You are an AI assistant designed to classify input and return a JSON object describing the type of request. You only output JSON. Do not add extra text.',
+  '',
+  'Rules:',
+  '  • Each rule has a trigger (the input text or pattern) and a type (task or question).',
+  '  • When input matches a rule, return a JSON object with type and value.',
+  '  • If input does not match any rule, classify it as a question by default.',
+  '',
+  'Rules list (example):',
+].join('\n');
 
 const DEFAULT_RULES = [
   {
@@ -112,7 +118,11 @@ export function useRouterConfig(open) {
             ? ''
             : String(anth.max_tokens),
         );
-        const { rules: parsedRules, basePrompt: bp } = extractRules(anth.prompt_context || '');
+        const rawPrompt = anth.prompt_context || '';
+        const decodedPrompt = rawPrompt.includes('\\n') && !rawPrompt.includes('\n\n')
+          ? rawPrompt.replace(/\\n/g, '\n')
+          : rawPrompt;
+        const { rules: parsedRules, basePrompt: bp } = extractRules(decodedPrompt || '');
         const base = (bp && bp.trim()) ? bp : DEFAULT_BASE_PROMPT;
         const parsedOrDefault = parsedRules.length ? parsedRules : DEFAULT_RULES;
         setBasePrompt(base);
