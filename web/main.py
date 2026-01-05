@@ -169,7 +169,7 @@ async def restart_system():
                 os._exit(0)
 
         # Run restart in a separate thread after a short delay to let the response flush
-        threading.Timer(0.5, _restart).start()
+        threading.Timer(1.0, _restart).start()
         return {"success": True, "message": "Server restart scheduled"}
     except Exception as e:
         logger.error(f"Failed to schedule restart: {e}", exc_info=True)
