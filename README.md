@@ -218,7 +218,7 @@ pip install -r requirements.txt
 HOST=0.0.0.0
 PORT=1337
 WEBSOCKET_PORT=8765
-DATABASE_URL=sqlite+aiosqlite:///./dragonfly.db
+DATABASE_URL=postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly
 LOG_LEVEL=INFO
 ```
 

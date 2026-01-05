@@ -15,8 +15,11 @@ from database.base import Base, AsyncSessionLocal
 from database import models
 
 
-# Test database URL (in-memory SQLite for tests)
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+# Test database URL (PostgreSQL by default; override with TEST_DATABASE_URL env)
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly_test",
+)
 
 
 @pytest.fixture(scope="session")
@@ -35,7 +38,6 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         TEST_DATABASE_URL,
         echo=False,
         future=True,
-        connect_args={"check_same_thread": False} if "sqlite" in TEST_DATABASE_URL else {}
     )
     
     # Create test session factory
@@ -131,4 +133,5 @@ def mock_expert_type() -> dict:
         "system_prompt": "You are a test expert assistant.",
         "icon": "🧪"
     }
+
 
