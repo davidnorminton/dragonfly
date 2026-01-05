@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { configAPI } from '../services/api';
+import { routerAPI } from '../services/api';
 
 export function useRouterConfig(open) {
   const [routerConfig, setRouterConfig] = useState('');
@@ -14,7 +14,7 @@ export function useRouterConfig(open) {
       setLoading(true);
       setError(null);
       try {
-        const data = await configAPI.getRouterConfig();
+        const data = await routerAPI.getRouterConfig();
         setRouterConfig(JSON.stringify(data, null, 2));
       } catch (err) {
         console.error('Error loading router config:', err);
@@ -32,7 +32,7 @@ export function useRouterConfig(open) {
     setSuccess(null);
     try {
       const cfg = JSON.parse(routerConfig);
-      await configAPI.saveRouterConfig(cfg);
+      await routerAPI.saveRouterConfig(cfg);
       setSuccess('Router config saved');
     } catch (err) {
       console.error('Error saving router config:', err);
