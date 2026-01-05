@@ -77,6 +77,14 @@ export function BottomToolbar({ sessionId, audioQueue }) {
             )}
           </button>
         </div>
+        <div className="toolbar-center">
+          <button
+            className="toolbar-button mic-button"
+            title="AI mic mode (coming soon)"
+          >
+            🎤
+          </button>
+        </div>
         <div className="toolbar-info">
           <div className="toolbar-time">
             {formatTime(currentTime)} / {formatTime(duration)}
