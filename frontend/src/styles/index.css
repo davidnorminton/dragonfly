@@ -1539,6 +1539,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
   background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.9) 70%);
   z-index: 1200;
   animation: fadeInOverlay 0.6s ease forwards;
@@ -1556,6 +1557,13 @@ body {
   box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(127, 90, 240, 0.7);
   color: #fff;
   animation: pulseMic 2.4s ease-in-out infinite;
+}
+
+.ai-focus-status {
+  margin-top: 18px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 1rem;
+  min-height: 20px;
 }
 
 @keyframes pulseMic {

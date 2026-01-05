@@ -25,6 +25,9 @@ function App() {
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiFocusMode, setAiFocusMode] = useState(false);
+  const [micStream, setMicStream] = useState(null);
+  const [micStatus, setMicStatus] = useState('idle'); // idle | listening | error
+  const [micError, setMicError] = useState('');
   const { selectPersona } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -56,6 +59,47 @@ function App() {
   };
 
   const toggleAiFocus = () => setAiFocusMode((prev) => !prev);
+
+  // Manage microphone capture in AI focus mode
+  useEffect(() => {
+    let cancelled = false;
+    const startMic = async () => {
+      setMicError('');
+      setMicStatus('listening');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        setMicStream(stream);
+        setMicStatus('listening');
+      } catch (err) {
+        setMicStatus('error');
+        setMicError(err?.message || 'Microphone access denied');
+      }
+    };
+
+    if (aiFocusMode) {
+      startMic();
+    } else {
+      // stop mic
+      if (micStream) {
+        micStream.getTracks().forEach((t) => t.stop());
+        setMicStream(null);
+      }
+      setMicStatus('idle');
+      setMicError('');
+    }
+
+    return () => {
+      cancelled = true;
+      if (micStream) {
+        micStream.getTracks().forEach((t) => t.stop());
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiFocusMode]);
 
   return (
     <div className={`app-shell ${aiFocusMode ? 'ai-focus' : ''}`}>
@@ -99,6 +143,10 @@ function App() {
       {aiFocusMode && (
         <div className="ai-focus-overlay">
           <div className="ai-focus-mic">🎤</div>
+          <div className="ai-focus-status">
+            {micStatus === 'listening' && 'Listening...'}
+            {micStatus === 'error' && `Mic error: ${micError}`}
+          </div>
           <button
             className="ai-focus-revert"
             onClick={toggleAiFocus}
