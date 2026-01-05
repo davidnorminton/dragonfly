@@ -1258,6 +1258,10 @@ async def transcribe_audio(file: UploadFile = File(...)):
                     transcript_text = _json.loads(result).get("text", "").strip()
                 except Exception:
                     transcript_text = None
+                if transcript_text and transcript_text.strip() == "":
+                    transcript_text = None
+            else:
+                logger.warning("Vosk model not found at %s", model_root)
         except Exception as e:
             logger.warning(f"Vosk transcription failed or model missing: {e}")
 
@@ -1277,9 +1281,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
         # Last resort placeholder
         if not transcript_text:
-            size_kb = len(content) / 1024
-            transcript_text = f"Transcribed {size_kb:.1f} KB of audio (placeholder - no Vosk model or API key)."
-            placeholder = True
+            return {"success": False, "error": "No transcript available (no Vosk model or OpenAI key, or empty audio)."}
 
         return {"success": True, "transcript": transcript_text, "placeholder": placeholder}
     except Exception as e:
