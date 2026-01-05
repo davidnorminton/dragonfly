@@ -20,3 +20,4 @@ def test_parse_router_answer_invalid_returns_none():
     assert _parse_router_answer("") is None
     assert _parse_router_answer(None) is None
 
+

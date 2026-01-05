@@ -27,3 +27,4 @@ def save_router_config(config: Dict[str, Any]) -> bool:
     except Exception:
         return False
 
+

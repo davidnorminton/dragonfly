@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { configAPI, systemAPI, routerAPI } from '../services/api';
+import { configAPI, systemAPI, routerAPI, musicAPI } from '../services/api';
 import { useRouterConfig } from '../hooks/useRouterConfig';
 
 export function Settings({ open, onClose }) {
@@ -18,6 +18,8 @@ export function Settings({ open, onClose }) {
   const [restarting, setRestarting] = useState(false);
   const [restartMsg, setRestartMsg] = useState('');
   const [activeRouterTab, setActiveRouterTab] = useState('router');
+  const [musicLoading, setMusicLoading] = useState(false);
+  const [musicMessage, setMusicMessage] = useState('');
   const {
     model,
     temperature,
@@ -218,6 +220,24 @@ export function Settings({ open, onClose }) {
     }
   };
 
+  const handleMusicScan = async () => {
+    setMusicLoading(true);
+    setMusicMessage('');
+    try {
+      const res = await musicAPI.scanMusic();
+      if (res?.success) {
+        setMusicMessage('Music library scanned successfully.');
+      } else {
+        setMusicMessage(res?.error || 'Music scan failed.');
+      }
+    } catch (err) {
+      console.error('Music scan failed:', err);
+      setMusicMessage(err?.message || 'Music scan failed.');
+    } finally {
+      setMusicLoading(false);
+    }
+  };
+
   return (
     <div className={`modal-overlay ${open ? 'active' : ''}`} onClick={onClose}>
       <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
@@ -244,6 +264,12 @@ export function Settings({ open, onClose }) {
             onClick={() => setActiveTab('api_keys')}
           >
             API Keys
+          </button>
+          <button
+            className={activeTab === 'music' ? 'active' : ''}
+            onClick={() => setActiveTab('music')}
+          >
+            Music
           </button>
           <button
             className={activeTab === 'router' ? 'active' : ''}
@@ -510,6 +536,25 @@ export function Settings({ open, onClose }) {
                 className="config-textarea"
                 rows={15}
               />
+            </div>
+          )}
+
+          {activeTab === 'music' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>Music</h3>
+                <button
+                  onClick={handleMusicScan}
+                  disabled={musicLoading}
+                  className="save-button"
+                >
+                  {musicLoading ? 'Scanning…' : 'Scan Library'}
+                </button>
+              </div>
+              {musicMessage && <div className="settings-message info">{musicMessage}</div>}
+              <p className="settings-help">
+                Scan `/Users/davidnorminton/Music` for artists, albums, and songs, updating the library metadata.
+              </p>
             </div>
           )}
         </div>

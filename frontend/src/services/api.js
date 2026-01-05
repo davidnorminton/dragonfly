@@ -52,6 +52,12 @@ export const locationAPI = {
 export const routerAPI = {
   getRouterConfig: () => api.get('/config/router').then(res => res.data),
   saveRouterConfig: (config) => api.put('/config/router', config).then(res => res.data),
+  route: (payload) => api.post('/router/route', payload, { responseType: 'blob' }),
+};
+
+export const musicAPI = {
+  scanMusic: () => api.get('/music/scan').then(res => res.data),
+  getMetadata: (path) => api.get('/music/metadata', { params: { path } }).then(res => res.data),
 };
 
 export const weatherAPI = {

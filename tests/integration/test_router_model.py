@@ -49,3 +49,4 @@ def test_router_model_classifies_get_time():
     assert "task" in text.lower(), f"Router did not classify as task: {text}"
     assert "get_time" in text, f"Router did not return get_time value: {text}"
 
+

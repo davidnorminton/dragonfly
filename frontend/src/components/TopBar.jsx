@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { locationAPI } from '../services/api';
 import { usePersonas } from '../hooks/usePersonas';
 
-export function TopBar({ onSwitchAI, onSettingsClick }) {
+export function TopBar({ onSwitchAI, onSettingsClick, activePage = 'dashboard', onNavigate }) {
   const [currentTime, setCurrentTime] = useState('');
   const [location, setLocation] = useState('Loading...');
   const { currentTitle } = usePersonas();
@@ -45,6 +45,22 @@ export function TopBar({ onSwitchAI, onSettingsClick }) {
     <div className="top-bar">
       <div className="top-bar-left">
         <div className="logo-text">{currentTitle}</div>
+        <div className="top-nav">
+          <button
+            className={`nav-button ${activePage === 'dashboard' ? 'active' : ''}`}
+            onClick={() => onNavigate?.('dashboard')}
+            style={{ minWidth: 90 }}
+          >
+            Dashboard
+          </button>
+          <button
+            className={`nav-button ${activePage === 'music' ? 'active' : ''}`}
+            onClick={() => onNavigate?.('music')}
+            style={{ minWidth: 90 }}
+          >
+            Music
+          </button>
+        </div>
         <button 
           onClick={onSwitchAI}
           style={{

@@ -1,12 +1,13 @@
 """FastAPI application for the web GUI."""
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, JSONResponse
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import logging
 import asyncio
 import json
+import mimetypes
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,8 +18,12 @@ import subprocess
 import os
 import soundfile as sf
 import numpy as np
+import os.path
+from collections import defaultdict
+from mutagen.mp3 import MP3
+from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong
 from sqlalchemy import select, desc, func, or_
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
@@ -190,22 +195,342 @@ async def restart_system():
 async def router_route(request: Request):
     """
     Dispatch a router decision to a concrete action.
-    Expected payload: { "type": "...", "value": "...", "mode": "qa|conversational" }
+    Expected payload: { "type": "...", "value": "...", "mode": "qa|conversational", "ai_mode": bool }
     """
     try:
         payload = await request.json()
         route_type = payload.get("type")
         route_value = payload.get("value")
         mode = payload.get("mode", "qa")
-        result = route_request(route_type, route_value, mode=mode)
+        ai_mode = bool(payload.get("ai_mode", False))
+
+        result = await route_request(route_type, route_value, mode=mode)
         if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Routing failed"))
-        return result
+            # Return JSON error instead of raising to avoid breaking frontend audio flow
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": False,
+                    "error": result.get("error", "Routing failed"),
+                    "route_type": route_type,
+                    "route_value": route_value,
+                },
+            )
+
+        text = result.get("result") or result.get("answer") or ""
+        if ai_mode:
+            try:
+                # Generate TTS using current persona voice
+                persona_config = load_persona_config()
+                fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+                voice_id = fish_cfg.get("voice_id")
+                voice_engine = fish_cfg.get("voice_engine", "s1")
+                if voice_id:
+                    tts = TTSService()
+                    audio_bytes, _ = await tts.generate_audio(text, voice_id=voice_id, voice_engine=voice_engine, save_to_file=False)
+                    if audio_bytes:
+                        return Response(content=audio_bytes, media_type="audio/mpeg")
+            except Exception as tts_err:
+                logger.error(f"TTS generation failed: {tts_err}", exc_info=True)
+                # fall through to JSON response with error note
+                return {"success": True, "text": text, "route": result.get("route"), "mode": mode, "audio_error": str(tts_err)}
+        # Fallback JSON if not in AI mode or TTS missing
+        return {"success": True, "text": text, "route": result.get("route"), "mode": mode}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Router dispatch failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Router dispatch failed")
+
+
+def _extract_audio_meta(path: Path) -> Dict[str, Any]:
+    """Extract audio metadata using mutagen."""
+    meta: Dict[str, Any] = {
+        "duration_seconds": 0,
+        "bitrate": None,
+        "sample_rate": None,
+        "channels": None,
+        "codec": "mp3",
+        "title": None,
+        "artist": None,
+        "album": None,
+        "track_number": None,
+        "disc_number": None,
+        "genre": None,
+        "year": None,
+        "date": None,
+    }
+    try:
+        audio = MP3(str(path))
+        if audio and audio.info:
+            meta["duration_seconds"] = int(audio.info.length)
+            meta["bitrate"] = int((audio.info.bitrate or 0) / 1000) if audio.info.bitrate else None
+            meta["sample_rate"] = audio.info.sample_rate
+            meta["channels"] = audio.info.channels
+        try:
+            tags = EasyID3(str(path))
+            meta["title"] = tags.get("title", [None])[0]
+            meta["artist"] = tags.get("artist", [None])[0]
+            meta["album"] = tags.get("album", [None])[0]
+            meta["genre"] = tags.get("genre", [None])[0]
+            meta["year"] = tags.get("date", [None])[0] or tags.get("originaldate", [None])[0]
+            meta["date"] = tags.get("originaldate", [None])[0] or tags.get("date", [None])[0]
+            trk = tags.get("tracknumber", [None])[0]
+            if trk:
+                try:
+                    meta["track_number"] = int(str(trk).split("/")[0])
+                except Exception:
+                    meta["track_number"] = None
+            disc = tags.get("discnumber", [None])[0]
+            if disc:
+                try:
+                    meta["disc_number"] = int(str(disc).split("/")[0])
+                except Exception:
+                    meta["disc_number"] = None
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"Failed to read metadata for {path}: {e}")
+    return meta
+
+
+async def _persist_music(tree_songs: list):
+    """Persist artists/albums/songs into the database."""
+    async with AsyncSessionLocal() as session:
+        for item in tree_songs:
+            artist_name = item["artist"]
+            album_title = item["album"]
+            song_title = item["title"]
+            meta = item.get("meta", {})
+
+            # Artist
+            artist_stmt = select(MusicArtist).where(MusicArtist.name == artist_name)
+            artist_res = await session.execute(artist_stmt)
+            artist = artist_res.scalars().first()
+            if not artist:
+                artist = MusicArtist(name=artist_name)
+                session.add(artist)
+                await session.flush()
+
+            # Album
+            album_stmt = select(MusicAlbum).where(MusicAlbum.artist_id == artist.id, MusicAlbum.title == album_title)
+            album_res = await session.execute(album_stmt)
+            album = album_res.scalars().first()
+            if not album:
+                album = MusicAlbum(
+                    artist_id=artist.id,
+                    title=album_title,
+                    year=(meta.get("year") or None),
+                    genre=meta.get("genre"),
+                    cover_path=item.get("album_image"),
+                    extra_metadata=meta,
+                )
+                session.add(album)
+                await session.flush()
+            else:
+                album.year = meta.get("year") or album.year
+                album.genre = album.genre or meta.get("genre")
+                if item.get("album_image"):
+                    album.cover_path = item.get("album_image")
+                if meta:
+                    album.extra_metadata = meta
+
+            # Song
+            song_stmt = select(MusicSong).where(MusicSong.file_path == item["path"])
+            song_res = await session.execute(song_stmt)
+            song = song_res.scalars().first()
+            if not song:
+                song = MusicSong(
+                    album_id=album.id,
+                    artist_id=artist.id,
+                    title=song_title,
+                    track_number=meta.get("track_number"),
+                    disc_number=meta.get("disc_number"),
+                    duration_seconds=meta.get("duration_seconds"),
+                    file_path=item["path"],
+                    bitrate=meta.get("bitrate"),
+                    sample_rate=meta.get("sample_rate"),
+                    channels=meta.get("channels"),
+                    codec=meta.get("codec"),
+                    genre=meta.get("genre"),
+                    year=meta.get("year"),
+                    extra_metadata=meta,
+                )
+                session.add(song)
+            else:
+                song.title = song_title
+                song.track_number = meta.get("track_number")
+                song.disc_number = meta.get("disc_number")
+                song.duration_seconds = meta.get("duration_seconds")
+                song.bitrate = meta.get("bitrate")
+                song.sample_rate = meta.get("sample_rate")
+                song.channels = meta.get("channels")
+                song.codec = meta.get("codec")
+                song.genre = meta.get("genre")
+                song.year = meta.get("year")
+                song.extra_metadata = meta
+
+        await session.commit()
+
+
+@app.get("/api/music/scan")
+async def scan_music_library():
+    """
+    Scan the user's Music directory for mp3 files in Artist/Album/Song structure.
+    Returns a nested tree: { artists: [ { name, albums: [ { name, image, songs: [ { name, path } ] } ] } ] }
+    Paths are returned relative to the base music directory and can be streamed via /api/music/stream?path=<relpath>.
+    """
+    base_path = Path("/Users/davidnorminton/Music")
+    if not base_path.exists():
+        return {"success": False, "error": f"{base_path} does not exist"}
+
+    tree = defaultdict(lambda: defaultdict(lambda: {"songs": [], "image": None, "year": None, "date": None}))  # artist -> album -> {songs, image, year, date}
+    artist_images: Dict[str, str] = {}
+    image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    collected_songs = []
+
+    for root, _, files in os.walk(base_path):
+        for f in files:
+            if not f.lower().endswith(".mp3"):
+                # Capture artist hero image from artist root folder
+                full_image_path = Path(root) / f
+                try:
+                    rel_img = full_image_path.relative_to(base_path)
+                    parts_img = rel_img.parts
+                    if len(parts_img) == 1 and full_image_path.suffix.lower() in image_exts:
+                        artist_images[parts_img[0]] = str(rel_img)
+                except Exception:
+                    pass
+                continue
+            full_path = Path(root) / f
+            try:
+                rel = full_path.relative_to(base_path)
+                parts = rel.parts
+                if len(parts) < 3:
+                    # Not in Artist/Album/Song; skip
+                    continue
+                artist, album = parts[0], parts[1]
+                song = Path(parts[-1]).stem
+                rel_path = str(full_path.relative_to(base_path))
+                meta = _extract_audio_meta(full_path)
+                title_from_meta = meta.get("title") or song
+                tree[artist][album]["songs"].append(
+                    {
+                        "name": title_from_meta,
+                        "path": rel_path,
+                        "duration": meta.get("duration_seconds"),
+                        "track_number": meta.get("track_number"),
+                    }
+                )
+                # Capture year/date for album ordering
+                if meta.get("year") and not tree[artist][album]["year"]:
+                    try:
+                        tree[artist][album]["year"] = int(str(meta.get("year")).split("-")[0])
+                    except Exception:
+                        tree[artist][album]["year"] = None
+                if meta.get("date") and not tree[artist][album]["date"]:
+                    tree[artist][album]["date"] = meta.get("date")
+                collected_songs.append(
+                    {
+                        "artist": artist,
+                        "album": album,
+                        "title": title_from_meta,
+                        "path": rel_path,
+                        "album_image": None,
+                        "meta": meta,
+                    }
+                )
+            except Exception:
+                continue
+
+        # Try to find an album cover in this directory if not already set
+        album_dir = Path(root)
+        rel_album = None
+        try:
+          rel_album = album_dir.relative_to(base_path)
+        except Exception:
+          rel_album = None
+        if rel_album and len(rel_album.parts) >= 2:
+            artist, album = rel_album.parts[0], rel_album.parts[1]
+            if tree[artist][album]["image"] is None:
+                for img in album_dir.iterdir():
+                    if img.is_file() and img.suffix.lower() in image_exts:
+                        rel_img = str(img.relative_to(base_path))
+                        tree[artist][album]["image"] = rel_img
+                        # update collected_songs album_image for this album
+                        for cs in collected_songs:
+                            if cs["artist"] == artist and cs["album"] == album:
+                                cs["album_image"] = rel_img
+                        break
+
+    artists_out = []
+    for artist, albums in tree.items():
+        albums_out = []
+        for album, songs in albums.items():
+            albums_out.append(
+                {
+                    "name": album,
+                    "songs": songs["songs"],
+                    "image": songs.get("image"),
+                    "year": songs.get("year"),
+                    "date": songs.get("date"),
+                }
+            )
+        artists_out.append({"name": artist, "image": artist_images.get(artist), "albums": albums_out})
+
+    # Persist to DB
+    try:
+        await _persist_music(collected_songs)
+    except Exception as e:
+        logger.error(f"Failed to persist music library: {e}", exc_info=True)
+
+    return {"success": True, "artists": sorted(artists_out, key=lambda a: a["name"].lower())}
+
+
+@app.get("/api/music/stream")
+async def stream_music_file(path: str):
+    """
+    Stream a music (or image) file from the user's Music directory.
+    """
+    base_path = Path("/Users/davidnorminton/Music").resolve()
+    # Accept relative paths (preferred) and absolute paths under base for safety
+    raw_path = Path(path)
+    if raw_path.is_absolute():
+        target = raw_path.resolve()
+    else:
+        target = (base_path / path).resolve()
+
+    if not str(target).startswith(str(base_path)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(str(target), media_type=media_type or "application/octet-stream")
+
+
+@app.get("/api/music/metadata")
+async def music_metadata(path: str):
+    """
+    Return simple metadata (duration seconds) for an mp3 under Music.
+    """
+    base_path = Path("/Users/davidnorminton/Music").resolve()
+    raw_path = Path(path)
+    if raw_path.is_absolute():
+        target = raw_path.resolve()
+    else:
+        target = (base_path / path).resolve()
+    if not str(target).startswith(str(base_path)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        import mutagen
+        from mutagen.mp3 import MP3
+        audio = MP3(str(target))
+        dur = int(audio.info.length) if audio and audio.info else 0
+    except Exception:
+        dur = 0
+    return {"duration": dur}
 
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""

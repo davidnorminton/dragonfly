@@ -27,3 +27,4 @@ def test_router_config_examples_present():
     assert "Always return a single JSON object" in prompt
     assert "type: task or question" in prompt
 
+

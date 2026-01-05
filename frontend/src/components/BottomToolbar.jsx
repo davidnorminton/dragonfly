@@ -1,4 +1,4 @@
-export function BottomToolbar({ sessionId, audioQueue, onMicClick }) {
+export function BottomToolbar({ sessionId, audioQueue, onMicClick, hideMic = false, hideControls = false }) {
   const {
     currentIndex,
     isPlaying,
@@ -41,63 +41,80 @@ export function BottomToolbar({ sessionId, audioQueue, onMicClick }) {
 
   return (
     <div className="bottom-toolbar">
-      <div className="toolbar-progress-wrapper">
-        <div 
-          className="toolbar-progress-bar"
-          onClick={handleProgressClick}
-        >
+      {!hideControls && (
+        <div className="toolbar-progress-wrapper">
           <div 
-            className="toolbar-progress-fill"
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-      </div>
-      <div className="toolbar-content">
-        <div className="toolbar-controls">
-          <button
-            className="toolbar-button stop-button"
-            onClick={stopQueue}
-            disabled={!isPlaying && !isPaused}
-            title="Stop"
+            className="toolbar-progress-bar"
+            onClick={handleProgressClick}
           >
-            ⏹
-          </button>
-          <button
-            className="toolbar-button play-button"
-            onClick={handlePlayPause}
-            disabled={queueLength === 0 || isGenerating}
-            title={isPlaying ? 'Pause' : 'Play queue'}
-          >
-            {isGenerating ? (
-              <span className="loading-spinner">⏳</span>
-            ) : isPlaying ? (
-              '⏸'
-            ) : (
-              '▶'
-            )}
-          </button>
-        </div>
-        <div className="toolbar-center">
-          <button
-            className="toolbar-button mic-button"
-            title="AI mic mode"
-            onClick={onMicClick}
-          >
-            🎤
-          </button>
-        </div>
-        <div className="toolbar-info">
-          <div className="toolbar-time">
-            {formatTime(currentTime)} / {formatTime(duration)}
+            <div 
+              className="toolbar-progress-fill"
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
-          {isGenerating && <span className="toolbar-status">Generating audio...</span>}
-          {isPlaying && <span className="toolbar-status">Playing...</span>}
-          {queueLength > 0 && currentIndex >= 0 && (
-            <span className="toolbar-status">
-              {currentIndex + 1} of {queueLength} in queue
-            </span>
-          )}
         </div>
+      )}
+      <div className="toolbar-content">
+        {!hideControls && (
+          <div className="toolbar-controls">
+            <button
+              className="toolbar-button stop-button"
+              onClick={stopQueue}
+              disabled={!isPlaying && !isPaused}
+              title="Stop"
+            >
+              ⏹
+            </button>
+            <button
+              className="toolbar-button play-button"
+              onClick={handlePlayPause}
+              disabled={queueLength === 0 || isGenerating}
+              title={isPlaying ? 'Pause' : 'Play queue'}
+            >
+              {isGenerating ? (
+                <span className="loading-spinner">⏳</span>
+              ) : isPlaying ? (
+                '⏸'
+              ) : (
+                '▶'
+              )}
+            </button>
+          </div>
+        )}
+        {!hideMic && (
+          <div className="toolbar-center">
+            <button
+              className="toolbar-button mic-button"
+              title="AI mic mode"
+              aria-label="AI mic mode"
+              onClick={onMicClick}
+            >
+              <span className="mic-icon-svg" aria-hidden="true">
+                <svg viewBox="0 0 64 64" role="presentation">
+                  <circle cx="32" cy="32" r="30" fill="#0a0a0f" stroke="#16c782" strokeWidth="4" />
+                  <rect x="26" y="18" width="12" height="22" rx="6" fill="#ffffff" />
+                  <rect x="24" y="38" width="16" height="4" rx="2" fill="#16c782" />
+                  <line x1="32" y1="42" x2="32" y2="50" stroke="#16c782" strokeWidth="4" strokeLinecap="round" />
+                  <line x1="22" y1="50" x2="42" y2="50" stroke="#16c782" strokeWidth="4" strokeLinecap="round" />
+                </svg>
+              </span>
+            </button>
+          </div>
+        )}
+        {!hideControls && (
+          <div className="toolbar-info">
+            <div className="toolbar-time">
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </div>
+            {isGenerating && <span className="toolbar-status">Generating audio...</span>}
+            {isPlaying && <span className="toolbar-status">Playing...</span>}
+            {queueLength > 0 && currentIndex >= 0 && (
+              <span className="toolbar-status">
+                {currentIndex + 1} of {queueLength} in queue
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

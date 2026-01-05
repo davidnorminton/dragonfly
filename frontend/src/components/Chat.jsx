@@ -4,7 +4,7 @@ import { ttsAPI, chatAPI } from '../services/api';
 import { usePersonas } from '../hooks/usePersonas';
 import { useExpertTypes } from '../hooks/useExpertTypes';
 
-export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue }) {
+export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue, aiFocusMode, onMicClick, onCollapse }) {
   const [mode, setMode] = useState('qa'); // 'qa' or 'conversational'
   const [expertType, setExpertType] = useState('general');
   const [input, setInput] = useState('');
@@ -134,6 +134,10 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue })
   };
 
   const handleGenerateTTS = async (messageId, text) => {
+    if (!aiFocusMode) {
+      console.log('AI mode is off; skipping TTS generation.');
+      return;
+    }
     try {
       const response = await ttsAPI.generate(text, messageId, currentPersona);
       if (!response.ok) throw new Error('TTS generation failed');
@@ -163,18 +167,25 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue })
   return (
     <div className="right-panel">
       <div className="chat-header-controls">
-        <div className="mode-toggle">
-          <label className="mode-toggle-label">
-            <input
-              type="checkbox"
-              checked={mode === 'conversational'}
-              onChange={(e) => setMode(e.target.checked ? 'conversational' : 'qa')}
-              className="mode-toggle-input"
-            />
-            <span className="mode-toggle-text">
-              {mode === 'qa' ? 'Q&A Mode' : 'Conversational Mode'}
-            </span>
-          </label>
+        <div className="chat-header-row">
+          <div className="mode-toggle">
+            <label className="mode-toggle-label">
+              <input
+                type="checkbox"
+                checked={mode === 'conversational'}
+                onChange={(e) => setMode(e.target.checked ? 'conversational' : 'qa')}
+                className="mode-toggle-input"
+              />
+              <span className="mode-toggle-text">
+                {mode === 'qa' ? 'Q&A Mode' : 'Conversational Mode'}
+              </span>
+            </label>
+          </div>
+          {onCollapse && (
+            <button className="collapse-btn" onClick={onCollapse} title="Hide chat">
+              ▼
+            </button>
+          )}
         </div>
         {mode === 'conversational' && (
           <div className="expert-type-selector">
@@ -263,8 +274,24 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue })
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleSend()}
         />
-        <button className="send-button" onClick={handleSend}>
+        <button className="send-button" onClick={handleSend} title="Send message">
           ➤
+        </button>
+        <button
+          className="chat-mic-inline"
+          onClick={onMicClick}
+          title="AI mic"
+          aria-label="AI mic"
+        >
+          <span className="mic-icon-svg" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="presentation">
+              <circle cx="16" cy="16" r="14" fill="#0a0a0f" stroke="#16c782" strokeWidth="2.4" />
+              <rect x="12" y="8" width="8" height="12" rx="4" fill="#ffffff" />
+              <rect x="11" y="20" width="10" height="3" rx="1.5" fill="#16c782" />
+              <line x1="16" y1="23" x2="16" y2="27" stroke="#16c782" strokeWidth="2.4" strokeLinecap="round" />
+              <line x1="10" y1="27" x2="22" y2="27" stroke="#16c782" strokeWidth="2.4" strokeLinecap="round" />
+            </svg>
+          </span>
         </button>
       </div>
     </div>
