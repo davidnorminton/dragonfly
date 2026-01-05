@@ -1500,7 +1500,7 @@ body {
 .right-panel,
 .center-panel,
 .bottom-toolbar {
-  transition: transform 0.4s ease, opacity 0.35s ease;
+  transition: transform 0.8s ease, opacity 0.75s ease;
 }
 
 .app-shell.ai-focus .top-bar {
@@ -1529,7 +1529,7 @@ body {
 
 .app-shell.ai-focus .center-panel {
   opacity: 0;
-  transform: translateY(-60px);
+  transform: translateY(-80px);
   pointer-events: none;
 }
 
@@ -1541,7 +1541,7 @@ body {
   justify-content: center;
   background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.9) 70%);
   z-index: 1200;
-  animation: fadeInOverlay 0.35s ease forwards;
+  animation: fadeInOverlay 0.6s ease forwards;
 }
 
 .ai-focus-mic {
@@ -1555,7 +1555,7 @@ body {
   background: linear-gradient(135deg, #7f5af0 0%, #9a4dff 50%, #ff4d4d 100%);
   box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(127, 90, 240, 0.7);
   color: #fff;
-  animation: pulseMic 1.8s ease-in-out infinite;
+  animation: pulseMic 2.4s ease-in-out infinite;
 }
 
 @keyframes pulseMic {
@@ -1567,4 +1567,30 @@ body {
 @keyframes fadeInOverlay {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+.ai-focus-revert {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ai-focus-revert:hover {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 12px rgba(127, 90, 240, 0.6);
+  transform: translateX(-50%) translateY(-2px);
+}
+
+.ai-focus-revert:active {
+  transform: translateX(-50%) translateY(0);
 }

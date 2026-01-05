@@ -99,6 +99,13 @@ function App() {
       {aiFocusMode && (
         <div className="ai-focus-overlay">
           <div className="ai-focus-mic">🎤</div>
+          <button
+            className="ai-focus-revert"
+            onClick={toggleAiFocus}
+            title="Exit AI Focus"
+          >
+            Revert
+          </button>
         </div>
       )}
     </div>
