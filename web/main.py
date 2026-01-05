@@ -26,6 +26,7 @@ from config.persona_loader import list_available_personas, get_current_persona_n
 from config.location_loader import load_location_config, get_location_display_name, save_location_config
 from config.api_key_loader import load_api_keys, save_api_keys
 from config.expert_types_loader import list_expert_types
+from config.router_loader import load_router_config, save_router_config
 from services.rag_service import RAGService
 from services.tts_service import TTSService
 from services.ai_service import AIService
@@ -1010,6 +1011,32 @@ async def save_api_keys_config_endpoint(request: Request):
         return {"success": True, "message": "API keys config saved"}
     except Exception as e:
         logger.error(f"Error saving API keys config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/config/router")
+async def get_router_config_endpoint():
+    """Get router configuration."""
+    cfg = load_router_config()
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="router.config not found")
+    return cfg
+
+
+@app.put("/api/config/router")
+async def save_router_config_endpoint(request: Request):
+    """Save router configuration."""
+    try:
+        cfg = await request.json()
+        if not isinstance(cfg, dict):
+            raise HTTPException(status_code=400, detail="Router config must be a JSON object")
+        if not save_router_config(cfg):
+            raise HTTPException(status_code=500, detail="Failed to save router config")
+        return {"success": True, "message": "Router config saved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving router config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

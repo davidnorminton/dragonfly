@@ -49,6 +49,11 @@ export const locationAPI = {
   getLocation: () => api.get('/location').then(res => res.data),
 };
 
+export const routerAPI = {
+  getRouterConfig: () => api.get('/config/router').then(res => res.data),
+  saveRouterConfig: (config) => api.put('/config/router', config).then(res => res.data),
+};
+
 export const weatherAPI = {
   getWeather: () => api.get('/weather').then(res => res.data),
 };

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { configAPI, systemAPI } from '../services/api';
+import { configAPI, systemAPI, routerAPI } from '../services/api';
+import { useRouterConfig } from '../hooks/useRouterConfig';
 
 export function Settings({ open, onClose }) {
   const [activeTab, setActiveTab] = useState('personas');
@@ -16,6 +17,17 @@ export function Settings({ open, onClose }) {
   const [success, setSuccess] = useState(null);
   const [restarting, setRestarting] = useState(false);
   const [restartMsg, setRestartMsg] = useState('');
+  const [activeRouterTab, setActiveRouterTab] = useState('router');
+  const {
+    routerConfig,
+    setRouterConfig,
+    loading: routerLoading,
+    error: routerError,
+    saving: routerSaving,
+    success: routerSuccess,
+    saveRouter,
+    addRule,
+  } = useRouterConfig(activeRouterTab === 'router' && open);
 
   useEffect(() => {
     if (open) {
@@ -222,6 +234,12 @@ export function Settings({ open, onClose }) {
           >
             API Keys
           </button>
+          <button
+            className={activeTab === 'router' ? 'active' : ''}
+            onClick={() => setActiveTab('router')}
+          >
+            Router
+          </button>
         </div>
 
         <div className="settings-content">
@@ -254,6 +272,34 @@ export function Settings({ open, onClose }) {
               </div>
             )}
           </div>
+
+          {activeTab === 'router' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>Router Configuration</h3>
+                <div className="settings-panel-actions">
+                  <button onClick={addRule} className="save-button" disabled={routerLoading || routerSaving}>
+                    Add Rule Snippet
+                  </button>
+                  <button onClick={saveRouter} className="save-button" disabled={routerSaving || routerLoading}>
+                    {routerSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              {routerError && <div className="settings-message error">{routerError}</div>}
+              {routerSuccess && <div className="settings-message success">{routerSuccess}</div>}
+              {routerLoading ? (
+                <div className="loading">Loading router config...</div>
+              ) : (
+                <textarea
+                  value={routerConfig}
+                  onChange={(e) => setRouterConfig(e.target.value)}
+                  className="config-textarea"
+                  rows={20}
+                />
+              )}
+            </div>
+          )}
 
           {activeTab === 'personas' && (
             <div className="settings-panel">
