@@ -20,6 +20,10 @@ export function MusicPage() {
   const [popularMap, setPopularMap] = useState({});
   const [popularLoading, setPopularLoading] = useState(false);
   const [popularError, setPopularError] = useState('');
+  const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
+  const [playlistModalName, setPlaylistModalName] = useState('');
+  const [playlistModalExisting, setPlaylistModalExisting] = useState('');
+  const [pendingSong, setPendingSong] = useState(null);
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
 
@@ -179,16 +183,15 @@ export function MusicPage() {
       return ta - tb;
     });
 
+  const openPlaylistModal = (song = null) => {
+    setPendingSong(song);
+    setPlaylistModalName('');
+    setPlaylistModalExisting('');
+    setPlaylistModalOpen(true);
+  };
+
   const handleCreatePlaylist = () => {
-    const name = prompt('Playlist name?');
-    if (!name) return;
-    if (playlists.some((p) => p.name === name)) {
-      setSelectedPlaylist(name);
-      setViewMode('playlists');
-      return;
-    }
-    setPlaylists((prev) => [...prev, { name, songs: [] }]);
-    setSelectedPlaylist(name);
+    openPlaylistModal(null);
     setViewMode('playlists');
   };
 
@@ -206,24 +209,36 @@ export function MusicPage() {
     );
   };
 
-  const handleAddToPlaylist = (song) => {
-    if (!song) return;
-    let target = selectedPlaylist || playlists[0]?.name;
-    const name = prompt(
-      playlists.length
-        ? `Add to playlist. Enter existing name or new name:\nExisting: ${playlists.map((p) => p.name).join(', ')}`
-        : 'No playlists yet. Enter a name to create one:'
-      ,
-      target || ''
-    );
+  const confirmPlaylistAdd = () => {
+    const name = (playlistModalExisting || playlistModalName).trim();
     if (!name) return;
-    if (!playlists.some((p) => p.name === name)) {
-      setPlaylists((prev) => [...prev, { name, songs: [song] }]);
+    const song = pendingSong;
+    if (song) {
+      if (!playlists.some((p) => p.name === name)) {
+        setPlaylists((prev) => [...prev, { name, songs: [song] }]);
+      } else {
+        upsertPlaylistWithSong(name, song);
+      }
     } else {
-      upsertPlaylistWithSong(name, song);
+      if (!playlists.some((p) => p.name === name)) {
+        setPlaylists((prev) => [...prev, { name, songs: [] }]);
+      }
     }
     setSelectedPlaylist(name);
     setViewMode('playlists');
+    setPlaylistModalOpen(false);
+    setPendingSong(null);
+  };
+
+  const handleAddToPlaylist = (song, albumName, artistName) => {
+    if (!song) return;
+    const enriched = {
+      ...song,
+      album: song.album || song.album_title || albumName || song.albumName,
+      artist: song.artist || song.artistName || artistName || song.artist_name,
+    };
+    setPendingSong(enriched);
+    openPlaylistModal(enriched);
   };
 
   const currentPopular = selectedArtist ? popularMap[selectedArtist] || [] : [];
@@ -706,14 +721,18 @@ export function MusicPage() {
                           <span className="col-index">{song.track_number || idx + 1}</span>
                           <span className="col-title">{song.name}</span>
                           <span className="col-artist">{song.artist || song.artistName || song.artist_name || currentArtist?.name || ''}</span>
-                          <span className="col-length">{song.album || song.album_title || ''}</span>
+                          <span className="col-length">{song.album || song.album_title || song.albumName || ''}</span>
                           <span className="col-length">{formatTime(dur)}</span>
                           <button
                             className="track-add"
                             title="Add to playlist"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleAddToPlaylist(song);
+                              handleAddToPlaylist(
+                                song,
+                                song.album || song.album_title || song.albumName || '',
+                                song.artist || song.artistName || song.artist_name || currentArtist?.name || ''
+                              );
                             }}
                           >
                             +
@@ -863,6 +882,51 @@ export function MusicPage() {
           </div>
         </div>
       </div>
+
+      {playlistModalOpen && (
+        <div className="playlist-modal-overlay" onClick={() => setPlaylistModalOpen(false)}>
+          <div className="playlist-modal" onClick={(e) => e.stopPropagation()}>
+            <h4>{pendingSong ? 'Add to playlist' : 'Create playlist'}</h4>
+            {playlists.length > 0 && (
+              <div className="form-group">
+                <label>Select existing</label>
+                <select
+                  value={playlistModalExisting}
+                  onChange={(e) => setPlaylistModalExisting(e.target.value)}
+                >
+                  <option value="">-- none --</option>
+                  {playlists.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="form-group">
+              <label>Or create new</label>
+              <input
+                type="text"
+                placeholder="Playlist name"
+                value={playlistModalName}
+                onChange={(e) => setPlaylistModalName(e.target.value)}
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="save-button secondary" onClick={() => setPlaylistModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="save-button"
+                onClick={confirmPlaylistAdd}
+                disabled={!playlistModalExisting && !playlistModalName.trim()}
+              >
+                {pendingSong ? 'Add' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
