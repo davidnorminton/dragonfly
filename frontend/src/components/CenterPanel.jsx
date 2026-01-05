@@ -7,6 +7,21 @@ export function CenterPanel({ audioUrl, onAudioUrlChange }) {
   const [summaries, setSummaries] = useState({});
   const [loadingSummaries, setLoadingSummaries] = useState({});
 
+  // Hydrate summaries from backend data when news changes
+  useEffect(() => {
+    if (news && news.articles && news.articles.length > 0) {
+      const fromBackend = {};
+      news.articles.forEach((article, idx) => {
+        if (article.summary) {
+          fromBackend[idx] = article.summary;
+        }
+      });
+      if (Object.keys(fromBackend).length > 0) {
+        setSummaries(prev => ({ ...fromBackend, ...prev }));
+      }
+    }
+  }, [news]);
+
   const formatDate = (dateString) => {
     if (!dateString) return '';
     try {
