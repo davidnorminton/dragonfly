@@ -190,13 +190,14 @@ async def restart_system():
 async def router_route(request: Request):
     """
     Dispatch a router decision to a concrete action.
-    Expected payload: { "type": "...", "value": "..." }
+    Expected payload: { "type": "...", "value": "...", "mode": "qa|conversational" }
     """
     try:
         payload = await request.json()
         route_type = payload.get("type")
         route_value = payload.get("value")
-        result = route_request(route_type, route_value)
+        mode = payload.get("mode", "qa")
+        result = route_request(route_type, route_value, mode=mode)
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "Routing failed"))
         return result

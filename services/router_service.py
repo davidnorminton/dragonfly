@@ -2,9 +2,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 from services.ai_service import AIService
+from services.rag_service import RAGService
 
 
-def route_request(route_type: str, route_value: str) -> Dict[str, Any]:
+def route_request(route_type: str, route_value: str, mode: str = "qa") -> Dict[str, Any]:
     """
     Simple router that dispatches based on type/value coming from the AI router.
 
@@ -39,13 +40,26 @@ def route_request(route_type: str, route_value: str) -> Dict[str, Any]:
     if route_type == "question":
         if not val:
             return {"success": False, "error": "Missing question text"}
+        if mode == "conversational":
+            rag = RAGService()
+            rag.reload_persona_config()
+            resp = rag.execute({"question": val})
+            return {
+                "success": True,
+                "route": "question",
+                "result": resp.get("answer"),
+                "model": resp.get("model") or resp.get("service"),
+                "mode": mode,
+            }
         ai = AIService()
+        ai.reload_persona_config()
         resp = ai.execute({"question": val})
         return {
-          "success": True,
-          "route": "question",
-          "result": resp.get("answer"),
-          "model": resp.get("model") or resp.get("service"),
+            "success": True,
+            "route": "question",
+            "result": resp.get("answer"),
+            "model": resp.get("model") or resp.get("service"),
+            "mode": mode,
         }
 
     return {"success": False, "error": f"Unsupported route type: {route_type}"}
