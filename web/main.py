@@ -1168,8 +1168,9 @@ async def summarize_article(request: Request):
                     latest_news_data = news_result.scalar_one_or_none()
                     
                     if latest_news_data and latest_news_data.data:
-                        # Make a shallow copy so SQLAlchemy sees JSON change
-                        data_copy = dict(latest_news_data.data)
+                        # Deep copy to ensure SQLAlchemy detects JSON change
+                        import copy
+                        data_copy = copy.deepcopy(latest_news_data.data)
                         articles = data_copy.get("data", {}).get("articles", [])
                         for article in articles:
                             if article.get("link") == url:
