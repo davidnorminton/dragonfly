@@ -690,7 +690,8 @@ export function MusicPage() {
                     <div className="tracklist-header">
                       <span className="col-index">#</span>
                       <span className="col-title">Title</span>
-                      <span className="col-length">Length</span>
+                      <span className="col-artist">Artist</span>
+                      <span className="col-length">Album</span>
                       <span className="col-add" />
                     </div>
                     {currentPlaylist.songs.map((song, idx) => {
@@ -704,6 +705,8 @@ export function MusicPage() {
                         >
                           <span className="col-index">{song.track_number || idx + 1}</span>
                           <span className="col-title">{song.name}</span>
+                          <span className="col-artist">{song.artist || song.artistName || song.artist_name || currentArtist?.name || ''}</span>
+                          <span className="col-length">{song.album || song.album_title || ''}</span>
                           <span className="col-length">{formatTime(dur)}</span>
                           <button
                             className="track-add"
@@ -787,6 +790,7 @@ export function MusicPage() {
                         <div className="tracklist-header">
                           <span className="col-index">#</span>
                           <span className="col-title">Title</span>
+                          <span className="col-artist">Artist</span>
                           <span className="col-length">Length</span>
                           <span className="col-add" />
                         </div>
@@ -801,6 +805,7 @@ export function MusicPage() {
                             >
                               <span className="col-index">{song.track_number || idx + 1}</span>
                               <span className="col-title">{song.name}</span>
+                              <span className="col-artist">{song.artist || album.artistName}</span>
                               <span className="col-length">{formatTime(dur)}</span>
                               <button
                                 className="track-add"
