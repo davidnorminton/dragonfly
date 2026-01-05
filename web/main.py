@@ -152,15 +152,25 @@ def _parse_router_answer(answer: Optional[str]) -> Optional[Dict[str, Any]]:
 @app.post("/api/system/restart")
 async def restart_system():
     """
-    Schedule a server restart. Returns immediately, then exits the process.
+    Schedule a server restart. Returns immediately, then spawns a new process and exits.
     Frontend should clear caches and reload after calling this.
     """
     try:
-        loop = asyncio.get_event_loop()
-        loop.call_later(0.5, lambda: os._exit(0))
+        def _restart():
+            try:
+                cmd = [sys.executable] + sys.argv
+                env = os.environ.copy()
+                cwd = os.getcwd()
+                logger.info(f"Spawning new process for restart: {cmd} (cwd={cwd})")
+                subprocess.Popen(cmd, env=env, cwd=cwd)
+            finally:
+                os._exit(0)
+
+        # Run restart in a separate thread after a short delay to let the response flush
+        threading.Timer(0.5, _restart).start()
         return {"success": True, "message": "Server restart scheduled"}
     except Exception as e:
-        logger.error(f"Failed to schedule restart: {e}")
+        logger.error(f"Failed to schedule restart: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to schedule restart")
 
 def get_system_uptime() -> float:
