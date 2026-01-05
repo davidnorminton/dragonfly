@@ -138,6 +138,8 @@ def _parse_router_answer(answer: Optional[str]) -> Optional[Dict[str, Any]]:
         trimmed = answer.strip()
         if trimmed.startswith("```"):
             trimmed = trimmed.strip("`").strip()
+            if trimmed.lower().startswith("json"):
+                trimmed = trimmed[4:].lstrip()
             try:
                 return json.loads(trimmed)
             except Exception:
