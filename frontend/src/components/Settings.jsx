@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { configAPI } from '../services/api';
+import { configAPI, systemAPI } from '../services/api';
 
 export function Settings({ open, onClose }) {
   const [activeTab, setActiveTab] = useState('personas');
