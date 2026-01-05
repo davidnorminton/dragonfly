@@ -30,6 +30,7 @@ from config.router_loader import load_router_config, save_router_config
 from services.rag_service import RAGService
 from services.tts_service import TTSService
 from services.ai_service import AIService
+from services.router_service import route_request
 from data_collectors.weather_collector import WeatherCollector
 from data_collectors.news_collector import NewsCollector
 from data_collectors.traffic_collector import TrafficCollector
@@ -48,6 +49,7 @@ import sys
 import threading
 from anthropic import AsyncAnthropic
 import signal
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +184,27 @@ async def restart_system():
     except Exception as e:
         logger.error(f"Failed to schedule restart: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to schedule restart")
+
+
+@app.post("/api/router/route")
+async def router_route(request: Request):
+    """
+    Dispatch a router decision to a concrete action.
+    Expected payload: { "type": "...", "value": "..." }
+    """
+    try:
+        payload = await request.json()
+        route_type = payload.get("type")
+        route_value = payload.get("value")
+        result = route_request(route_type, route_value)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Routing failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Router dispatch failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Router dispatch failed")
 
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""
