@@ -19,14 +19,25 @@ export function Settings({ open, onClose }) {
   const [restartMsg, setRestartMsg] = useState('');
   const [activeRouterTab, setActiveRouterTab] = useState('router');
   const {
-    routerConfig,
-    setRouterConfig,
+    model,
+    temperature,
+    topP,
+    maxTokens,
+    basePrompt,
+    rules,
+    setModel,
+    setTemperature,
+    setTopP,
+    setMaxTokens,
+    setBasePrompt,
     loading: routerLoading,
     error: routerError,
     saving: routerSaving,
     success: routerSuccess,
     saveRouter,
     addRule,
+    updateRule,
+    removeRule,
   } = useRouterConfig(activeRouterTab === 'router' && open);
 
   useEffect(() => {
@@ -279,7 +290,7 @@ export function Settings({ open, onClose }) {
                 <h3>Router Configuration</h3>
                 <div className="settings-panel-actions">
                   <button onClick={addRule} className="save-button" disabled={routerLoading || routerSaving}>
-                    Add Rule Snippet
+                    + Add Rule
                   </button>
                   <button onClick={saveRouter} className="save-button" disabled={routerSaving || routerLoading}>
                     {routerSaving ? 'Saving…' : 'Save'}
@@ -291,12 +302,70 @@ export function Settings({ open, onClose }) {
               {routerLoading ? (
                 <div className="loading">Loading router config...</div>
               ) : (
-                <textarea
-                  value={routerConfig}
-                  onChange={(e) => setRouterConfig(e.target.value)}
-                  className="config-textarea"
-                  rows={20}
-                />
+                <>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label>Model</label>
+                      <input value={model} onChange={(e) => setModel(e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label>Temperature</label>
+                      <input value={temperature} onChange={(e) => setTemperature(e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label>Top P</label>
+                      <input value={topP} onChange={(e) => setTopP(e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label>Max Tokens</label>
+                      <input value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>Prompt Context (base, rules added below)</label>
+                    <textarea
+                      value={basePrompt}
+                      onChange={(e) => setBasePrompt(e.target.value)}
+                      className="config-textarea"
+                      rows={10}
+                    />
+                  </div>
+                  <div className="rules-list">
+                    <div className="rules-header">
+                      <span>Trigger</span>
+                      <span>Type</span>
+                      <span>Value</span>
+                      <span />
+                    </div>
+                    {rules.map((rule, idx) => (
+                      <div key={idx} className="rule-row">
+                        <div className="rule-index">#{idx + 1}</div>
+                        <input
+                          placeholder="trigger"
+                          value={rule.trigger}
+                          onChange={(e) => updateRule(idx, 'trigger', e.target.value)}
+                        />
+                        <input
+                          placeholder="type (task|question)"
+                          value={rule.type}
+                          onChange={(e) => updateRule(idx, 'type', e.target.value)}
+                        />
+                        <input
+                          placeholder="value"
+                          value={rule.value}
+                          onChange={(e) => updateRule(idx, 'value', e.target.value)}
+                        />
+                        <button
+                          className="delete-button"
+                          onClick={() => removeRule(idx)}
+                          disabled={rules.length <= 1}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}
