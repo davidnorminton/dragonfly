@@ -27,6 +27,7 @@ from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, Coll
 from sqlalchemy import select, desc, func, or_
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
+from pydantic import BaseModel
 from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config, save_persona_config, create_persona_config
 from config.location_loader import load_location_config, get_location_display_name, save_location_config
 from config.api_key_loader import load_api_keys, save_api_keys
@@ -531,6 +532,144 @@ async def music_metadata(path: str):
     except Exception:
         dur = 0
     return {"duration": dur}
+
+
+class PopularRequest(BaseModel):
+    artist: str
+
+
+def _extract_json_object(payload: str):
+    if not payload:
+        return None
+    try:
+        return json.loads(payload)
+    except Exception:
+        pass
+    try:
+        start = payload.find("{")
+        end = payload.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(payload[start : end + 1])
+    except Exception:
+        return None
+    return None
+
+
+def _match_popular_items(ai_items: List[Dict[str, Any]], songs_data: List[Dict[str, Any]]):
+    matched = []
+    seen_paths = set()
+    for entry in ai_items or []:
+        title = (entry.get("title") or entry.get("name") or "").strip()
+        album = (entry.get("album") or entry.get("album_title") or "").strip()
+        if not title:
+            continue
+        title_l = title.lower()
+        album_l = album.lower() if album else None
+        candidate = None
+        if album_l:
+            candidate = next(
+                (s for s in songs_data if s["title"].lower() == title_l and s["album"].lower() == album_l),
+                None,
+            )
+        if not candidate:
+            candidate = next((s for s in songs_data if s["title"].lower() == title_l), None)
+        if candidate and candidate["path"] not in seen_paths:
+            matched.append(candidate)
+            seen_paths.add(candidate["path"])
+        if len(matched) >= 20:
+            break
+    return matched
+
+
+@app.get("/api/music/popular")
+async def get_music_popular(artist: str):
+    """
+    Return cached popular songs for the artist from DB (extra_metadata.popular_songs).
+    """
+    async with AsyncSessionLocal() as session:
+        artist_row = await session.scalar(
+            select(MusicArtist).where(func.lower(MusicArtist.name) == artist.lower())
+        )
+        if not artist_row:
+            raise HTTPException(status_code=404, detail="Artist not found")
+        meta = artist_row.extra_metadata or {}
+        popular = meta.get("popular_songs") or []
+        return {"success": True, "popular": popular}
+
+
+@app.post("/api/music/popular")
+async def generate_music_popular(req: PopularRequest):
+    """
+    Use AI to pick up to 20 popular songs from the albums we have for an artist.
+    Stores the list in artist.extra_metadata.popular_songs and returns it.
+    """
+    artist_name = req.artist.strip()
+    if not artist_name:
+        raise HTTPException(status_code=400, detail="artist is required")
+
+    async with AsyncSessionLocal() as session:
+        artist_row = await session.scalar(
+            select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
+        )
+        if not artist_row:
+            raise HTTPException(status_code=404, detail="Artist not found")
+
+        result = await session.execute(
+            select(MusicSong, MusicAlbum)
+            .join(MusicAlbum, MusicSong.album_id == MusicAlbum.id)
+            .where(MusicSong.artist_id == artist_row.id)
+        )
+        rows = result.all()
+        if not rows:
+            return {"success": False, "error": "No songs found for this artist"}
+
+        songs_data = []
+        albums_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for song, album in rows:
+            item = {
+                "title": song.title,
+                "album": album.title,
+                "track_number": song.track_number,
+                "duration": song.duration_seconds,
+                "path": song.file_path,
+            }
+            songs_data.append(item)
+            albums_map[album.title].append(item)
+
+        lines = [
+            f"You are selecting the most popular songs for artist '{artist_name}'.",
+            "Only choose songs that appear in the provided list. If you are unsure, skip it.",
+            'Return STRICT JSON: {"songs": [{"title": "song title", "album": "album title"}]} with at most 20 items.',
+            "Do not include songs not listed here.",
+            "Albums and songs we have:",
+        ]
+        for album_title, tracks in albums_map.items():
+            sorted_tracks = sorted(tracks, key=lambda t: t.get("track_number") or 9999)
+            lines.append(f"- Album: {album_title}")
+            for t in sorted_tracks:
+                tn = t.get("track_number")
+                tn_str = f"{tn}. " if tn else ""
+                lines.append(f"  - {tn_str}{t['title']}")
+        prompt = "\n".join(lines)
+
+        ai = AIService()
+        ai.reload_persona_config()
+        ai_resp = await ai.execute({"question": prompt})
+        raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
+        parsed = _extract_json_object(raw_answer) or {}
+        popular_items = parsed.get("songs") if isinstance(parsed, dict) else None
+        matched = _match_popular_items(popular_items or [], songs_data)
+
+        # Fallback to first 10 tracks if AI failed
+        if not matched:
+            matched = songs_data[:10]
+
+        artist_row.extra_metadata = artist_row.extra_metadata or {}
+        artist_row.extra_metadata["popular_songs"] = matched
+        flag_modified(artist_row, "extra_metadata")
+        await session.commit()
+
+        return {"success": True, "popular": matched}
 
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""

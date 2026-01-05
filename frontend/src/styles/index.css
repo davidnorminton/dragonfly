@@ -2144,6 +2144,23 @@ body {
   padding: 6px 4px 10px;
 }
 
+.popular-section {
+  margin-bottom: 12px;
+}
+
+.popular-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.popular-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .playlist-add-btn {
   background: rgba(102, 126, 234, 0.2);
   color: #e0e0e0;
@@ -2157,6 +2174,11 @@ body {
 .playlist-add-btn:hover {
   background: rgba(102, 126, 234, 0.35);
   border-color: rgba(255, 255, 255, 0.2);
+}
+
+.music-error-inline {
+  color: #ff9b9b;
+  padding: 6px 8px;
 }
 
 .artist-thumb {
@@ -2208,7 +2230,7 @@ body {
 
 .tracklist-header {
   display: grid;
-  grid-template-columns: 40px 1fr 80px;
+  grid-template-columns: 40px 1fr 80px 40px;
   color: #9da7b8;
   font-size: 0.85em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);

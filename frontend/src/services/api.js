@@ -58,6 +58,8 @@ export const routerAPI = {
 export const musicAPI = {
   scanMusic: () => api.get('/music/scan').then(res => res.data),
   getMetadata: (path) => api.get('/music/metadata', { params: { path } }).then(res => res.data),
+  getPopular: (artist) => api.get('/music/popular', { params: { artist } }).then(res => res.data),
+  generatePopular: (artist) => api.post('/music/popular', { artist }).then(res => res.data),
 };
 
 export const weatherAPI = {

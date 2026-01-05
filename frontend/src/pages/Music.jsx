@@ -17,6 +17,9 @@ export function MusicPage() {
   const [lengths, setLengths] = useState({});
   const [playlists, setPlaylists] = useState([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+  const [popularMap, setPopularMap] = useState({});
+  const [popularLoading, setPopularLoading] = useState(false);
+  const [popularError, setPopularError] = useState('');
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
 
@@ -212,6 +215,44 @@ export function MusicPage() {
     setViewMode('playlists');
   };
 
+  const currentPopular = selectedArtist ? popularMap[selectedArtist] || [] : [];
+
+  const fetchPopular = async (artistName) => {
+    if (!artistName) return;
+    setPopularError('');
+    setPopularLoading(true);
+    try {
+      const res = await musicAPI.getPopular(artistName);
+      if (res.success) {
+        setPopularMap((prev) => ({ ...prev, [artistName]: res.popular || [] }));
+      } else {
+        setPopularError(res.error || 'Failed to load popular songs');
+      }
+    } catch (e) {
+      setPopularError(e?.message || 'Failed to load popular songs');
+    } finally {
+      setPopularLoading(false);
+    }
+  };
+
+  const handleGeneratePopular = async () => {
+    if (!selectedArtist) return;
+    setPopularError('');
+    setPopularLoading(true);
+    try {
+      const res = await musicAPI.generatePopular(selectedArtist);
+      if (res.success) {
+        setPopularMap((prev) => ({ ...prev, [selectedArtist]: res.popular || [] }));
+      } else {
+        setPopularError(res.error || 'Failed to generate popular songs');
+      }
+    } catch (e) {
+      setPopularError(e?.message || 'Failed to generate popular songs');
+    } finally {
+      setPopularLoading(false);
+    }
+  };
+
   const guessArtistDirectoryFromSongs = (artist) => {
     const firstSongPath = artist?.albums?.[0]?.songs?.[0]?.path;
     if (!firstSongPath) return null;
@@ -405,6 +446,12 @@ export function MusicPage() {
     };
     fetchLengths();
   }, [currentArtist, lengths]);
+
+  useEffect(() => {
+    if (viewMode === 'playlists') return;
+    if (!selectedArtist) return;
+    fetchPopular(selectedArtist);
+  }, [selectedArtist, viewMode]);
 
   const handleAlbumSelect = (artistName, albumName) => {
     setSelectedArtist(artistName);
@@ -648,6 +695,59 @@ export function MusicPage() {
                 )
               ) : (
                 <>
+                  <div className="album-section popular-section">
+                    <div className="album-section-title popular-title">
+                      <span>Popular</span>
+                      <div className="popular-actions">
+                        <button className="playlist-add-btn" onClick={handleGeneratePopular} disabled={popularLoading}>
+                          {popularLoading ? 'Loading…' : 'Refresh'}
+                        </button>
+                      </div>
+                    </div>
+                    {popularError && <div className="music-error-inline">{popularError}</div>}
+                    {!popularLoading && !popularError && !currentPopular.length && (
+                      <div className="music-empty">Click Refresh to fetch popular songs</div>
+                    )}
+                    {popularLoading && <div className="music-empty">Loading popular songs…</div>}
+                    {currentPopular.length > 0 && (
+                      <>
+                        <div className="tracklist-header">
+                          <span className="col-index">#</span>
+                          <span className="col-title">Title</span>
+                          <span className="col-length">Length</span>
+                          <span className="col-add" />
+                        </div>
+                        {currentPopular.map((song, idx) => {
+                          const active = playlist[currentIndex]?.path === song.path;
+                          const dur = song.duration ?? song.duration_seconds ?? lengths[song.path];
+                          return (
+                            <div
+                              key={`${song.path}-${idx}`}
+                              className={`track-row ${active ? 'active' : ''}`}
+                              onClick={() => handleSongClick(currentPopular, idx)}
+                            >
+                              <span className="col-index">{song.track_number || idx + 1}</span>
+                              <span className="col-title">{song.title || song.name}</span>
+                              <span className="col-length">{formatTime(dur)}</span>
+                              <button
+                                className="track-add"
+                                title="Add to playlist"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAddToPlaylist({
+                                    ...song,
+                                    name: song.title || song.name,
+                                  });
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
                   {sortedAlbums.map((album) => {
                     const songsSorted = sortSongs(album.songs || []);
                     return (
