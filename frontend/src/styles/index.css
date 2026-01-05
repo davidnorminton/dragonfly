@@ -1183,6 +1183,16 @@ body {
   font-weight: 700;
 }
 
+.rules-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin: 8px 0;
+}
+
+.rules-actions.bottom {
+  justify-content: flex-end;
+}
+
 .loading {
   padding: 40px;
   text-align: center;
