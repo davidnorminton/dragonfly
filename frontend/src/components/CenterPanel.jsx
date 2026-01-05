@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNews } from '../hooks/useNews';
 import { newsAPI } from '../services/api';
 
