@@ -119,12 +119,10 @@ export function useRouterConfig(open) {
             : String(anth.max_tokens),
         );
         const rawPrompt = anth.prompt_context || '';
-        const decodedPrompt = rawPrompt.includes('\\n') && !rawPrompt.includes('\n\n')
-          ? rawPrompt.replace(/\\n/g, '\n')
-          : rawPrompt;
+        const decodedPrompt = (rawPrompt || '').replace(/\\n/g, '\n');
         const { rules: parsedRules, basePrompt: bp } = extractRules(decodedPrompt || '');
         const base = (bp && bp.trim()) ? bp : DEFAULT_BASE_PROMPT;
-        const parsedOrDefault = parsedRules.length ? parsedRules : DEFAULT_RULES;
+        const parsedOrDefault = parsedRules.length >= DEFAULT_RULES.length ? parsedRules : DEFAULT_RULES;
         setBasePrompt(base);
         setRules(parsedOrDefault);
       } catch (err) {
