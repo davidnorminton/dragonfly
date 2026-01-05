@@ -9,6 +9,7 @@ const DEFAULT_BASE_PROMPT = [
   '  • Each rule has a trigger (the input text or pattern) and a type (task or question).',
   '  • When input matches a rule, return a JSON object with type and value.',
   '  • If input does not match any rule, classify it as a question by default.',
+  '  • Each rule also has a reason: use it to confirm you chose the correct rule and to guide similar future queries. If multiple rules seem similar, pick the one whose reason best matches the user intent.',
   '',
   'Rules list (example):',
 ].join('\n');
