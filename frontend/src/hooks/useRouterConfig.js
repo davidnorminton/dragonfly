@@ -18,6 +18,11 @@ const DEFAULT_RULES = [
     type: 'question',
     value: 'what is the capital of china',
   },
+  {
+    trigger: 'get date',
+    type: 'task',
+    value: 'get_date',
+  },
 ];
 
 // Parse rules from prompt_context by scanning lines for trigger/type/value triplets.
