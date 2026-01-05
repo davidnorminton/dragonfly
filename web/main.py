@@ -15,6 +15,7 @@ from services.ai_service import AIService
 from database.base import AsyncSessionLocal
 from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData
 from sqlalchemy import select, desc, func, or_
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
 from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config, save_persona_config, create_persona_config
 from config.location_loader import load_location_config, get_location_display_name, save_location_config
@@ -1179,6 +1180,7 @@ async def summarize_article(request: Request):
                         
                         data_copy.setdefault("data", {})["articles"] = articles
                         latest_news_data.data = data_copy
+                        flag_modified(latest_news_data, "data")
                         await session.commit()
                         logger.info(f"Stored summary for article: {url}")
             except Exception as db_error:
