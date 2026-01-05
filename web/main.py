@@ -298,11 +298,20 @@ def _extract_audio_meta(path: Path) -> Dict[str, Any]:
 async def _persist_music(tree_songs: list):
     """Persist artists/albums/songs into the database."""
     async with AsyncSessionLocal() as session:
+        def to_int(val):
+            if val is None:
+                return None
+            try:
+                return int(str(val).split("-")[0])
+            except Exception:
+                return None
+
         for item in tree_songs:
             artist_name = item["artist"]
             album_title = item["album"]
             song_title = item["title"]
             meta = item.get("meta", {})
+            year_val = to_int(meta.get("year"))
 
             # Artist
             artist_stmt = select(MusicArtist).where(MusicArtist.name == artist_name)
@@ -321,7 +330,7 @@ async def _persist_music(tree_songs: list):
                 album = MusicAlbum(
                     artist_id=artist.id,
                     title=album_title,
-                    year=(meta.get("year") or None),
+                    year=year_val,
                     genre=meta.get("genre"),
                     cover_path=item.get("album_image"),
                     extra_metadata=meta,
@@ -329,7 +338,7 @@ async def _persist_music(tree_songs: list):
                 session.add(album)
                 await session.flush()
             else:
-                album.year = meta.get("year") or album.year
+                album.year = year_val or album.year
                 album.genre = album.genre or meta.get("genre")
                 if item.get("album_image"):
                     album.cover_path = item.get("album_image")
@@ -354,7 +363,7 @@ async def _persist_music(tree_songs: list):
                     channels=meta.get("channels"),
                     codec=meta.get("codec"),
                     genre=meta.get("genre"),
-                    year=meta.get("year"),
+                    year=year_val,
                     extra_metadata=meta,
                 )
                 session.add(song)
