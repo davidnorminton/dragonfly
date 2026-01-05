@@ -1,6 +1,25 @@
 import { useState, useEffect } from 'react';
 import { routerAPI } from '../services/api';
 
+const DEFAULT_BASE_PROMPT =
+  '# === System message ===\\n' +
+  'You are an AI assistant designed to classify input and return a JSON object describing the type of request. You only output JSON. Do not add extra text.\\n\\n' +
+  'Rules:\\n  • Each rule has a trigger (the input text or pattern) and a type (task or question).\\n  • When input matches a rule, return a JSON object with type and value.\\n  • If input does not match any rule, classify it as a question by default.\\n\\n' +
+  'Rules list (example):\\n';
+
+const DEFAULT_RULES = [
+  {
+    trigger: 'get time',
+    type: 'task',
+    value: 'get_time',
+  },
+  {
+    trigger: 'what is the capital of china',
+    type: 'question',
+    value: 'what is the capital of china',
+  },
+];
+
 // Parse rules from prompt_context by scanning lines for trigger/type/value triplets.
 function extractRules(prompt) {
   const rules = [];
@@ -89,8 +108,10 @@ export function useRouterConfig(open) {
             : String(anth.max_tokens),
         );
         const { rules: parsedRules, basePrompt: bp } = extractRules(anth.prompt_context || '');
-        setBasePrompt(bp);
-        setRules(parsedRules.length ? parsedRules : [{ trigger: '', type: '', value: '' }]);
+        const base = (bp && bp.trim()) ? bp : DEFAULT_BASE_PROMPT;
+        const parsedOrDefault = parsedRules.length ? parsedRules : DEFAULT_RULES;
+        setBasePrompt(base);
+        setRules(parsedOrDefault);
       } catch (err) {
         console.error('Error loading router config:', err);
         setError('Failed to load router config');
