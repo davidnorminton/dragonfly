@@ -240,14 +240,18 @@ export function MusicPage() {
     setPopularError('');
     setPopularLoading(true);
     try {
+      console.log('Popular refresh: requesting generatePopular for', selectedArtist);
       const res = await musicAPI.generatePopular(selectedArtist);
+      console.log('Popular refresh response:', res);
       if (res.success) {
         setPopularMap((prev) => ({ ...prev, [selectedArtist]: res.popular || [] }));
       } else {
         setPopularError(res.error || 'Failed to generate popular songs');
+        console.error('Popular refresh failed:', res);
       }
     } catch (e) {
       setPopularError(e?.message || 'Failed to generate popular songs');
+      console.error('Popular refresh exception:', e);
     } finally {
       setPopularLoading(false);
     }
