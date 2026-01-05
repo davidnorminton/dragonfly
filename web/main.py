@@ -15,6 +15,7 @@ from services.ai_service import AIService
 from database.base import AsyncSessionLocal
 from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData
 from sqlalchemy import select, desc, func, or_
+from sqlalchemy.exc import OperationalError
 from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config, save_persona_config, create_persona_config
 from config.location_loader import load_location_config, get_location_display_name, save_location_config
 from config.api_key_loader import load_api_keys, save_api_keys
@@ -358,154 +359,194 @@ async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optiona
 @app.post("/api/chat")
 async def send_chat_message(request: Request):
     """Send a chat message and get AI response (streaming)."""
-    data = await request.json()
-    message = data.get("message")
-    session_id = data.get("session_id")
-    mode = data.get("mode", "qa")  # "qa" or "conversational"
-    expert_type = data.get("expert_type", "general")  # Expert type for conversational mode
-    service_name = data.get("service_name")  # Deprecated, use mode instead
-    stream = data.get("stream", True)
-    
-    if not message:
-        raise HTTPException(status_code=400, detail="Message is required")
-    
-    # Determine service based on mode
-    if mode == "conversational":
-        actual_service_name = "rag_service"
-    else:
-        actual_service_name = "ai_service"
-    
-    # Backward compatibility: if service_name is explicitly set, use it
-    if service_name:
-        actual_service_name = service_name
-    
-    # Save user message
-    async with AsyncSessionLocal() as session:
-        current_persona = get_current_persona_name()
-        user_msg = ChatMessage(
-            session_id=session_id,
-            role="user",
-            message=message,
-            service_name=actual_service_name,
-            mode=mode,
-            persona=current_persona
-        )
-        session.add(user_msg)
-        await session.commit()
-    
-    # For streaming responses (AI service - Q&A mode)
-    if stream and actual_service_name == "ai_service":
-        ai_service = AIService()
-        ai_service.reload_persona_config()  # Ensure we have the latest persona
-        input_data = {"question": message}
-        
-        async def generate_response():
-            full_response = ""
+    async def save_chat_message_with_retry(
+        *, session_id: str, role: str, message_text: str, service_name: str, mode: str, persona: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> ChatMessage:
+        """Persist a chat message with simple retries to avoid transient SQLite locks."""
+        last_exc = None
+        for attempt in range(3):
             try:
-                loop = asyncio.get_event_loop()
-                
-                def run_generator():
-                    return list(ai_service.stream_execute(input_data))
-                
-                chunks = await loop.run_in_executor(None, run_generator)
-                
-                for chunk in chunks:
-                    full_response += chunk
-                    yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
-                
-                # Save complete response
                 async with AsyncSessionLocal() as session:
-                    current_persona = get_current_persona_name()
-                    assistant_msg = ChatMessage(
+                    msg = ChatMessage(
                         session_id=session_id,
-                        role="assistant",
-                        message=full_response,
+                        role=role,
+                        message=message_text,
                         service_name=service_name,
                         mode=mode,
-                        persona=current_persona
+                        persona=persona,
+                        message_metadata=metadata or {},
                     )
-                    session.add(assistant_msg)
+                    session.add(msg)
                     await session.commit()
+                    return msg
+            except OperationalError as exc:  # pragma: no cover - depends on DB state
+                last_exc = exc
+                logger.warning(f"Database busy when saving {role} message (attempt {attempt + 1}/3): {exc}")
+                await asyncio.sleep(0.5 * (attempt + 1))
+        logger.error(f"Failed to save {role} message after retries", exc_info=last_exc)
+        raise HTTPException(status_code=503, detail="Database is busy, please try again.")
+
+    try:
+        data = await request.json()
+        message = data.get("message")
+        session_id = data.get("session_id")
+        mode = data.get("mode", "qa")  # "qa" or "conversational"
+        expert_type = data.get("expert_type", "general")  # Expert type for conversational mode
+        service_name = data.get("service_name")  # Deprecated, use mode instead
+        stream = data.get("stream", True)
+        
+        logger.info(f"Chat request received: message='{message[:50] if message else None}', mode={mode}, stream={stream}")
+        
+        if not message:
+            raise HTTPException(status_code=400, detail="Message is required")
+        
+        # Determine service based on mode
+        if mode == "conversational":
+            actual_service_name = "rag_service"
+        else:
+            actual_service_name = "ai_service"
+        
+        # Backward compatibility: if service_name is explicitly set, use it
+        if service_name:
+            actual_service_name = service_name
+        
+        logger.info(f"Using service: {actual_service_name}")
+        
+        # Save user message (retry on transient DB locks)
+        current_persona = get_current_persona_name()
+        try:
+            await asyncio.wait_for(
+                save_chat_message_with_retry(
+                    session_id=session_id,
+                    role="user",
+                    message_text=message,
+                    service_name=actual_service_name,
+                    mode=mode,
+                    persona=current_persona,
+                ),
+                timeout=3,
+            )
+            logger.info(f"User message saved, starting streaming response with service={actual_service_name}, stream={stream}")
+        except Exception as e:
+            logger.error(f"Failed to save user message, continuing without persistence: {e}")
+            logger.info(f"Proceeding with chat response without saving user message (service={actual_service_name}, stream={stream})")
+        
+        # For streaming responses (AI service - Q&A mode)
+        if stream and actual_service_name == "ai_service":
+            ai_service = AIService()
+            ai_service.reload_persona_config()  # Ensure we have the latest persona
+            input_data = {"question": message}
+            
+            async def generate_response():
+                full_response = ""
+                message_id = None
+                try:
+                    # Use async stream method to avoid blocking the event loop
+                    async for chunk in ai_service.async_stream_execute(input_data):
+                        full_response += chunk
+                        yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
+                    
+                    # Save complete response
+                    try:
+                        assistant_msg = await asyncio.wait_for(
+                            save_chat_message_with_retry(
+                                session_id=session_id,
+                                role="assistant",
+                                message_text=full_response,
+                                service_name=actual_service_name,
+                                mode=mode,
+                                persona=current_persona,
+                            ),
+                            timeout=3,
+                        )
+                        message_id = assistant_msg.id
+                    except Exception as e:
+                        logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
+                        assistant_msg = None
                     
                     # Save transcript
+                        try:
+                            persona_config = load_persona_config(current_persona)
+                            model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
+                            # Get audio file path from message metadata if available
+                            audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
+                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="qa", expert_type="general")
+                        except Exception as e:
+                            logger.warning(f"Failed to save transcript: {e}")
+                    
+                    yield f"data: {json.dumps({'chunk': '', 'done': True, 'message_id': message_id})}\n\n"
+                except Exception as e:
+                    logger.error(f"Error in streaming response: {e}", exc_info=True)
+                    yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+            
+            return StreamingResponse(generate_response(), media_type="text/event-stream")
+        
+        # For streaming responses (RAG service - Conversational mode)
+        if stream and actual_service_name == "rag_service":
+            rag_service = RAGService()
+            rag_service.reload_persona_config()  # Ensure we have the latest persona
+            
+            async def generate_response():
+                full_response = ""
+                message_id = None
+                try:
+                    # Load conversation history (increased limit for better context)
+                    conversation_history = await rag_service._load_conversation_history(session_id, limit=50)
+                    
+                    # Build input data for RAG service
+                    input_data = {
+                        "query": message,
+                        "session_id": session_id,
+                        "expert_type": expert_type,
+                        "messages": conversation_history
+                    }
+                    
+                    # Consume the synchronous generator directly (it's safe in async context)
+                    # The generator yields chunks from the Anthropic API stream
+                    for chunk in rag_service.stream_execute(input_data):
+                        full_response += chunk
+                        yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
+                    
+                    # Save complete response
                     try:
-                        persona_config = load_persona_config(current_persona)
-                        model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
-                        # Get audio file path from message metadata if available
-                        audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg.message_metadata else None
-                        save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="qa", expert_type="general")
+                        assistant_msg = await asyncio.wait_for(
+                            save_chat_message_with_retry(
+                                session_id=session_id,
+                                role="assistant",
+                                message_text=full_response,
+                                service_name=actual_service_name,
+                                mode=mode,
+                                persona=current_persona,
+                            ),
+                            timeout=3,
+                        )
+                        message_id = assistant_msg.id
                     except Exception as e:
-                        logger.warning(f"Failed to save transcript: {e}")
-                
-                yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
-            except Exception as e:
-                logger.error(f"Error in streaming response: {e}", exc_info=True)
-                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
-        
-        return StreamingResponse(generate_response(), media_type="text/event-stream")
-    
-    # For streaming responses (RAG service - Conversational mode)
-    if stream and actual_service_name == "rag_service":
-        rag_service = RAGService()
-        rag_service.reload_persona_config()  # Ensure we have the latest persona
-        
-        async def generate_response():
-            full_response = ""
-            try:
-                # Load conversation history (increased limit for better context)
-                conversation_history = await rag_service._load_conversation_history(session_id, limit=50)
-                
-                # Build input data for RAG service
-                input_data = {
-                    "query": message,
-                    "session_id": session_id,
-                    "expert_type": expert_type,
-                    "messages": conversation_history
-                }
-                
-                loop = asyncio.get_event_loop()
-                
-                def run_generator():
-                    return list(rag_service.stream_execute(input_data))
-                
-                chunks = await loop.run_in_executor(None, run_generator)
-                
-                for chunk in chunks:
-                    full_response += chunk
-                    yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
-                
-                # Save complete response
-                async with AsyncSessionLocal() as session:
-                    current_persona = get_current_persona_name()
-                    assistant_msg = ChatMessage(
-                        session_id=session_id,
-                        role="assistant",
-                        message=full_response,
-                        service_name=actual_service_name,
-                        mode=mode,
-                        persona=current_persona
-                    )
-                    session.add(assistant_msg)
-                    await session.commit()
+                        logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
+                        assistant_msg = None
                     
                     # Save transcript
-                    try:
-                        persona_config = load_persona_config(current_persona)
-                        model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
-                        # Get audio file path from message metadata if available
-                        audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg.message_metadata else None
-                        save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="conversational", expert_type=expert_type)
-                    except Exception as e:
-                        logger.warning(f"Failed to save transcript: {e}")
-                
-                yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
-            except Exception as e:
-                logger.error(f"Error in streaming response: {e}", exc_info=True)
-                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+                        try:
+                            persona_config = load_persona_config(current_persona)
+                            model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
+                            # Get audio file path from message metadata if available
+                            audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
+                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_id, audio_file=audio_file_path, mode="conversational", expert_type=expert_type)
+                        except Exception as e:
+                            logger.warning(f"Failed to save transcript: {e}")
+                    
+                    yield f"data: {json.dumps({'chunk': '', 'done': True, 'message_id': message_id})}\n\n"
+                except Exception as e:
+                    logger.error(f"Error in streaming response: {e}", exc_info=True)
+                    yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+            
+            return StreamingResponse(generate_response(), media_type="text/event-stream")
         
-        return StreamingResponse(generate_response(), media_type="text/event-stream")
-    
-    return {"error": "Non-streaming mode not implemented"}
+        logger.warning(f"Unhandled case: stream={stream}, actual_service_name={actual_service_name}")
+        return {"error": "Non-streaming mode not implemented"}
+    except Exception as e:
+        logger.error(f"Error in send_chat_message endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/tts/generate")
@@ -1111,9 +1152,41 @@ async def summarize_article(request: Request):
         result = await summarizer.summarize_article_from_url(url)
         
         if result.get("success"):
+            summary = result.get("summary")
+            
+            # Store the summary in the database with the article data
+            try:
+                async with AsyncSessionLocal() as session:
+                    # Find the latest news data
+                    news_result = await session.execute(
+                        select(CollectedData)
+                        .where(CollectedData.source == "news")
+                        .where(CollectedData.data_type == "news_feed")
+                        .order_by(desc(CollectedData.collected_at))
+                        .limit(1)
+                    )
+                    latest_news_data = news_result.scalar_one_or_none()
+                    
+                    if latest_news_data and latest_news_data.data:
+                        # Make a shallow copy so SQLAlchemy sees JSON change
+                        data_copy = dict(latest_news_data.data)
+                        articles = data_copy.get("data", {}).get("articles", [])
+                        for article in articles:
+                            if article.get("link") == url:
+                                article["summary"] = summary
+                                break
+                        
+                        data_copy.setdefault("data", {})["articles"] = articles
+                        latest_news_data.data = data_copy
+                        await session.commit()
+                        logger.info(f"Stored summary for article: {url}")
+            except Exception as db_error:
+                # Log but don't fail if database is locked - we still have the summary
+                logger.warning(f"Could not store article summary in database (may be locked): {db_error}")
+            
             return {
                 "success": True,
-                "summary": result.get("summary")
+                "summary": summary
             }
         else:
             return {

@@ -64,7 +64,11 @@ export function CenterPanel({ audioUrl, onAudioUrlChange }) {
           )}
           {!loading && !error && news && news.articles && news.articles.length > 0 ? (
             <div className="news-articles">
-              {news.articles.map((article, index) => (
+              {news.articles.map((article, index) => {
+                const existingSummary = summaries[index] || article.summary;
+                const isSummarizing = !!loadingSummaries[index];
+                const showButton = article.link && !existingSummary && !isSummarizing;
+                return (
                 <div key={index} className="news-article">
                   {article.image_url && (
                     <div className="news-article-image">
@@ -101,23 +105,26 @@ export function CenterPanel({ audioUrl, onAudioUrlChange }) {
                         {article.description.length > 200 ? '...' : ''}
                       </div>
                     )}
-                    {article.link && (
+                    {showButton && (
                       <button
-                        className="news-summarize-button"
                         onClick={() => handleSummarize(article.link, index)}
-                        disabled={loadingSummaries[index] || !!summaries[index]}
+                        disabled={isSummarizing}
                       >
-                        {loadingSummaries[index] ? 'Summarizing...' : summaries[index] ? 'Summary' : 'Summarize Article'}
+                        {isSummarizing ? 'Summarizing...' : 'Summarize Article'}
                       </button>
                     )}
-                    {summaries[index] && (
+                    {isSummarizing && (
+                      <div className="news-article-summary">Summarizing...</div>
+                    )}
+                    {existingSummary && !isSummarizing && (
                       <div className="news-article-summary">
-                        {summaries[index]}
+                        {existingSummary}
                       </div>
                     )}
                   </div>
                 </div>
-              ))}
+              );
+            })}
             </div>
           ) : !loading && !error && (
             <div className="news-placeholder">
