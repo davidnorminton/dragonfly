@@ -67,6 +67,12 @@ data/audio/*
 data/transcripts/*
 !data/transcripts/.gitkeep
 
+# Models
+models/
+
+# Local dumps
+sqlite_dump.sql
+
 # OS
 .DS_Store
 Thumbs.db
