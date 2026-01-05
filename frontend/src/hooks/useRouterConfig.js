@@ -1,37 +1,40 @@
 import { useState, useEffect } from 'react';
 import { routerAPI } from '../services/api';
 
-// Parse rules from a prompt_context string.
-// Looks for triplets:
-// trigger: ...
-// type: ...
-// value: ...
+// Parse rules from prompt_context by scanning lines for trigger/type/value triplets.
 function extractRules(prompt) {
   const rules = [];
   if (!prompt) return { rules, basePrompt: prompt || '' };
-  const regex = /trigger:\s*(.+?)\s*[\r\n]+type:\s*(.+?)\s*[\r\n]+value:\s*(.+?)(?=(?:\r?\n\r?\n|$))/gis;
-  let match;
-  const segments = [];
-  let lastIndex = 0;
-  while ((match = regex.exec(prompt)) !== null) {
-    rules.push({
-      trigger: match[1].trim(),
-      type: match[2].trim(),
-      value: match[3].trim(),
-    });
-    segments.push({ start: match.index, end: regex.lastIndex });
-    lastIndex = regex.lastIndex;
+
+  const lines = prompt.split(/\r?\n/);
+  const used = new Set();
+
+  for (let i = 0; i < lines.length; i++) {
+    const norm = (lines[i] || '').trim().replace(/^•\s*/, '').toLowerCase();
+    if (norm.startsWith('trigger:')) {
+      const trigger = lines[i].replace(/^•\s*/, '').split(':').slice(1).join(':').trim();
+      // Look ahead for type and value
+      let type = '';
+      let value = '';
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        const n = (lines[j] || '').trim().replace(/^•\s*/, '').toLowerCase();
+        if (n.startsWith('type:') && !type) {
+          type = lines[j].replace(/^•\s*/, '').split(':').slice(1).join(':').trim();
+          used.add(j);
+        } else if (n.startsWith('value:') && !value) {
+          value = lines[j].replace(/^•\s*/, '').split(':').slice(1).join(':').trim();
+          used.add(j);
+        }
+      }
+      rules.push({ trigger, type, value });
+      used.add(i);
+    }
   }
-  // Remove matched rule segments to get base prompt
-  if (segments.length === 0) return { rules, basePrompt: prompt };
-  let base = '';
-  let idx = 0;
-  for (const seg of segments) {
-    base += prompt.slice(idx, seg.start);
-    idx = seg.end;
-  }
-  base += prompt.slice(idx);
-  return { rules, basePrompt: base.trim() };
+
+  const baseLines = lines.filter((_, idx) => !used.has(idx));
+  const basePrompt = baseLines.join('\n').trim();
+
+  return { rules, basePrompt };
 }
 
 function buildPrompt(basePrompt, rules) {
