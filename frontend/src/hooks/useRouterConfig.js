@@ -18,16 +18,19 @@ const DEFAULT_RULES = [
     trigger: 'get time',
     type: 'task',
     value: 'get_time',
+    reason: 'User asked for current time',
   },
   {
     trigger: 'what is the capital of china',
     type: 'question',
     value: 'what is the capital of china',
+    reason: 'User asked a geography fact',
   },
   {
     trigger: 'get date',
     type: 'task',
     value: 'get_date',
+    reason: 'User asked for current date',
   },
 ];
 
@@ -161,7 +164,7 @@ export function useRouterConfig(open) {
   };
 
   const addRule = () => {
-    setRules((prev) => [...prev, { trigger: '', type: '', value: '' }]);
+    setRules((prev) => [...prev, { trigger: '', type: '', value: '', reason: '' }]);
   };
 
   const updateRule = (index, field, value) => {

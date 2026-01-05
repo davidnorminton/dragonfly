@@ -343,6 +343,7 @@ export function Settings({ open, onClose }) {
                   <span>Trigger</span>
                   <span>Type</span>
                   <span>Value</span>
+                  <span>Reason</span>
                   <span />
                 </div>
                 {rules.map((rule, idx) => (
@@ -362,6 +363,11 @@ export function Settings({ open, onClose }) {
                       placeholder="value"
                       value={rule.value}
                       onChange={(e) => updateRule(idx, 'value', e.target.value)}
+                    />
+                    <input
+                      placeholder="reason (why this route applies)"
+                      value={rule.reason || ''}
+                      onChange={(e) => updateRule(idx, 'reason', e.target.value)}
                     />
                     <button
                       className="delete-button"
