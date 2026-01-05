@@ -1992,12 +1992,6 @@ body {
 
 .music-library {
   margin-top: 16px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  max-height: 340px;
-  overflow: auto;
 }
 
 .music-empty {
