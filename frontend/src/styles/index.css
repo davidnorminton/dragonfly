@@ -479,7 +479,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 5000; /* above footer and other UI */
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.3s, visibility 0.3s;
