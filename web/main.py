@@ -581,15 +581,30 @@ def _match_popular_items(ai_items: List[Dict[str, Any]], songs_data: List[Dict[s
     return matched
 
 
+async def _ensure_artist_in_db(session: AsyncSessionLocal, artist_name: str):
+    artist_row = await session.scalar(
+        select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
+    )
+    if artist_row:
+        return artist_row
+    # Attempt a rescan to populate DB
+    try:
+        await scan_music_library()
+    except Exception as e:
+        logger.error(f"Rescan failed while ensuring artist '{artist_name}': {e}", exc_info=True)
+    artist_row = await session.scalar(
+        select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
+    )
+    return artist_row
+
+
 @app.get("/api/music/popular")
 async def get_music_popular(artist: str):
     """
     Return cached popular songs for the artist from DB (extra_metadata.popular_songs).
     """
     async with AsyncSessionLocal() as session:
-        artist_row = await session.scalar(
-            select(MusicArtist).where(func.lower(MusicArtist.name) == artist.lower())
-        )
+        artist_row = await _ensure_artist_in_db(session, artist)
         if not artist_row:
             return {"success": False, "error": "Artist not found"}
         meta = artist_row.extra_metadata or {}
@@ -608,9 +623,7 @@ async def generate_music_popular(req: PopularRequest):
         return {"success": False, "error": "artist is required"}
 
     async with AsyncSessionLocal() as session:
-        artist_row = await session.scalar(
-            select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
-        )
+        artist_row = await _ensure_artist_in_db(session, artist_name)
         if not artist_row:
             return {"success": False, "error": "Artist not found"}
 
