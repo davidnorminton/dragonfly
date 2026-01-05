@@ -206,6 +206,8 @@ export function MusicPage() {
   };
 
   const confirmPlaylistAdd = async () => {
+    setPopularError('');
+    setPlaylistModalError('');
     const name = (playlistModalExisting || playlistModalName).trim();
     if (!name) return;
     const song = pendingSong;
@@ -223,6 +225,8 @@ export function MusicPage() {
         await loadPlaylists();
       } catch (e) {
         console.error('Failed to add to playlist', e);
+        setPlaylistModalError(e?.message || 'Failed to add to playlist');
+        return;
       }
     } else {
       try {
@@ -230,6 +234,8 @@ export function MusicPage() {
         await loadPlaylists();
       } catch (e) {
         console.error('Failed to create playlist', e);
+        setPlaylistModalError(e?.message || 'Failed to create playlist');
+        return;
       }
     }
     setSelectedPlaylist(name);
@@ -920,6 +926,7 @@ export function MusicPage() {
                 onChange={(e) => setPlaylistModalName(e.target.value)}
               />
             </div>
+            {playlistModalError && <div className="settings-message error">{playlistModalError}</div>}
             <div className="modal-actions">
               <button className="save-button secondary" onClick={() => setPlaylistModalOpen(false)}>
                 Cancel

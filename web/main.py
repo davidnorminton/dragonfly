@@ -757,14 +757,18 @@ async def create_playlist(payload: PlaylistCreate):
     if not name:
         return {"success": False, "error": "name is required"}
     async with AsyncSessionLocal() as session:
-        exists = await session.scalar(select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower()))
-        if exists:
-            return {"success": True, "playlist": {"id": exists.id, "name": exists.name}}
-        pl = MusicPlaylist(name=name)
-        session.add(pl)
-        await session.commit()
-        await session.refresh(pl)
-        return {"success": True, "playlist": {"id": pl.id, "name": pl.name}}
+        try:
+            exists = await session.scalar(select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower()))
+            if exists:
+                return {"success": True, "playlist": {"id": exists.id, "name": exists.name}}
+            pl = MusicPlaylist(name=name)
+            session.add(pl)
+            await session.commit()
+            await session.refresh(pl)
+            return {"success": True, "playlist": {"id": pl.id, "name": pl.name}}
+        except Exception as e:
+            logger.error(f"Failed to create playlist '{name}': {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
 
 @app.post("/api/music/playlists/add")
@@ -775,34 +779,38 @@ async def add_song_to_playlist(payload: PlaylistAddSong):
     if not playlist_id and not name:
         return {"success": False, "error": "playlist_id or name required"}
     async with AsyncSessionLocal() as session:
-        playlist = None
-        if playlist_id:
-            playlist = await session.get(MusicPlaylist, playlist_id)
-        if not playlist and name:
-            playlist = await session.scalar(select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower()))
-        if not playlist:
-            playlist = MusicPlaylist(name=name or "New Playlist")
-            session.add(playlist)
-            await session.flush()
-        # Deduplicate by file_path
-        existing = await session.scalar(
-            select(MusicPlaylistSong).where(
-                MusicPlaylistSong.playlist_id == playlist.id, MusicPlaylistSong.file_path == payload.path
+        try:
+            playlist = None
+            if playlist_id:
+                playlist = await session.get(MusicPlaylist, playlist_id)
+            if not playlist and name:
+                playlist = await session.scalar(select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower()))
+            if not playlist:
+                playlist = MusicPlaylist(name=name or "New Playlist")
+                session.add(playlist)
+                await session.flush()
+            # Deduplicate by file_path
+            existing = await session.scalar(
+                select(MusicPlaylistSong).where(
+                    MusicPlaylistSong.playlist_id == playlist.id, MusicPlaylistSong.file_path == payload.path
+                )
             )
-        )
-        if not existing:
-            ps = MusicPlaylistSong(
-                playlist_id=playlist.id,
-                file_path=payload.path,
-                title=payload.title,
-                artist=payload.artist,
-                album=payload.album,
-                track_number=payload.track_number,
-                duration_seconds=payload.duration_seconds,
-            )
-            session.add(ps)
-        await session.commit()
-        return {"success": True, "playlist_id": playlist.id}
+            if not existing:
+                ps = MusicPlaylistSong(
+                    playlist_id=playlist.id,
+                    file_path=payload.path,
+                    title=payload.title,
+                    artist=payload.artist,
+                    album=payload.album,
+                    track_number=payload.track_number,
+                    duration_seconds=payload.duration_seconds,
+                )
+                session.add(ps)
+            await session.commit()
+            return {"success": True, "playlist_id": playlist.id}
+        except Exception as e:
+            logger.error(f"Failed to add to playlist '{name or playlist_id}': {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""
