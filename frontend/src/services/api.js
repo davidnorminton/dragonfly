@@ -8,6 +8,7 @@ export const systemAPI = {
   getStats: () => api.get('/system/stats').then(res => res.data),
   getUptime: () => api.get('/system/uptime').then(res => res.data),
   getIPs: () => api.get('/system/ips').then(res => res.data),
+  restart: () => api.post('/system/restart').then(res => res.data),
 };
 
 export const chatAPI = {

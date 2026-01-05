@@ -44,6 +44,7 @@ import platform
 import socket
 import httpx
 from anthropic import AsyncAnthropic
+import signal
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,21 @@ def _parse_router_answer(answer: Optional[str]) -> Optional[Dict[str, Any]]:
             except Exception:
                 return None
         return None
+
+
+@app.post("/api/system/restart")
+async def restart_system():
+    """
+    Schedule a server restart. Returns immediately, then exits the process.
+    Frontend should clear caches and reload after calling this.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        loop.call_later(0.5, lambda: os._exit(0))
+        return {"success": True, "message": "Server restart scheduled"}
+    except Exception as e:
+        logger.error(f"Failed to schedule restart: {e}")
+        raise HTTPException(status_code=500, detail="Failed to schedule restart")
 
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""

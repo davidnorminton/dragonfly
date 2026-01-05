@@ -14,6 +14,8 @@ export function Settings({ open, onClose }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [restarting, setRestarting] = useState(false);
+  const [restartMsg, setRestartMsg] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -168,6 +170,31 @@ export function Settings({ open, onClose }) {
 
   if (!open) return null;
 
+  const handleRestart = async () => {
+    setRestarting(true);
+    setRestartMsg('');
+    try {
+      const res = await systemAPI.restart();
+      setRestartMsg(res?.message || 'Restart scheduled');
+      // Clear caches/local storage to avoid stale assets
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      localStorage.clear();
+      sessionStorage.clear();
+      // Give the server a moment to exit, then reload
+      setTimeout(() => {
+        window.location.reload(true);
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to restart server:', err);
+      setRestartMsg('Failed to restart server');
+    } finally {
+      setRestarting(false);
+    }
+  };
+
   return (
     <div className={`modal-overlay ${open ? 'active' : ''}`} onClick={onClose}>
       <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
@@ -208,6 +235,25 @@ export function Settings({ open, onClose }) {
               {success}
             </div>
           )}
+
+          <div className="settings-panel">
+            <div className="settings-panel-header">
+              <h3>System</h3>
+              <button
+                className="save-button"
+                onClick={handleRestart}
+                disabled={restarting}
+                title="Restart server and clear caches"
+              >
+                {restarting ? 'Restarting…' : 'Restart Server'}
+              </button>
+            </div>
+            {restartMsg && (
+              <div className="settings-message info">
+                {restartMsg}
+              </div>
+            )}
+          </div>
 
           {activeTab === 'personas' && (
             <div className="settings-panel">
