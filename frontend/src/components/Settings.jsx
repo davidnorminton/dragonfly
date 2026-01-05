@@ -279,6 +279,12 @@ export function Settings({ open, onClose }) {
           >
             Router
           </button>
+          <button
+            className={activeTab === 'system' ? 'active' : ''}
+            onClick={() => setActiveTab('system')}
+          >
+            System
+          </button>
         </div>
 
         <div className="settings-content">
@@ -292,25 +298,6 @@ export function Settings({ open, onClose }) {
               {success}
             </div>
           )}
-
-          <div className="settings-panel">
-            <div className="settings-panel-header">
-              <h3>System</h3>
-              <button
-                className="save-button"
-                onClick={handleRestart}
-                disabled={restarting}
-                title="Restart server and clear caches"
-              >
-                {restarting ? 'Restarting…' : 'Restart Server'}
-              </button>
-            </div>
-            {restartMsg && (
-              <div className="settings-message info">
-                {restartMsg}
-              </div>
-            )}
-          </div>
 
           {activeTab === 'router' && (
             <div className="settings-panel">
@@ -556,6 +543,26 @@ export function Settings({ open, onClose }) {
               {musicMessage && <div className="settings-message info">{musicMessage}</div>}
               <p className="settings-help">
                 Scan `/Users/davidnorminton/Music` for artists, albums, and songs, updating the library metadata.
+              </p>
+            </div>
+          )}
+
+          {activeTab === 'system' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>System</h3>
+                <button
+                  className="save-button"
+                  onClick={handleRestart}
+                  disabled={restarting}
+                  title="Restart server and clear caches"
+                >
+                  {restarting ? 'Restarting…' : 'Restart Server'}
+                </button>
+              </div>
+              {restartMsg && <div className="settings-message info">{restartMsg}</div>}
+              <p className="settings-help">
+                Restart the backend server. This will temporarily disconnect the UI while the server restarts.
               </p>
             </div>
           )}
