@@ -15,6 +15,8 @@ export function MusicPage() {
   const [selectedAlbum, setSelectedAlbum] = useState(null);
   const [viewMode, setViewMode] = useState('artists'); // artists | albums
   const [lengths, setLengths] = useState({});
+  const [playlists, setPlaylists] = useState([]);
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
 
@@ -48,7 +50,27 @@ export function MusicPage() {
 
   useEffect(() => {
     scanLibrary();
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('music_playlists');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setPlaylists(Array.isArray(parsed) ? parsed : []);
+        }
+      } catch (e) {
+        console.error('Failed to load playlists', e);
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('music_playlists', JSON.stringify(playlists));
+    } catch (e) {
+      console.error('Failed to persist playlists', e);
+    }
+  }, [playlists]);
 
   useEffect(() => {
     audioRef.current = new Audio();
@@ -143,12 +165,71 @@ export function MusicPage() {
       return ta - tb;
     });
 
+  const handleCreatePlaylist = () => {
+    const name = prompt('Playlist name?');
+    if (!name) return;
+    if (playlists.some((p) => p.name === name)) {
+      setSelectedPlaylist(name);
+      setViewMode('playlists');
+      return;
+    }
+    setPlaylists((prev) => [...prev, { name, songs: [] }]);
+    setSelectedPlaylist(name);
+    setViewMode('playlists');
+  };
+
+  const upsertPlaylistWithSong = (playlistName, song) => {
+    if (!playlistName || !song) return;
+    setPlaylists((prev) =>
+      prev.map((p) =>
+        p.name === playlistName
+          ? {
+              ...p,
+              songs: p.songs.some((s) => s.path === song.path) ? p.songs : [...p.songs, song],
+            }
+          : p
+      )
+    );
+  };
+
+  const handleAddToPlaylist = (song) => {
+    if (!song) return;
+    let target = selectedPlaylist || playlists[0]?.name;
+    const name = prompt(
+      playlists.length
+        ? `Add to playlist. Enter existing name or new name:\nExisting: ${playlists.map((p) => p.name).join(', ')}`
+        : 'No playlists yet. Enter a name to create one:'
+      ,
+      target || ''
+    );
+    if (!name) return;
+    if (!playlists.some((p) => p.name === name)) {
+      setPlaylists((prev) => [...prev, { name, songs: [song] }]);
+    } else {
+      upsertPlaylistWithSong(name, song);
+    }
+    setSelectedPlaylist(name);
+    setViewMode('playlists');
+  };
+
   const guessArtistDirectoryFromSongs = (artist) => {
     const firstSongPath = artist?.albums?.[0]?.songs?.[0]?.path;
     if (!firstSongPath) return null;
     const parts = firstSongPath.split('/');
     if (parts.length < 3) return null;
     return parts.slice(0, -2).join('/');
+  };
+
+  const guessCoverFromSongPath = (songPath) => {
+    if (!songPath) return null;
+    const parts = songPath.split('/');
+    if (parts.length < 2) return null;
+    const dir = parts.slice(0, -1).join('/');
+    const baseNames = ['cover', 'Cover', 'folder', 'Folder', 'album', 'Album'];
+    const exts = ['webp', 'jpg', 'jpeg', 'png'];
+    const picks = [];
+    baseNames.forEach((b) => exts.forEach((ext) => picks.push(`${dir}/${b}.${ext}`)));
+    return picks[0] || null;
   };
 
   const makeArtistImageCandidates = (artist, artistName = '') => {
@@ -203,6 +284,11 @@ export function MusicPage() {
     return library.find((a) => a.name === selectedArtist) || null;
   }, [selectedArtist, library]);
 
+  const currentPlaylist = useMemo(() => {
+    if (!selectedPlaylist) return null;
+    return playlists.find((p) => p.name === selectedPlaylist) || null;
+  }, [selectedPlaylist, playlists]);
+
   const allAlbums = useMemo(() => {
     const albums = [];
     library.forEach((artist) => {
@@ -252,7 +338,11 @@ export function MusicPage() {
         .catch((e) => console.error('Play error', e));
       return;
     }
-    // Choose songs from the selected album, otherwise from the latest album
+    // Choose songs from playlist, selected album, otherwise from the latest album
+    if (viewMode === 'playlists' && currentPlaylist?.songs?.length) {
+      playIndex(0, currentPlaylist.songs);
+      return;
+    }
     const baseAlbum = currentAlbum || sortedAlbums[0];
     const songs = sortSongs(baseAlbum?.songs || []);
     if (songs.length) {
@@ -278,7 +368,10 @@ export function MusicPage() {
         totalDuration += s.duration ?? lengths[s.path] ?? 0;
       });
     };
-    if (selectedAlbum && currentAlbum?.songs) {
+    if (viewMode === 'playlists' && selectedPlaylist) {
+      const pl = playlists.find((p) => p.name === selectedPlaylist);
+      addSongs(pl?.songs || []);
+    } else if (selectedAlbum && currentAlbum?.songs) {
       addSongs(currentAlbum.songs);
     } else if (currentArtist?.albums) {
       currentArtist.albums.forEach((al) => addSongs(al.songs));
@@ -287,7 +380,7 @@ export function MusicPage() {
       songs: totalSongs,
       durationText: totalDuration ? formatTime(totalDuration) : '',
     };
-  }, [selectedAlbum, currentAlbum, currentArtist, lengths]);
+  }, [viewMode, selectedPlaylist, playlists, selectedAlbum, currentAlbum, currentArtist, lengths]);
 
   useEffect(() => {
     if (!currentArtist?.albums?.length) return;
@@ -320,9 +413,11 @@ export function MusicPage() {
   };
 
   const heroLabel = selectedAlbum && currentAlbum ? 'Album' : 'Artist';
-  const heroTitle = selectedAlbum && currentAlbum ? currentAlbum.name : selectedArtist || 'Select an artist';
+  const heroTitle = viewMode === 'playlists' && selectedPlaylist ? selectedPlaylist : selectedAlbum && currentAlbum ? currentAlbum.name : selectedArtist || 'Select an artist';
   const heroSub =
-    selectedAlbum && currentAlbum
+    viewMode === 'playlists' && selectedPlaylist
+      ? `${stats.songs} songs${stats.durationText ? ` • ${stats.durationText}` : ''}`
+      : selectedAlbum && currentAlbum
       ? `${currentAlbum.artist || selectedArtist || ''}${currentAlbum.songs?.length ? ` • ${currentAlbum.songs.length} songs` : ''}`
       : stats.songs
       ? `${stats.songs} songs${stats.durationText ? ` • ${stats.durationText}` : ''}`
@@ -341,6 +436,14 @@ export function MusicPage() {
       push(currentAlbum.imagePath);
     }
 
+    // Playlist cover guess from first song
+    if (viewMode === 'playlists' && selectedPlaylist) {
+      const pl = playlists.find((p) => p.name === selectedPlaylist);
+      const firstSongPath = pl?.songs?.[0]?.path;
+      const coverGuess = guessCoverFromSongPath(firstSongPath);
+      push(coverGuess);
+    }
+
     // Artist images
     makeArtistImageCandidates(currentArtist, selectedArtist).forEach((c) => push(c));
 
@@ -352,7 +455,7 @@ export function MusicPage() {
     }
 
     return Array.from(new Set(candidates.filter(Boolean)));
-  }, [currentAlbum, currentArtist, selectedArtist]);
+  }, [currentAlbum, currentArtist, selectedArtist, viewMode, selectedPlaylist, playlists]);
 
   const heroBgStyle =
     heroImageCandidates.length > 0
@@ -376,19 +479,42 @@ export function MusicPage() {
           <div className="music-filters">
             <button
               className={`filter-pill ${viewMode === 'artists' ? 'active' : ''}`}
-              onClick={() => setViewMode('artists')}
+              onClick={() => {
+                setViewMode('artists');
+                setSelectedPlaylist(null);
+              }}
             >
               Artists
             </button>
             <button
               className={`filter-pill ${viewMode === 'albums' ? 'active' : ''}`}
-              onClick={() => setViewMode('albums')}
+              onClick={() => {
+                setViewMode('albums');
+                setSelectedPlaylist(null);
+              }}
             >
               Albums
+            </button>
+            <button
+              className={`filter-pill ${viewMode === 'playlists' ? 'active' : ''}`}
+              onClick={() => {
+                setViewMode('playlists');
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+              }}
+            >
+              Playlists
             </button>
           </div>
           <div className="music-library">
             {library.length === 0 && !loading && <div className="music-empty">No music found yet.</div>}
+            {viewMode === 'playlists' && (
+              <div className="playlist-actions">
+                <button className="playlist-add-btn" onClick={handleCreatePlaylist}>
+                  + New playlist
+                </button>
+              </div>
+            )}
             {viewMode === 'artists' &&
               library.map((artist) => {
                 const artistCandidates = makeArtistImageCandidates(artist, artist.name);
@@ -412,6 +538,21 @@ export function MusicPage() {
                   </div>
                 );
               })}
+            {viewMode === 'playlists' &&
+              playlists.map((pl) => (
+                <div
+                  key={pl.name}
+                  className={`music-row artist-only ${selectedPlaylist === pl.name ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedPlaylist(pl.name);
+                    setSelectedArtist(null);
+                    setSelectedAlbum(null);
+                  }}
+                >
+                  <strong>{pl.name}</strong>
+                  <div className="music-row-sub">{pl.songs?.length || 0} songs</div>
+                </div>
+              ))}
             {viewMode === 'albums' &&
               allAlbums.map((album) => (
                 <div
@@ -464,35 +605,91 @@ export function MusicPage() {
 
           <div className="music-tracklist">
             <div className="tracklist-body">
-              {sortedAlbums.map((album) => {
-                const songsSorted = sortSongs(album.songs || []);
-                return (
-                  <div key={album.name} className="album-section">
-                    <div className="album-section-title">{album.name}</div>
+              {viewMode === 'playlists' ? (
+                currentPlaylist?.songs?.length ? (
+                  <div className="album-section">
+                    <div className="album-section-title">{currentPlaylist.name}</div>
                     <div className="tracklist-header">
                       <span className="col-index">#</span>
                       <span className="col-title">Title</span>
                       <span className="col-length">Length</span>
+                      <span className="col-add" />
                     </div>
-                    {songsSorted.map((song, idx) => {
+                    {currentPlaylist.songs.map((song, idx) => {
                       const active = playlist[currentIndex]?.path === song.path;
                       const dur = song.duration ?? lengths[song.path];
                       return (
                         <div
-                          key={song.path}
+                          key={`${song.path}-${idx}`}
                           className={`track-row ${active ? 'active' : ''}`}
-                          onClick={() => handleSongClick(songsSorted, idx)}
+                          onClick={() => handleSongClick(currentPlaylist.songs, idx)}
                         >
                           <span className="col-index">{song.track_number || idx + 1}</span>
                           <span className="col-title">{song.name}</span>
                           <span className="col-length">{formatTime(dur)}</span>
+                          <button
+                            className="track-add"
+                            title="Add to playlist"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAddToPlaylist(song);
+                            }}
+                          >
+                            +
+                          </button>
                         </div>
                       );
                     })}
                   </div>
-                );
-              })}
-              {!sortedAlbums.length && <div className="music-empty">Select an artist to view tracks</div>}
+                ) : (
+                  <div className="music-empty">
+                    {playlists.length ? 'Select a playlist to view tracks' : 'Create a playlist to get started'}
+                  </div>
+                )
+              ) : (
+                <>
+                  {sortedAlbums.map((album) => {
+                    const songsSorted = sortSongs(album.songs || []);
+                    return (
+                      <div key={album.name} className="album-section">
+                        <div className="album-section-title">{album.name}</div>
+                        <div className="tracklist-header">
+                          <span className="col-index">#</span>
+                          <span className="col-title">Title</span>
+                          <span className="col-length">Length</span>
+                          <span className="col-add" />
+                        </div>
+                        {songsSorted.map((song, idx) => {
+                          const active = playlist[currentIndex]?.path === song.path;
+                          const dur = song.duration ?? lengths[song.path];
+                          return (
+                            <div
+                              key={song.path}
+                              className={`track-row ${active ? 'active' : ''}`}
+                              onClick={() => handleSongClick(songsSorted, idx)}
+                            >
+                              <span className="col-index">{song.track_number || idx + 1}</span>
+                              <span className="col-title">{song.name}</span>
+                              <span className="col-length">{formatTime(dur)}</span>
+                              <button
+                                className="track-add"
+                                title="Add to playlist"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAddToPlaylist(song);
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                  {!sortedAlbums.length && <div className="music-empty">Select an artist to view tracks</div>}
+                </>
+              )}
             </div>
           </div>
         </div>

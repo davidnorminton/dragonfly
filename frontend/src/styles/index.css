@@ -1945,7 +1945,7 @@ body {
 
 .tracklist-header {
   display: grid;
-  grid-template-columns: 40px 1fr 80px;
+  grid-template-columns: 40px 1fr 80px 40px;
   color: #9da7b8;
   font-size: 0.85em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -2138,6 +2138,27 @@ body {
   background: rgba(102, 126, 234, 0.18);
 }
 
+.playlist-actions {
+  display: flex;
+  justify-content: flex-start;
+  padding: 6px 4px 10px;
+}
+
+.playlist-add-btn {
+  background: rgba(102, 126, 234, 0.2);
+  color: #e0e0e0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.playlist-add-btn:hover {
+  background: rgba(102, 126, 234, 0.35);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .artist-thumb {
   width: 32px;
   height: 32px;
@@ -2201,7 +2222,7 @@ body {
 
 .track-row {
   display: grid;
-  grid-template-columns: 40px 1fr 80px;
+  grid-template-columns: 40px 1fr 80px 40px;
   align-items: center;
   padding: 8px 8px;
   border-radius: 6px;
@@ -2234,6 +2255,29 @@ body {
   color: #9da7b8;
   text-align: right;
   padding-right: 6px;
+}
+
+.col-add {
+  text-align: center;
+}
+
+.track-add {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.track-add:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.05);
 }
 
 .music-controls {
