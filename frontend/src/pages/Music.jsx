@@ -76,6 +76,17 @@ export function MusicPage() {
   }, [playlists]);
 
   useEffect(() => {
+    // Auto-select a playlist when switching to playlists view or when playlists load
+    if (viewMode === 'playlists' && playlists.length > 0 && !selectedPlaylist) {
+      setSelectedPlaylist(playlists[0].name);
+    }
+    // If the selected playlist was removed, pick the first available
+    if (selectedPlaylist && !playlists.some((p) => p.name === selectedPlaylist) && playlists.length > 0) {
+      setSelectedPlaylist(playlists[0].name);
+    }
+  }, [viewMode, playlists, selectedPlaylist]);
+
+  useEffect(() => {
     audioRef.current = new Audio();
     const onTime = () => {
       if (!audioRef.current) return;
