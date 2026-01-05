@@ -1,4 +1,4 @@
-export function BottomToolbar({ sessionId, audioQueue }) {
+export function BottomToolbar({ sessionId, audioQueue, onMicClick }) {
   const {
     currentIndex,
     isPlaying,
@@ -80,7 +80,8 @@ export function BottomToolbar({ sessionId, audioQueue }) {
         <div className="toolbar-center">
           <button
             className="toolbar-button mic-button"
-            title="AI mic mode (coming soon)"
+            title="AI mic mode"
+            onClick={onMicClick}
           >
             🎤
           </button>

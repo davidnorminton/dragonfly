@@ -24,6 +24,7 @@ function App() {
   const [rightWidth, setRightWidth] = useState(400);
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aiFocusMode, setAiFocusMode] = useState(false);
   const { selectPersona } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -54,8 +55,10 @@ function App() {
     setPersonaModalOpen(false);
   };
 
+  const toggleAiFocus = () => setAiFocusMode((prev) => !prev);
+
   return (
-    <>
+    <div className={`app-shell ${aiFocusMode ? 'ai-focus' : ''}`}>
       <TopBar 
         onSwitchAI={handleSwitchAI}
         onSettingsClick={() => setSettingsOpen(true)}
@@ -88,8 +91,17 @@ function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
-      <BottomToolbar sessionId={sessionId} audioQueue={audioQueue} />
-    </>
+      <BottomToolbar 
+        sessionId={sessionId} 
+        audioQueue={audioQueue} 
+        onMicClick={toggleAiFocus}
+      />
+      {aiFocusMode && (
+        <div className="ai-focus-overlay">
+          <div className="ai-focus-mic">🎤</div>
+        </div>
+      )}
+    </div>
   );
 }
 
