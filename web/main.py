@@ -251,7 +251,7 @@ def _extract_audio_meta(path: Path) -> Dict[str, Any]:
         "bitrate": None,
         "sample_rate": None,
         "channels": None,
-        "codec": path.suffix.lower().lstrip(".") or "audio",
+        "codec": "mp3",
         "title": None,
         "artist": None,
         "album": None,
@@ -262,70 +262,34 @@ def _extract_audio_meta(path: Path) -> Dict[str, Any]:
         "date": None,
     }
     try:
-        suffix = path.suffix.lower()
-        if suffix == ".mp3":
-            audio = MP3(str(path))
-            if audio and audio.info:
-                meta["duration_seconds"] = int(audio.info.length)
-                meta["bitrate"] = int((audio.info.bitrate or 0) / 1000) if audio.info.bitrate else None
-                meta["sample_rate"] = audio.info.sample_rate
-                meta["channels"] = audio.info.channels
-            try:
-                tags = EasyID3(str(path))
-                meta["title"] = tags.get("title", [None])[0]
-                meta["artist"] = tags.get("artist", [None])[0]
-                meta["album"] = tags.get("album", [None])[0]
-                meta["genre"] = tags.get("genre", [None])[0]
-                meta["year"] = tags.get("date", [None])[0] or tags.get("originaldate", [None])[0]
-                meta["date"] = tags.get("originaldate", [None])[0] or tags.get("date", [None])[0]
-                trk = tags.get("tracknumber", [None])[0]
-                if trk:
-                    try:
-                        meta["track_number"] = int(str(trk).split("/")[0])
-                    except Exception:
-                        meta["track_number"] = None
-                disc = tags.get("discnumber", [None])[0]
-                if disc:
-                    try:
-                        meta["disc_number"] = int(str(disc).split("/")[0])
-                    except Exception:
-                        meta["disc_number"] = None
-            except Exception:
-                pass
-        else:
-            import mutagen
-
-            audio = mutagen.File(str(path))
-            if audio and audio.info:
-                meta["duration_seconds"] = int(audio.info.length)
-                meta["bitrate"] = getattr(audio.info, "bitrate", None)
-                if meta["bitrate"]:
-                    try:
-                        meta["bitrate"] = int(meta["bitrate"] / 1000)
-                    except Exception:
-                        pass
-                meta["sample_rate"] = getattr(audio.info, "sample_rate", None)
-                meta["channels"] = getattr(audio.info, "channels", None)
-            tags = getattr(audio, "tags", None)
-            if tags:
-                meta["title"] = tags.get("title", [None])[0] if isinstance(tags.get("title"), list) else tags.get("title")
-                meta["artist"] = tags.get("artist", [None])[0] if isinstance(tags.get("artist"), list) else tags.get("artist")
-                meta["album"] = tags.get("album", [None])[0] if isinstance(tags.get("album"), list) else tags.get("album")
-                tn = tags.get("tracknumber") or tags.get("track_number")
-                if tn:
-                    try:
-                        meta["track_number"] = int(str(tn[0] if isinstance(tn, list) else tn).split("/")[0])
-                    except Exception:
-                        meta["track_number"] = None
-                dn = tags.get("discnumber")
-                if dn:
-                    try:
-                        meta["disc_number"] = int(str(dn[0] if isinstance(dn, list) else dn).split("/")[0])
-                    except Exception:
-                        meta["disc_number"] = None
-                meta["genre"] = tags.get("genre", [None])[0] if isinstance(tags.get("genre"), list) else tags.get("genre")
-                meta["year"] = tags.get("date", [None])[0] if isinstance(tags.get("date"), list) else tags.get("date")
-                meta["date"] = meta["year"]
+        audio = MP3(str(path))
+        if audio and audio.info:
+            meta["duration_seconds"] = int(audio.info.length)
+            meta["bitrate"] = int((audio.info.bitrate or 0) / 1000) if audio.info.bitrate else None
+            meta["sample_rate"] = audio.info.sample_rate
+            meta["channels"] = audio.info.channels
+        try:
+            tags = EasyID3(str(path))
+            meta["title"] = tags.get("title", [None])[0]
+            meta["artist"] = tags.get("artist", [None])[0]
+            meta["album"] = tags.get("album", [None])[0]
+            meta["genre"] = tags.get("genre", [None])[0]
+            meta["year"] = tags.get("date", [None])[0] or tags.get("originaldate", [None])[0]
+            meta["date"] = tags.get("originaldate", [None])[0] or tags.get("date", [None])[0]
+            trk = tags.get("tracknumber", [None])[0]
+            if trk:
+                try:
+                    meta["track_number"] = int(str(trk).split("/")[0])
+                except Exception:
+                    meta["track_number"] = None
+            disc = tags.get("discnumber", [None])[0]
+            if disc:
+                try:
+                    meta["disc_number"] = int(str(disc).split("/")[0])
+                except Exception:
+                    meta["disc_number"] = None
+        except Exception:
+            pass
     except Exception as e:
         logger.warning(f"Failed to read metadata for {path}: {e}")
     return meta
@@ -433,21 +397,7 @@ async def scan_music_library():
     tree = defaultdict(lambda: defaultdict(lambda: {"songs": [], "image": None, "year": None, "date": None}))  # artist -> album -> {songs, image, year, date}
     artist_images: Dict[str, str] = {}
     image_exts = {".jpg", ".jpeg", ".png", ".webp"}
-    audio_exts = {
-        ".mp3",
-        ".m4a",
-        ".m4p",
-        ".aac",
-        ".flac",
-        ".alac",
-        ".wav",
-        ".aiff",
-        ".aif",
-        ".ogg",
-        ".oga",
-        ".wma",
-        ".mp4",
-    }
+    audio_exts = {".mp3"}
     collected_songs = []
     artist_names_seen = set()
 
@@ -673,28 +623,27 @@ async def _ensure_artist_in_db(session: AsyncSessionLocal, artist_name: str):
     logger.info(f"Artist '{artist_name}' not found, attempting rescan...")
     try:
         await scan_music_library()
-        logger.info(f"Rescan completed, querying for artist '{artist_name}' again...")
+        logger.info(f"Rescan completed, querying for artist '{artist_name}' again with fresh session...")
     except Exception as e:
         logger.error(f"Rescan failed while ensuring artist '{artist_name}': {e}", exc_info=True)
         return None
 
-    # Refresh session state and retry exact + ilike
-    session.expire_all()
-    await session.commit()
+    # Use a fresh session after rescan to avoid stale state
+    async with AsyncSessionLocal() as fresh:
+        artist_row = await _fetch_exact(fresh)
+        if not artist_row:
+            artist_row = await _fetch_like(fresh)
 
-    artist_row = await _fetch_exact(session)
-    if not artist_row:
-        artist_row = await _fetch_like(session)
+        if artist_row:
+            logger.info(f"Artist '{artist_name}' found after rescan")
+            return artist_row
 
-    if artist_row:
-        logger.info(f"Artist '{artist_name}' found after rescan")
-    else:
-        all_artists_res = await session.execute(select(MusicArtist.name))
+        all_artists_res = await fresh.execute(select(MusicArtist.name))
         artist_names = [a[0] for a in all_artists_res.all()]
         logger.warning(
             f"Artist '{artist_name}' still not found after rescan. Available artists: {artist_names}"
         )
-    return artist_row
+        return None
 
 
 @app.get("/api/music/popular")
