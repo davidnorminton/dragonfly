@@ -1912,7 +1912,7 @@ body {
   top: 0;
   margin: 0;
   z-index: 2000;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
@@ -1923,12 +1923,13 @@ body {
   opacity: 0;
   visibility: hidden;
   transform: translateY(-100%);
-  transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease, display 0.3s ease;
   pointer-events: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .music-hero-minimal.visible {
+  display: flex;
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
@@ -2175,8 +2176,9 @@ body {
 
 .tracklist-body {
   overflow-y: auto;
-  max-height: calc(100vh - 420px);
+  max-height: calc(100vh);
   padding: 8px;
+  padding-bottom: 90px;
 }
 
 .music-player-shell {
