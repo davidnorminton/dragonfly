@@ -306,81 +306,88 @@ async def _persist_music(tree_songs: list):
             except Exception:
                 return None
 
+        artists_persisted = set()
         for item in tree_songs:
-            artist_name = item["artist"]
-            album_title = item["album"]
-            song_title = item["title"]
-            meta = item.get("meta", {})
-            year_val = to_int(meta.get("year"))
+            try:
+                artist_name = item["artist"]
+                artists_persisted.add(artist_name)
+                album_title = item["album"]
+                song_title = item["title"]
+                meta = item.get("meta", {})
+                year_val = to_int(meta.get("year"))
 
-            # Artist
-            artist_stmt = select(MusicArtist).where(MusicArtist.name == artist_name)
-            artist_res = await session.execute(artist_stmt)
-            artist = artist_res.scalars().first()
-            if not artist:
-                artist = MusicArtist(name=artist_name)
-                session.add(artist)
-                await session.flush()
+                # Artist
+                artist_stmt = select(MusicArtist).where(MusicArtist.name == artist_name)
+                artist_res = await session.execute(artist_stmt)
+                artist = artist_res.scalars().first()
+                if not artist:
+                    artist = MusicArtist(name=artist_name)
+                    session.add(artist)
+                    await session.flush()
 
-            # Album
-            album_stmt = select(MusicAlbum).where(MusicAlbum.artist_id == artist.id, MusicAlbum.title == album_title)
-            album_res = await session.execute(album_stmt)
-            album = album_res.scalars().first()
-            if not album:
-                album = MusicAlbum(
-                    artist_id=artist.id,
-                    title=album_title,
-                    year=year_val,
-                    genre=meta.get("genre"),
-                    cover_path=item.get("album_image"),
-                    extra_metadata=meta,
-                )
-                session.add(album)
-                await session.flush()
-            else:
-                album.year = year_val or album.year
-                album.genre = album.genre or meta.get("genre")
-                if item.get("album_image"):
-                    album.cover_path = item.get("album_image")
-                if meta:
-                    album.extra_metadata = meta
+                # Album
+                album_stmt = select(MusicAlbum).where(MusicAlbum.artist_id == artist.id, MusicAlbum.title == album_title)
+                album_res = await session.execute(album_stmt)
+                album = album_res.scalars().first()
+                if not album:
+                    album = MusicAlbum(
+                        artist_id=artist.id,
+                        title=album_title,
+                        year=year_val,
+                        genre=meta.get("genre"),
+                        cover_path=item.get("album_image"),
+                        extra_metadata=meta,
+                    )
+                    session.add(album)
+                    await session.flush()
+                else:
+                    album.year = year_val or album.year
+                    album.genre = album.genre or meta.get("genre")
+                    if item.get("album_image"):
+                        album.cover_path = item.get("album_image")
+                    if meta:
+                        album.extra_metadata = meta
 
-            # Song
-            song_stmt = select(MusicSong).where(MusicSong.file_path == item["path"])
-            song_res = await session.execute(song_stmt)
-            song = song_res.scalars().first()
-            if not song:
-                song = MusicSong(
-                    album_id=album.id,
-                    artist_id=artist.id,
-                    title=song_title,
-                    track_number=meta.get("track_number"),
-                    disc_number=meta.get("disc_number"),
-                    duration_seconds=meta.get("duration_seconds"),
-                    file_path=item["path"],
-                    bitrate=meta.get("bitrate"),
-                    sample_rate=meta.get("sample_rate"),
-                    channels=meta.get("channels"),
-                    codec=meta.get("codec"),
-                    genre=meta.get("genre"),
-                    year=year_val,
-                    extra_metadata=meta,
-                )
-                session.add(song)
-            else:
-                song.title = song_title
-                song.track_number = meta.get("track_number")
-                song.disc_number = meta.get("disc_number")
-                song.duration_seconds = meta.get("duration_seconds")
-                song.bitrate = meta.get("bitrate")
-                song.sample_rate = meta.get("sample_rate")
-                song.channels = meta.get("channels")
-                song.codec = meta.get("codec")
-                song.genre = meta.get("genre")
-                song.year = meta.get("year")
-                song.extra_metadata = meta
+                # Song
+                song_stmt = select(MusicSong).where(MusicSong.file_path == item["path"])
+                song_res = await session.execute(song_stmt)
+                song = song_res.scalars().first()
+                if not song:
+                    song = MusicSong(
+                        album_id=album.id,
+                        artist_id=artist.id,
+                        title=song_title,
+                        track_number=meta.get("track_number"),
+                        disc_number=meta.get("disc_number"),
+                        duration_seconds=meta.get("duration_seconds"),
+                        file_path=item["path"],
+                        bitrate=meta.get("bitrate"),
+                        sample_rate=meta.get("sample_rate"),
+                        channels=meta.get("channels"),
+                        codec=meta.get("codec"),
+                        genre=meta.get("genre"),
+                        year=year_val,
+                        extra_metadata=meta,
+                    )
+                    session.add(song)
+                else:
+                    song.title = song_title
+                    song.track_number = meta.get("track_number")
+                    song.disc_number = meta.get("disc_number")
+                    song.duration_seconds = meta.get("duration_seconds")
+                    song.bitrate = meta.get("bitrate")
+                    song.sample_rate = meta.get("sample_rate")
+                    song.channels = meta.get("channels")
+                    song.codec = meta.get("codec")
+                    song.genre = meta.get("genre")
+                    song.year = meta.get("year")
+                    song.extra_metadata = meta
+            except Exception as e:
+                logger.error(f"Failed to persist song {item.get('path')}: {e}", exc_info=True)
+                continue
 
         await session.commit()
+        logger.info(f"Persisted {len(tree_songs)} songs for artists: {sorted(artists_persisted)}")
 
 
 @app.get("/api/music/scan")
