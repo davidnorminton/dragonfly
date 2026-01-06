@@ -2114,6 +2114,10 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.55);
   z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
 }
 
 .music-layout {
@@ -2439,4 +2443,56 @@ body {
   font-size: 0.85em;
   color: #9da7b8;
   text-align: center;
+}
+
+.music-volume-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 120px;
+}
+
+.volume-icon {
+  background: transparent;
+  border: none;
+  color: #e0e0e0;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.volume-icon:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.music-volume-slider {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+  min-width: 80px;
+}
+
+.music-volume-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #16c782);
+  width: 0%;
+  border-radius: 999px;
+}
+
+.music-volume-handle {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
 }

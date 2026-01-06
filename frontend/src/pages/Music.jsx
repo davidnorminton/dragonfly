@@ -26,6 +26,7 @@ export function MusicPage() {
   const [pendingSong, setPendingSong] = useState(null);
   const [playlistLoading, setPlaylistLoading] = useState(false);
   const [playlistModalError, setPlaylistModalError] = useState('');
+  const [volume, setVolume] = useState(1.0); // 0.0 to 1.0
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
 
@@ -115,6 +116,12 @@ export function MusicPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
   const playIndex = async (idx, list = playlist) => {
     if (idx < 0 || idx >= list.length) return;
     setPlaylist(list);
@@ -181,6 +188,20 @@ export function MusicPage() {
     const newTime = pct * duration;
     audioRef.current.currentTime = newTime;
     setProgress(newTime);
+  };
+
+  const handleVolumeChange = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    setVolume(pct);
+  };
+
+  const toggleMute = () => {
+    if (volume > 0) {
+      setVolume(0);
+    } else {
+      setVolume(1.0);
+    }
   };
 
   const handleSongClick = (songs, idx) => {
@@ -1009,6 +1030,25 @@ export function MusicPage() {
               />
             </div>
             <span className="time-stamp">{formatTime(duration)}</span>
+          </div>
+        </div>
+        <div className="music-volume-control">
+          <button className="volume-icon" onClick={toggleMute} title={volume > 0 ? 'Mute' : 'Unmute'}>
+            {volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}
+          </button>
+          <div className="music-volume-slider" onClick={handleVolumeChange}>
+            <div
+              className="music-volume-fill"
+              style={{
+                width: `${volume * 100}%`,
+              }}
+            />
+            <div
+              className="music-volume-handle"
+              style={{
+                left: `${volume * 100}%`,
+              }}
+            />
           </div>
         </div>
       </div>
