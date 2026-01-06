@@ -289,15 +289,42 @@ export function MusicPage() {
 
   const handleSeek = (e) => {
     e.stopPropagation();
-    if (!audioRef.current) return;
+    e.preventDefault();
+    
+    console.log('handleSeek called');
+    
+    if (!audioRef.current) {
+      console.log('No audio ref');
+      return;
+    }
+    
     const dur = audioRef.current.duration;
-    if (!dur || isNaN(dur) || dur === 0) return;
+    console.log('Audio duration:', dur, 'readyState:', audioRef.current.readyState);
+    
+    if (!dur || isNaN(dur) || dur === 0) {
+      console.log('Duration not valid:', dur);
+      return;
+    }
+    
+    // Check if audio is ready for seeking (readyState >= 2 means HAVE_CURRENT_DATA)
+    if (audioRef.current.readyState < 2) {
+      console.log('Audio not ready for seeking, readyState:', audioRef.current.readyState);
+      return;
+    }
+    
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const newTime = pct * dur;
+    
     console.log('Seeking to:', newTime, 'seconds (', Math.round(pct * 100), '% of', dur, ')');
-    audioRef.current.currentTime = newTime;
-    setProgress(newTime);
+    
+    try {
+      audioRef.current.currentTime = newTime;
+      setProgress(newTime);
+      console.log('Seek successful');
+    } catch (err) {
+      console.error('Seek failed:', err);
+    }
   };
 
   const handleVolumeChange = (e) => {
