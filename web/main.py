@@ -244,6 +244,66 @@ async def router_route(request: Request):
         raise HTTPException(status_code=500, detail="Router dispatch failed")
 
 
+async def _download_album_cover(artist: str, album: str, save_dir: Path) -> Optional[str]:
+    """
+    Download album cover from MusicBrainz Cover Art Archive.
+    Returns the relative path to the saved cover image, or None if not found.
+    """
+    try:
+        # Query MusicBrainz for release information
+        query = f'artist:"{artist}" AND release:"{album}"'
+        url = f"https://musicbrainz.org/ws/2/release/?query={query}&fmt=json"
+        
+        headers = {
+            "User-Agent": "Dragonfly/1.0 (https://github.com/davidnorminton/dragonfly)"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Search for the release
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            releases = data.get("releases", [])
+            if not releases:
+                logger.info(f"No MusicBrainz release found for {artist} - {album}")
+                return None
+            
+            # Get the first release ID
+            release_id = releases[0].get("id")
+            if not release_id:
+                return None
+            
+            logger.info(f"Found MusicBrainz release {release_id} for {artist} - {album}")
+            
+            # Try to get cover art from Cover Art Archive
+            cover_url = f"https://coverartarchive.org/release/{release_id}/front"
+            
+            # Respect MusicBrainz rate limiting
+            await asyncio.sleep(1)
+            
+            cover_response = await client.get(cover_url, headers=headers, follow_redirects=True)
+            cover_response.raise_for_status()
+            
+            # Save the cover image
+            save_dir.mkdir(parents=True, exist_ok=True)
+            cover_path = save_dir / "cover.jpg"
+            
+            with open(cover_path, "wb") as f:
+                f.write(cover_response.content)
+            
+            logger.info(f"Downloaded cover art for {artist} - {album} to {cover_path}")
+            
+            # Return relative path from music base
+            base_path = Path("/Users/davidnorminton/Music")
+            rel_path = str(cover_path.relative_to(base_path))
+            return rel_path
+            
+    except Exception as e:
+        logger.warning(f"Failed to download cover for {artist} - {album}: {e}")
+        return None
+
+
 def _extract_audio_meta(path: Path) -> Dict[str, Any]:
     """Extract audio metadata using mutagen; supports common formats with duration fallback."""
     meta: Dict[str, Any] = {
@@ -496,6 +556,21 @@ async def scan_music_library():
                             if cs["artist"] == artist and cs["album_dir"] == album_dir_name:
                                 cs["album_image"] = rel_img
                         break
+
+    # Download missing album covers from MusicBrainz
+    logger.info("Checking for missing album covers...")
+    for artist, albums in tree.items():
+        for album_dir, album_data in albums.items():
+            if album_data["image"] is None and album_data["title"]:
+                logger.info(f"No cover found for {artist} - {album_data['title']}, trying MusicBrainz...")
+                album_path = base_path / artist / album_dir
+                downloaded_cover = await _download_album_cover(artist, album_data["title"], album_path)
+                if downloaded_cover:
+                    album_data["image"] = downloaded_cover
+                    # Update collected_songs with the new cover
+                    for cs in collected_songs:
+                        if cs["artist"] == artist and cs["album_dir"] == album_dir:
+                            cs["album_image"] = downloaded_cover
 
     artists_out = []
     for artist, albums in tree.items():
