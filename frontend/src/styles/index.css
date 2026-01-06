@@ -1916,7 +1916,7 @@ body {
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  background: #a855f7;
+  background: linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), linear-gradient(90deg, #0b8be6 0%, #0a7acc 100%);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.9);
   height: 64px;
   width: 100%;
@@ -2066,12 +2066,16 @@ body {
 }
 
 .tracklist-header {
+  position: sticky;
+  top: 64px;
+  z-index: 1000;
   display: grid;
   grid-template-columns: 40px 1.4fr 80px 40px;
   color: #9da7b8;
   font-size: 0.85em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding: 6px 8px;
+  background: #1a1a2e;
 }
 
 .tracklist-header.playlist-view {
