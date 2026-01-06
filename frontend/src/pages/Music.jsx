@@ -179,33 +179,31 @@ export function MusicPage() {
     };
   }, []); // Empty deps - ref is updated separately
 
-  // Scroll detection for sticky hero using Intersection Observer
+  // Scroll detection for sticky hero using scroll event
   useEffect(() => {
     if (!heroRef.current || !mainContentRef.current) return;
 
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        // When the hero top is out of view (intersectionRatio < 1), stick it
-        console.log('Intersection:', { 
-          isIntersecting: entry.isIntersecting, 
-          intersectionRatio: entry.intersectionRatio,
-          boundingClientRect: entry.boundingClientRect.top 
-        });
-        
-        // Stick when hero has scrolled up and top is at/above viewport top
-        setIsScrolled(!entry.isIntersecting || entry.intersectionRatio < 0.3);
-      },
-      {
-        root: mainContentRef.current,
-        threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
-        rootMargin: '-80px 0px 0px 0px', // Trigger when 80px from top (minimized hero height)
-      }
-    );
+    const handleScroll = () => {
+      if (!mainContentRef.current || !heroRef.current) return;
+      
+      const scrollTop = mainContentRef.current.scrollTop;
+      const heroHeight = heroRef.current.offsetHeight;
+      const threshold = heroHeight - 80; // When play button would disappear
+      
+      console.log('Scroll event:', { scrollTop, heroHeight, threshold, shouldStick: scrollTop >= threshold });
+      
+      // Stick when scrolled past the threshold
+      setIsScrolled(scrollTop >= threshold);
+    };
 
-    observer.observe(heroRef.current);
+    const mainContent = mainContentRef.current;
+    mainContent.addEventListener('scroll', handleScroll, { passive: true });
+    
+    // Check initial state
+    handleScroll();
 
     return () => {
-      observer.disconnect();
+      mainContent.removeEventListener('scroll', handleScroll);
     };
   }, [selectedArtist, selectedAlbum, selectedPlaylist]);
 
@@ -625,30 +623,24 @@ export function MusicPage() {
       if (val) candidates.push(val);
     };
 
-    const addCoverFields = (obj) => {
-      push(obj?.cover_path);
-      push(obj?.coverPath);
-      push(obj?.image_path);
-      push(obj?.imagePath);
-      push(obj?.image);
-    };
+    // Use artist metadata images
+    push(artist?.image_path);
+    push(artist?.imagePath);
+    push(artist?.image);
 
-    addCoverFields(artist);
-    (artist?.albums || []).forEach((al) => addCoverFields(al));
-
+    // Only use cover.jpg for artist root directory
     const artistDir = guessArtistDirectoryFromSongs(artist);
     const roots = [];
     if (artistDir) roots.push(artistDir);
     if (artistName) roots.push(`/Users/davidnorminton/Music/${artistName}`);
 
-    // Prioritize cover.jpg for artist images
     roots.forEach((root) => {
       push(`${root}/cover.jpg`);
     });
 
-    // Then check other common names and extensions
-    const baseNames = ['cover', 'Cover', 'folder', 'Folder', 'album', 'Album'];
-    const exts = ['webp', 'jpg', 'jpeg', 'png'];
+    // Removed all other fallback images - only cover.jpg
+    const baseNames = [];
+    const exts = [];
     roots.forEach((root) => {
       baseNames.forEach((b) => {
         exts.forEach((ext) => {
@@ -853,24 +845,8 @@ export function MusicPage() {
       }
     }
 
-    // Artist images
+    // Artist images - only cover.jpg
     makeArtistImageCandidates(currentArtist, selectedArtist).forEach((c) => push(c));
-
-    // Extra fallback to selected artist path - prioritize cover.jpg
-    if (selectedArtist) {
-      push(`/Users/davidnorminton/Music/${selectedArtist}/cover.jpg`);
-      const baseNames = ['cover', 'Cover', 'folder', 'Folder', 'album', 'Album'];
-      const exts = ['webp', 'jpg', 'jpeg', 'png'];
-      baseNames.forEach((b) => {
-        exts.forEach((ext) => {
-          const path = `/Users/davidnorminton/Music/${selectedArtist}/${b}.${ext}`;
-          // Skip cover.jpg as we already added it first
-          if (path !== `/Users/davidnorminton/Music/${selectedArtist}/cover.jpg`) {
-            push(path);
-          }
-        });
-      });
-    }
 
     return Array.from(new Set(candidates.filter(Boolean)));
   }, [currentAlbum, currentArtist, selectedArtist, viewMode, selectedPlaylist, playlists, library]);
