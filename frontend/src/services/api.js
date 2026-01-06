@@ -62,6 +62,8 @@ export const musicAPI = {
   generatePopular: (artist) => api.post('/music/popular', { artist }).then(res => res.data),
   getAbout: (artist) => api.get('/music/artist/about', { params: { artist } }).then(res => res.data),
   generateAbout: (artist) => api.post('/music/artist/about', { artist }).then(res => res.data),
+  getDiscography: (artist) => api.get('/music/artist/discography', { params: { artist } }).then(res => res.data),
+  generateDiscography: (artist) => api.post('/music/artist/discography', { artist }).then(res => res.data),
   getPlaylists: () => api.get('/music/playlists').then(res => res.data),
   createPlaylist: (name) => api.post('/music/playlists', { name }).then(res => res.data),
   addToPlaylist: (payload) => api.post('/music/playlists/add', payload).then(res => res.data),

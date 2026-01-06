@@ -569,6 +569,10 @@ class AboutRequest(BaseModel):
     artist: str
 
 
+class DiscographyRequest(BaseModel):
+    artist: str
+
+
 def _extract_json_object(payload: str):
     if not payload:
         return None
@@ -881,6 +885,109 @@ async def generate_artist_about(req: AboutRequest):
             return {"success": True, "about": about_text}
     except Exception as e:
         logger.error(f"Error generating about info for '{artist_name}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.get("/api/music/artist/discography")
+async def get_artist_discography(artist: str):
+    """
+    Retrieve cached discography for an artist.
+    """
+    artist_name = artist.strip()
+    if not artist_name:
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": "artist is required"}
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await session.scalar(
+                select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
+            )
+            if not artist_row:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+
+            # Return cached discography if it exists
+            if artist_row.extra_metadata and artist_row.extra_metadata.get("discography"):
+                return {"success": True, "discography": artist_row.extra_metadata["discography"]}
+            else:
+                return {"success": True, "discography": None}
+    except Exception as e:
+        logger.error(f"Error fetching discography for '{artist_name}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.post("/api/music/artist/discography")
+async def generate_artist_discography(req: DiscographyRequest):
+    """
+    Use AI to generate a list of all studio albums by the artist.
+    Stores the list in artist.extra_metadata.discography and returns it.
+    """
+    artist_name = req.artist.strip()
+    if not artist_name:
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": "artist is required"}
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await _ensure_artist_in_db(session, artist_name)
+            if not artist_row:
+                logger.warning(f"Artist '{artist_name}' not found in database")
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+
+            # Check if we already have discography cached
+            if artist_row.extra_metadata and artist_row.extra_metadata.get("discography"):
+                return {"success": True, "discography": artist_row.extra_metadata["discography"]}
+
+            # Generate discography using AI
+            prompt = f"""List all studio albums by the band/artist '{artist_name}' in chronological order. 
+Return ONLY a JSON array with this exact format:
+{{"albums": [{{"year": 1990, "title": "Album Name"}}, {{"year": 1992, "title": "Another Album"}}]}}
+
+Include only official studio albums, not live albums, compilations, or EPs. Be accurate and factual."""
+
+            ai = AIService()
+            ai.reload_persona_config()
+            ai_resp = await ai.execute({"question": prompt})
+            raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
+
+            # Try to extract JSON from response
+            parsed = _extract_json_object(raw_answer) or {}
+            albums_list = parsed.get("albums") if isinstance(parsed, dict) else None
+
+            if not albums_list or not isinstance(albums_list, list):
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Failed to generate discography"}
+                )
+
+            # Sort by year
+            albums_list = sorted(albums_list, key=lambda x: x.get("year", 9999))
+
+            # Store in database
+            artist_row.extra_metadata = artist_row.extra_metadata or {}
+            artist_row.extra_metadata["discography"] = albums_list
+            flag_modified(artist_row, "extra_metadata")
+            await session.commit()
+
+            return {"success": True, "discography": albums_list}
+    except Exception as e:
+        logger.error(f"Error generating discography for '{artist_name}': {e}", exc_info=True)
         return JSONResponse(
             status_code=200,
             content={"success": False, "error": str(e)}

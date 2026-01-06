@@ -2538,6 +2538,52 @@ body {
   cursor: not-allowed;
 }
 
+/* Full Discography Section */
+.discography-section {
+  margin-top: 32px;
+}
+
+.discography-list {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.discography-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.discography-item:last-child {
+  border-bottom: none;
+}
+
+.discography-year {
+  color: #9da7b8;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 50px;
+}
+
+.discography-title {
+  color: #b3b3b3;
+  font-size: 15px;
+}
+
+.discography-title.linked {
+  color: #e0e0e0;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.discography-title.linked:hover {
+  color: #1db954;
+  text-decoration: underline;
+}
+
 .playlist-modal-overlay {
   position: fixed;
   inset: 0;

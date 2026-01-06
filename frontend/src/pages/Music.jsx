@@ -23,6 +23,9 @@ export function MusicPage() {
   const [aboutMap, setAboutMap] = useState({});
   const [aboutLoading, setAboutLoading] = useState(false);
   const [aboutError, setAboutError] = useState('');
+  const [discographyMap, setDiscographyMap] = useState({});
+  const [discographyLoading, setDiscographyLoading] = useState(false);
+  const [discographyError, setDiscographyError] = useState('');
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [playlistModalName, setPlaylistModalName] = useState('');
   const [playlistModalExisting, setPlaylistModalExisting] = useState('');
@@ -506,6 +509,44 @@ export function MusicPage() {
     }
   };
 
+  const fetchDiscography = async (artistName) => {
+    if (!artistName) return;
+    setDiscographyError('');
+    setDiscographyLoading(true);
+    try {
+      const res = await musicAPI.getDiscography(artistName);
+      if (res.success) {
+        if (res.discography) {
+          setDiscographyMap((prev) => ({ ...prev, [artistName]: res.discography }));
+        }
+      } else {
+        setDiscographyError(res.error || 'Failed to load discography');
+      }
+    } catch (e) {
+      setDiscographyError(e?.message || 'Failed to load discography');
+    } finally {
+      setDiscographyLoading(false);
+    }
+  };
+
+  const handleGenerateDiscography = async () => {
+    if (!selectedArtist) return;
+    setDiscographyError('');
+    setDiscographyLoading(true);
+    try {
+      const res = await musicAPI.generateDiscography(selectedArtist);
+      if (res.success) {
+        setDiscographyMap((prev) => ({ ...prev, [selectedArtist]: res.discography || [] }));
+      } else {
+        setDiscographyError(res.error || 'Failed to generate discography');
+      }
+    } catch (e) {
+      setDiscographyError(e?.message || 'Failed to generate discography');
+    } finally {
+      setDiscographyLoading(false);
+    }
+  };
+
   const guessArtistDirectoryFromSongs = (artist) => {
     const firstSongPath = artist?.albums?.[0]?.songs?.[0]?.path;
     if (!firstSongPath) return null;
@@ -720,6 +761,7 @@ export function MusicPage() {
     if (!selectedArtist) return;
     fetchPopular(selectedArtist);
     fetchAbout(selectedArtist);
+    fetchDiscography(selectedArtist);
   }, [selectedArtist, viewMode]);
 
   const handleAlbumSelect = (artistName, albumName) => {
@@ -1231,6 +1273,45 @@ export function MusicPage() {
                             </button>
                           )}
                           {aboutError && <div className="music-error-inline">{aboutError}</div>}
+                        </div>
+                      )}
+                      {selectedArtist && (
+                        <div className="album-section discography-section">
+                          <div className="album-section-title">Full Discography</div>
+                          {discographyMap[selectedArtist] ? (
+                            <div className="discography-list">
+                              {discographyMap[selectedArtist].map((album, idx) => {
+                                // Check if this album exists in the user's library
+                                const albumInLibrary = sortedAlbums.find(
+                                  (a) => a.name.toLowerCase() === album.title.toLowerCase()
+                                );
+                                return (
+                                  <div key={idx} className="discography-item">
+                                    <span className="discography-year">{album.year}</span>
+                                    {albumInLibrary ? (
+                                      <span
+                                        className="discography-title linked"
+                                        onClick={() => handleAlbumSelect(selectedArtist, albumInLibrary.name)}
+                                      >
+                                        {album.title}
+                                      </span>
+                                    ) : (
+                                      <span className="discography-title">{album.title}</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <button 
+                              className="about-generate-btn" 
+                              onClick={handleGenerateDiscography}
+                              disabled={discographyLoading}
+                            >
+                              {discographyLoading ? 'Generating...' : 'Generate Full Discography'}
+                            </button>
+                          )}
+                          {discographyError && <div className="music-error-inline">{discographyError}</div>}
                         </div>
                       )}
                       {!sortedAlbums.length && <div className="music-empty">Select an artist to view albums</div>}
