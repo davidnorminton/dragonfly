@@ -1113,7 +1113,18 @@ export function MusicPage() {
                   <>
                     {(() => {
                       const artist = library.find((a) => a.name === (currentAlbum.artist || selectedArtist));
-                      const artistImgPath = artist?.image || artist?.image_path;
+                      let artistImgPath = artist?.image || artist?.image_path;
+                      
+                      // Normalize the path (remove base path if present)
+                      if (artistImgPath) {
+                        artistImgPath = normalizeMusicPath(artistImgPath);
+                      }
+                      
+                      // If no image, try to construct path from artist name
+                      if (!artistImgPath && artist?.name) {
+                        artistImgPath = `${artist.name}/cover.jpg`;
+                      }
+                      
                       return artistImgPath ? (
                         <img
                           src={`/api/music/stream?path=${encodeURIComponent(artistImgPath)}`}
