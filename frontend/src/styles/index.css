@@ -2025,7 +2025,7 @@ body {
 }
 
 .hero-icon.active {
-  color: #1db954;
+  color: #fff;
 }
 
 .hero-icon.active svg {
@@ -2052,13 +2052,16 @@ body {
 }
 
 .hero-icon {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: transparent;
+  color: #b3b3b3;
   border: none;
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
+  padding: 8px;
   cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.hero-icon:hover {
+  color: #fff;
 }
 
 .tracklist-header {
@@ -2754,7 +2757,7 @@ body {
 .control-btn {
   background: transparent;
   border: none;
-  color: #eaeaea;
+  color: #b3b3b3;
   cursor: pointer;
   padding: 8px;
   border-radius: 50%;
@@ -2782,12 +2785,11 @@ body {
 
 .control-btn:hover,
 .control-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 
 .control-icon.active {
-  color: #1db954;
+  color: #fff;
 }
 
 .control-icon.active svg {
