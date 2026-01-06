@@ -1908,10 +1908,8 @@ body {
 
 /* Minimal sticky hero */
 .music-hero-minimal {
-  position: fixed;
+  position: sticky;
   top: 0;
-  left: 310px;
-  right: 0;
   margin: 0;
   z-index: 2000;
   display: flex;
@@ -1921,6 +1919,7 @@ body {
   background: #0b8be6;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.9);
   height: 64px;
+  width: 100%;
   opacity: 0;
   visibility: hidden;
   transform: translateY(-100%);
