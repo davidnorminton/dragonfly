@@ -2212,7 +2212,6 @@ body {
 }
 
 .tracklist-body {
-  overflow-y: auto;
   max-height: calc(100vh);
   padding: 8px;
   padding-bottom: 90px;
