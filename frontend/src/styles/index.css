@@ -2611,7 +2611,8 @@ body {
   max-width: 1400px;
   margin: 0 auto;
   background: #1a1a2e;
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
   color: #e0e0e0;
 }
 
