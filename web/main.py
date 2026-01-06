@@ -433,8 +433,23 @@ async def scan_music_library():
     tree = defaultdict(lambda: defaultdict(lambda: {"songs": [], "image": None, "year": None, "date": None}))  # artist -> album -> {songs, image, year, date}
     artist_images: Dict[str, str] = {}
     image_exts = {".jpg", ".jpeg", ".png", ".webp"}
-    audio_exts = {".mp3", ".m4a", ".flac", ".wav", ".ogg"}
+    audio_exts = {
+        ".mp3",
+        ".m4a",
+        ".m4p",
+        ".aac",
+        ".flac",
+        ".alac",
+        ".wav",
+        ".aiff",
+        ".aif",
+        ".ogg",
+        ".oga",
+        ".wma",
+        ".mp4",
+    }
     collected_songs = []
+    artist_names_seen = set()
 
     for root, _, files in os.walk(base_path):
         for f in files:
@@ -464,6 +479,7 @@ async def scan_music_library():
                     # Not in Artist/Album/Song; skip
                     continue
                 artist, album = parts[0], parts[1]
+                artist_names_seen.add(artist)
                 song = Path(parts[-1]).stem
                 rel_path = str(full_path.relative_to(base_path))
                 meta = _extract_audio_meta(full_path)
@@ -535,10 +551,11 @@ async def scan_music_library():
     # Persist to DB
     try:
         await _persist_music(collected_songs)
+        logger.info(f"Scan complete. Artists found: {sorted(artist_names_seen)}")
     except Exception as e:
         logger.error(f"Failed to persist music library: {e}", exc_info=True)
 
-    return {"success": True, "artists": sorted(artists_out, key=lambda a: a["name"].lower())}
+    return {"success": True, "artists": sorted(artists_out, key=lambda a: a["name"].lower()), "found_artists": sorted(artist_names_seen)}
 
 
 @app.get("/api/music/stream")
