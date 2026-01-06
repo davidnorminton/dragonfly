@@ -803,10 +803,15 @@ export function MusicPage() {
 
   const formatTime = (secs) => {
     if (!secs || isNaN(secs)) return '0:00';
-    const m = Math.floor(secs / 60);
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
     const s = Math.floor(secs % 60)
       .toString()
       .padStart(2, '0');
+    
+    if (h > 0) {
+      return `${h} hr ${m} min`;
+    }
     return `${m}:${s}`;
   };
 
@@ -1144,6 +1149,7 @@ export function MusicPage() {
                       {currentAlbum.artist || selectedArtist || ''}
                     </span>
                     {currentAlbum.songs?.length ? ` • ${currentAlbum.songs.length} songs` : ''}
+                    {stats.durationText ? ` • ${stats.durationText}` : ''}
                   </>
                 ) : (
                   heroSub
