@@ -2116,8 +2116,7 @@ body {
   z-index: 1200;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  justify-content: center;
 }
 
 .music-layout {
@@ -2450,6 +2449,9 @@ body {
   align-items: center;
   gap: 10px;
   min-width: 120px;
+  position: absolute;
+  left: 75%;
+  transform: translateX(-50%);
 }
 
 .volume-icon {
