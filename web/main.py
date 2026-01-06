@@ -597,38 +597,48 @@ def _match_popular_items(ai_items: List[Dict[str, Any]], songs_data: List[Dict[s
 
 
 async def _ensure_artist_in_db(session: AsyncSessionLocal, artist_name: str):
+    """
+    Ensure an artist exists in DB. If missing, trigger a rescan and retry.
+    Returns the artist row or None. Also logs available artists when missing.
+    """
+    name_norm = (artist_name or "").strip().lower()
+
+    async def _fetch_exact(s):
+        return await s.scalar(select(MusicArtist).where(func.lower(MusicArtist.name) == name_norm))
+
+    async def _fetch_like(s):
+        return await s.scalar(select(MusicArtist).where(MusicArtist.name.ilike(artist_name)))
+
     logger.debug(f"Looking for artist: '{artist_name}'")
-    artist_row = await session.scalar(
-        select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
-    )
+    artist_row = await _fetch_exact(session)
     if artist_row:
         logger.debug(f"Artist '{artist_name}' found in DB")
         return artist_row
-    
+
     logger.info(f"Artist '{artist_name}' not found, attempting rescan...")
-    # Attempt a rescan to populate DB
     try:
         await scan_music_library()
         logger.info(f"Rescan completed, querying for artist '{artist_name}' again...")
     except Exception as e:
         logger.error(f"Rescan failed while ensuring artist '{artist_name}': {e}", exc_info=True)
         return None
-    
-    # Expire all and commit to ensure fresh query
+
+    # Refresh session state and retry exact + ilike
     session.expire_all()
     await session.commit()
-    
-    # Query again - the scan commits in its own session, so data should be visible
-    artist_row = await session.scalar(
-        select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
-    )
+
+    artist_row = await _fetch_exact(session)
+    if not artist_row:
+        artist_row = await _fetch_like(session)
+
     if artist_row:
         logger.info(f"Artist '{artist_name}' found after rescan")
     else:
-        # List all artists in DB for debugging
         all_artists_res = await session.execute(select(MusicArtist.name))
         artist_names = [a[0] for a in all_artists_res.all()]
-        logger.warning(f"Artist '{artist_name}' still not found after rescan. Available artists: {artist_names}")
+        logger.warning(
+            f"Artist '{artist_name}' still not found after rescan. Available artists: {artist_names}"
+        )
     return artist_row
 
 
@@ -642,9 +652,12 @@ async def get_music_popular(artist: str):
             artist_row = await _ensure_artist_in_db(session, artist)
             if not artist_row:
                 logger.warning(f"Artist '{artist}' not found in database after rescan attempt")
+                # Include available artists to aid debugging
+                all_artists_res = await session.execute(select(MusicArtist.name))
+                artist_names = [a[0] for a in all_artists_res.all()]
                 return JSONResponse(
                     status_code=200,
-                    content={"success": False, "error": "Artist not found"}
+                    content={"success": False, "error": "Artist not found", "artists": artist_names},
                 )
             meta = artist_row.extra_metadata or {}
             popular = meta.get("popular_songs") or []
@@ -675,9 +688,11 @@ async def generate_music_popular(req: PopularRequest):
             artist_row = await _ensure_artist_in_db(session, artist_name)
             if not artist_row:
                 logger.warning(f"Artist '{artist_name}' not found in database after rescan attempt")
+                all_artists_res = await session.execute(select(MusicArtist.name))
+                artist_names = [a[0] for a in all_artists_res.all()]
                 return JSONResponse(
                     status_code=200,
-                    content={"success": False, "error": "Artist not found"}
+                    content={"success": False, "error": "Artist not found", "artists": artist_names},
                 )
 
             result = await session.execute(
