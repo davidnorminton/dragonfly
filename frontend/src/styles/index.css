@@ -2432,6 +2432,7 @@ body {
   width: 0%;
   border-radius: 999px;
   transition: width 0.1s linear;
+  pointer-events: none;
 }
 
 .music-progress-handle {

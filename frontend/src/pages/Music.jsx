@@ -289,8 +289,8 @@ export function MusicPage() {
 
   const handleSeek = (e) => {
     if (!audioRef.current) return;
-    const dur = audioRef.current.duration || duration || 0;
-    if (!dur) return;
+    const dur = audioRef.current.duration;
+    if (!dur || isNaN(dur) || dur === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const newTime = pct * dur;
@@ -953,15 +953,12 @@ export function MusicPage() {
                     <div className="album-section-title popular-title">
                       <span>Popular</span>
                       <div className="popular-actions">
-                        <button className="playlist-add-btn" onClick={handleGeneratePopular} disabled={popularLoading}>
-                          {popularLoading ? 'Loading…' : 'Refresh'}
+                        <button className="playlist-add-btn" onClick={handleGeneratePopular} disabled={popularLoading} title="Refresh popular songs">
+                          {popularLoading ? '⟳' : '⟳'}
                         </button>
                       </div>
                     </div>
                     {popularError && <div className="music-error-inline">{popularError}</div>}
-                    {!popularLoading && !popularError && !currentPopular.length && (
-                      <div className="music-empty">Click Refresh to fetch popular songs</div>
-                    )}
                     {popularLoading && <div className="music-empty">Loading popular songs…</div>}
                     {currentPopular.length > 0 && (
                       <>
