@@ -2001,6 +2001,17 @@ body {
 .album-artist {
   color: #e5f2ff;
   transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.artist-circular-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .artist-name-link {
@@ -2011,6 +2022,14 @@ body {
 
 .artist-name-link:hover {
   color: #1db954;
+}
+
+.hero-icon.active {
+  color: #1db954;
+}
+
+.hero-icon.active svg {
+  opacity: 1;
 }
 
 .hero-actions {
@@ -2765,6 +2784,14 @@ body {
 .control-icon:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
+}
+
+.control-icon.active {
+  color: #1db954;
+}
+
+.control-icon.active svg {
+  opacity: 1;
 }
 
 .music-progress-container {

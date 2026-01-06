@@ -34,6 +34,8 @@ export function MusicPage() {
   const [playlistModalError, setPlaylistModalError] = useState('');
   const [volume, setVolume] = useState(1.0); // 0.0 to 1.0
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isShuffled, setIsShuffled] = useState(false);
+  const [shuffleQueue, setShuffleQueue] = useState([]);
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
   const mainContentRef = useRef(null);
@@ -411,7 +413,49 @@ export function MusicPage() {
   };
 
   const handleSongClick = (songs, idx) => {
+    // Clear shuffle when manually clicking a song
+    setIsShuffled(false);
+    setShuffleQueue([]);
     if (playIndexRef.current) playIndexRef.current(idx, songs);
+  };
+
+  const handleShuffle = () => {
+    if (isShuffled) {
+      // Turn off shuffle
+      setIsShuffled(false);
+      setShuffleQueue([]);
+    } else {
+      // Turn on shuffle - get all songs from current context
+      let songsToShuffle = [];
+      
+      if (viewMode === 'playlists' && selectedPlaylist) {
+        const currentPlaylistData = playlists.find((p) => p.name === selectedPlaylist);
+        songsToShuffle = currentPlaylistData?.songs || [];
+      } else if (selectedAlbum && currentAlbum) {
+        songsToShuffle = sortSongs(currentAlbum.songs || []);
+      } else if (currentArtist) {
+        // All songs from current artist
+        const allSongs = sortedAlbums.flatMap((album) => sortSongs(album.songs || []));
+        songsToShuffle = allSongs;
+      }
+      
+      if (songsToShuffle.length > 0) {
+        // Shuffle using Fisher-Yates algorithm
+        const shuffled = [...songsToShuffle];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        
+        setIsShuffled(true);
+        setShuffleQueue(shuffled);
+        
+        // Start playing first song in shuffled queue
+        if (playIndexRef.current) {
+          playIndexRef.current(0, shuffled);
+        }
+      }
+    }
   };
 
   const openPlaylistModal = (song = null) => {
@@ -1067,6 +1111,18 @@ export function MusicPage() {
               <div className="album-artist">
                 {selectedAlbum && currentAlbum ? (
                   <>
+                    {(() => {
+                      const artist = library.find((a) => a.name === (currentAlbum.artist || selectedArtist));
+                      const artistImgPath = artist?.image || artist?.image_path;
+                      return artistImgPath ? (
+                        <img
+                          src={`/api/music/stream?path=${encodeURIComponent(artistImgPath)}`}
+                          alt={artist?.name}
+                          className="artist-circular-thumb"
+                          onError={(e) => (e.target.style.display = 'none')}
+                        />
+                      ) : null;
+                    })()}
                     <span 
                       className="artist-name-link" 
                       onClick={() => {
@@ -1098,7 +1154,11 @@ export function MusicPage() {
                     </svg>
                   )}
                 </button>
-                <button className="hero-icon" title="Shuffle">
+                <button 
+                  className={`hero-icon ${isShuffled ? 'active' : ''}`} 
+                  onClick={handleShuffle} 
+                  title={isShuffled ? 'Shuffle: On' : 'Shuffle: Off'}
+                >
                   <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M13.151.922a.75.75 0 10-1.06 1.06L13.109 3H11.16a3.75 3.75 0 00-2.873 1.34l-6.173 7.356A2.25 2.25 0 01.39 13H0v1.5h.391a3.75 3.75 0 002.873-1.34l6.173-7.356A2.25 2.25 0 0111.16 4.5h1.95l-1.02 1.02a.75.75 0 101.06 1.06l2.273-2.273a.75.75 0 000-1.06L13.151.922zM11.16 12.5H13.11l-1.02-1.02a.75.75 0 111.06-1.06l2.273 2.273a.75.75 0 010 1.06l-2.273 2.273a.75.75 0 11-1.06-1.06l1.02-1.02H11.16a2.25 2.25 0 01-1.722-.804l-1.367-1.628a3.75 3.75 0 002.873 1.932zm-8.282-.804A2.25 2.25 0 010 10.5V9h.391a3.75 3.75 0 002.873-1.34l1.367-1.628a3.75 3.75 0 00-2.873 1.932l-1.867 2.228z"/>
                   </svg>
@@ -1406,7 +1466,11 @@ export function MusicPage() {
       <div className="music-player-footer">
         <div className="music-player-left">
           <div className="music-controls-row">
-            <button className="control-icon" title="Shuffle">
+            <button 
+              className={`control-icon ${isShuffled ? 'active' : ''}`} 
+              onClick={handleShuffle} 
+              title={isShuffled ? 'Shuffle: On' : 'Shuffle: Off'}
+            >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M13.151.922a.75.75 0 10-1.06 1.06L13.109 3H11.16a3.75 3.75 0 00-2.873 1.34l-6.173 7.356A2.25 2.25 0 01.39 13H0v1.5h.391a3.75 3.75 0 002.873-1.34l6.173-7.356A2.25 2.25 0 0111.16 4.5h1.95l-1.02 1.02a.75.75 0 101.06 1.06l2.273-2.273a.75.75 0 000-1.06L13.151.922zM11.16 12.5H13.11l-1.02-1.02a.75.75 0 111.06-1.06l2.273 2.273a.75.75 0 010 1.06l-2.273 2.273a.75.75 0 11-1.06-1.06l1.02-1.02H11.16a2.25 2.25 0 01-1.722-.804l-1.367-1.628a3.75 3.75 0 002.873 1.932zm-8.282-.804A2.25 2.25 0 010 10.5V9h.391a3.75 3.75 0 002.873-1.34l1.367-1.628a3.75 3.75 0 00-2.873 1.932l-1.867 2.228z"/>
               </svg>
