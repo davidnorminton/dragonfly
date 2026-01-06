@@ -361,9 +361,27 @@ export function MusicPage() {
     return parts.slice(0, -2).join('/');
   };
 
+  const normalizeMusicPath = (path) => {
+    if (!path) return null;
+    // Convert absolute paths to relative paths
+    const musicBase = '/Users/davidnorminton/Music/';
+    if (path.startsWith(musicBase)) {
+      return path.substring(musicBase.length);
+    } else if (path.startsWith('/Users/davidnorminton/Music')) {
+      let relPath = path.substring('/Users/davidnorminton/Music'.length);
+      if (relPath.startsWith('/')) {
+        relPath = relPath.substring(1);
+      }
+      return relPath;
+    }
+    // Already relative or different format
+    return path;
+  };
+
   const guessCoverFromSongPath = (songPath) => {
     if (!songPath) return null;
-    const parts = songPath.split('/');
+    const relPath = normalizeMusicPath(songPath);
+    const parts = relPath.split('/');
     if (parts.length < 2) return null;
     const dir = parts.slice(0, -1).join('/');
     const baseNames = ['cover', 'Cover', 'folder', 'Folder', 'album', 'Album'];
@@ -572,7 +590,12 @@ export function MusicPage() {
 
   const heroImageCandidates = useMemo(() => {
     const candidates = [];
-    const push = (val) => val && candidates.push(val);
+    const push = (val) => {
+      if (val) {
+        const normalized = normalizeMusicPath(val);
+        if (normalized) candidates.push(normalized);
+      }
+    };
 
     // Current album cover first
     if (currentAlbum) {
