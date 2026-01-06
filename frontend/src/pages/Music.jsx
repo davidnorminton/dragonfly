@@ -902,8 +902,17 @@ export function MusicPage() {
                 onError={(e) => nextImageFallback(e, heroImageCandidates)}
               />
             ) : (
-              <div className="album-hero" style={{ background: 'rgba(0, 0, 0, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.9em' }}>
-                {viewMode === 'playlists' ? '🎵' : '🎤'}
+              <div className="album-hero" style={{ background: 'rgba(0, 0, 0, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                {viewMode === 'playlists' ? (
+                  <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M15 14.5H5V13h10v1.5zm0-5.75H5v1.5h10v-1.5zM15 3H5v1.5h10V3zM3 3H1v1.5h2V3zm0 11.5H1V16h2v-1.5zm0-5.75H1v1.5h2v-1.5z"/>
+                  </svg>
+                ) : (
+                  <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M11 5a3 3 0 11-6 0 3 3 0 016 0zM8 7a2 2 0 100-4 2 2 0 000 4zm.256 7a4.474 4.474 0 01-.229-1.004H3c.001-.246.154-.986.832-1.664C4.484 10.68 5.711 10 8 10c.26 0 .507.009.74.025.226-.341.496-.65.804-.918C9.077 9.038 8.564 9 8 9c-5 0-6 3-6 4s1 1 1 1h5.256z"/>
+                    <path d="M12.5 16a3.5 3.5 0 100-7 3.5 3.5 0 000 7zm-.646-4.854l.646.647.646-.647a.5.5 0 01.708.708l-.647.646.647.646a.5.5 0 01-.708.708L12.5 13.207l-.646.647a.5.5 0 01-.708-.708l.647-.646-.647-.646a.5.5 0 01.708-.708z"/>
+                  </svg>
+                )}
               </div>
             )}
             <div className="hero-text">
@@ -916,10 +925,26 @@ export function MusicPage() {
                   onClick={handleHeroToggle}
                   title={isPlaying ? 'Pause' : 'Play'}
                 >
-                  {isPlaying ? '⏸' : '▶'}
+                  {isPlaying ? (
+                    <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M2.7 1a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7H2.7zm8 0a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7h-2.6z"/>
+                    </svg>
+                  ) : (
+                    <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M3 1.713a.7.7 0 011.05-.607l10.89 6.288a.7.7 0 010 1.212L4.05 14.894A.7.7 0 013 14.288V1.713z"/>
+                    </svg>
+                  )}
                 </button>
-                <button className="hero-icon" title="Shuffle">🔀</button>
-                <button className="hero-icon" title="Repeat">↻</button>
+                <button className="hero-icon" title="Shuffle">
+                  <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M13.151.922a.75.75 0 10-1.06 1.06L13.109 3H11.16a3.75 3.75 0 00-2.873 1.34l-6.173 7.356A2.25 2.25 0 01.39 13H0v1.5h.391a3.75 3.75 0 002.873-1.34l6.173-7.356A2.25 2.25 0 0111.16 4.5h1.95l-1.02 1.02a.75.75 0 101.06 1.06l2.273-2.273a.75.75 0 000-1.06L13.151.922zM11.16 12.5H13.11l-1.02-1.02a.75.75 0 111.06-1.06l2.273 2.273a.75.75 0 010 1.06l-2.273 2.273a.75.75 0 11-1.06-1.06l1.02-1.02H11.16a2.25 2.25 0 01-1.722-.804l-1.367-1.628a3.75 3.75 0 002.873 1.932zm-8.282-.804A2.25 2.25 0 010 10.5V9h.391a3.75 3.75 0 002.873-1.34l1.367-1.628a3.75 3.75 0 00-2.873 1.932l-1.867 2.228z"/>
+                  </svg>
+                </button>
+                <button className="hero-icon" title="Repeat">
+                  <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M0 4.75A3.75 3.75 0 013.75 1h8.5A3.75 3.75 0 0116 4.75v5a3.75 3.75 0 01-3.75 3.75H9.81l1.018 1.018a.75.75 0 11-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 111.06 1.06L9.811 12h2.439a2.25 2.25 0 002.25-2.25v-5a2.25 2.25 0 00-2.25-2.25h-8.5a2.25 2.25 0 00-2.25 2.25v5A2.25 2.25 0 003.75 12H5v1.5H3.75A3.75 3.75 0 010 9.75v-5z"/>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
@@ -999,7 +1024,9 @@ export function MusicPage() {
                       <span>Popular</span>
                       <div className="popular-actions">
                         <button className="playlist-add-btn" onClick={handleGeneratePopular} disabled={popularLoading} title="Refresh popular songs">
-                          {popularLoading ? '⟳' : '⟳'}
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className={popularLoading ? 'spinning' : ''}>
+                            <path fillRule="evenodd" d="M8 3a5 5 0 104.546 2.914.5.5 0 00-.908-.417A4 4 0 118 4v1H6.5a.5.5 0 000 1H9a.5.5 0 00.5-.5V2.5a.5.5 0 00-1 0V3z"/>
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -1117,13 +1144,37 @@ export function MusicPage() {
       <div className="music-player-footer">
         <div className="music-player-left">
           <div className="music-controls-row">
-            <button className="control-icon" title="Shuffle">🔀</button>
-            <button className="control-btn" onClick={handlePrev} title="Previous">⏮</button>
-            <button className="control-btn play-btn" onClick={handlePlayPause} title={isPlaying ? 'Pause' : 'Play'}>
-              {isPlaying ? '⏸' : '▶'}
+            <button className="control-icon" title="Shuffle">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M13.151.922a.75.75 0 10-1.06 1.06L13.109 3H11.16a3.75 3.75 0 00-2.873 1.34l-6.173 7.356A2.25 2.25 0 01.39 13H0v1.5h.391a3.75 3.75 0 002.873-1.34l6.173-7.356A2.25 2.25 0 0111.16 4.5h1.95l-1.02 1.02a.75.75 0 101.06 1.06l2.273-2.273a.75.75 0 000-1.06L13.151.922zM11.16 12.5H13.11l-1.02-1.02a.75.75 0 111.06-1.06l2.273 2.273a.75.75 0 010 1.06l-2.273 2.273a.75.75 0 11-1.06-1.06l1.02-1.02H11.16a2.25 2.25 0 01-1.722-.804l-1.367-1.628a3.75 3.75 0 002.873 1.932zm-8.282-.804A2.25 2.25 0 010 10.5V9h.391a3.75 3.75 0 002.873-1.34l1.367-1.628a3.75 3.75 0 00-2.873 1.932l-1.867 2.228z"/>
+              </svg>
             </button>
-            <button className="control-btn" onClick={handleNext} title="Next">⏭</button>
-            <button className="control-icon" title="Repeat">🔁</button>
+            <button className="control-btn" onClick={handlePrev} title="Previous">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3.3 1a.7.7 0 01.7.7v5.15l9.95-5.744a.7.7 0 011.05.606v12.575a.7.7 0 01-1.05.607L4 9.149V14.3a.7.7 0 01-.7.7H1.7a.7.7 0 01-.7-.7V1.7a.7.7 0 01.7-.7h1.6z"/>
+              </svg>
+            </button>
+            <button className="control-btn play-btn" onClick={handlePlayPause} title={isPlaying ? 'Pause' : 'Play'}>
+              {isPlaying ? (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2.7 1a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7H2.7zm8 0a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7h-2.6z"/>
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3 1.713a.7.7 0 011.05-.607l10.89 6.288a.7.7 0 010 1.212L4.05 14.894A.7.7 0 013 14.288V1.713z"/>
+                </svg>
+              )}
+            </button>
+            <button className="control-btn" onClick={handleNext} title="Next">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M12.7 1a.7.7 0 00-.7.7v5.15L2.05 1.107A.7.7 0 001 1.712v12.575a.7.7 0 001.05.607L12 9.149V14.3a.7.7 0 00.7.7h1.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7h-1.6z"/>
+              </svg>
+            </button>
+            <button className="control-icon" title="Repeat">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 4.75A3.75 3.75 0 013.75 1h8.5A3.75 3.75 0 0116 4.75v5a3.75 3.75 0 01-3.75 3.75H9.81l1.018 1.018a.75.75 0 11-1.06 1.06L6.939 12.75l2.829-2.828a.75.75 0 111.06 1.06L9.811 12h2.439a2.25 2.25 0 002.25-2.25v-5a2.25 2.25 0 00-2.25-2.25h-8.5a2.25 2.25 0 00-2.25 2.25v5A2.25 2.25 0 003.75 12H5v1.5H3.75A3.75 3.75 0 010 9.75v-5z"/>
+              </svg>
+            </button>
           </div>
           <div className="music-progress-container">
             <span className="time-stamp">{formatTime(progress)}</span>
@@ -1146,7 +1197,20 @@ export function MusicPage() {
         </div>
         <div className="music-volume-control">
           <button className="volume-icon" onClick={toggleMute} title={volume > 0 ? 'Mute' : 'Unmute'}>
-            {volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}
+            {volume === 0 ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M13.86 5.47a.75.75 0 00-1.061 0l-1.47 1.47-1.47-1.47A.75.75 0 008.8 6.53L10.269 8l-1.47 1.47a.75.75 0 101.06 1.06l1.47-1.47 1.47 1.47a.75.75 0 001.06-1.06L12.39 8l1.47-1.47a.75.75 0 000-1.06z"/>
+                <path d="M10.116 1.5A.75.75 0 008.991.85l-6.925 4a3.642 3.642 0 00-1.33 4.967 3.639 3.639 0 001.33 1.332l6.925 4a.75.75 0 001.125-.649v-1.906a4.73 4.73 0 01-1.5-.694v1.3L2.817 9.852a2.141 2.141 0 01-.781-2.92c.187-.324.456-.594.78-.782l5.8-3.35v1.3c.45-.313.956-.55 1.5-.694V1.5z"/>
+              </svg>
+            ) : volume < 0.5 ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M9.741.85a.75.75 0 01.375.65v13a.75.75 0 01-1.125.65l-6.925-4a3.642 3.642 0 01-1.33-4.967 3.639 3.639 0 011.33-1.332l6.925-4a.75.75 0 01.75 0zm-6.924 5.3a2.139 2.139 0 000 3.7l5.8 3.35V2.8l-5.8 3.35zm8.683 4.29V5.56a2.75 2.75 0 010 4.88z"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M9.741.85a.75.75 0 01.375.65v13a.75.75 0 01-1.125.65l-6.925-4a3.642 3.642 0 01-1.33-4.967 3.639 3.639 0 011.33-1.332l6.925-4a.75.75 0 01.75 0zm-6.924 5.3a2.139 2.139 0 000 3.7l5.8 3.35V2.8l-5.8 3.35zm8.683 6.087a4.502 4.502 0 000-8.474v1.65a2.999 2.999 0 010 5.175v1.649z"/>
+              </svg>
+            )}
           </button>
           <div className="music-volume-slider" onClick={handleVolumeChange}>
             <div
