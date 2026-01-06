@@ -490,7 +490,7 @@ async def get_music_library():
     Load the music library from the database (no filesystem scan).
     Returns the same structure as /api/music/scan but from cached DB data.
     """
-    async with get_async_session() as session:
+    async with AsyncSessionLocal() as session:
         try:
             # Load all artists with their albums and songs
             result = await session.execute(
