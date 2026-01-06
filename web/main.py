@@ -380,7 +380,7 @@ async def _persist_music(tree_songs: list):
                     song.channels = meta.get("channels")
                     song.codec = meta.get("codec")
                     song.genre = meta.get("genre")
-                    song.year = meta.get("year")
+                    song.year = year_val
                     song.extra_metadata = meta
             except Exception as e:
                 logger.error(f"Failed to persist song {item.get('path')}: {e}", exc_info=True)
