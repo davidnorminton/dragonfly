@@ -484,6 +484,70 @@ async def _persist_music(tree_songs: list):
         logger.info(f"Persisted {len(tree_songs)} songs for artists: {sorted(artists_persisted)}")
 
 
+async def _cleanup_deleted_music(base_path: Path):
+    """
+    Remove songs, albums, and artists from the database if their files no longer exist.
+    """
+    async with AsyncSessionLocal() as session:
+        # Get all songs
+        result = await session.execute(select(MusicSong))
+        songs = result.scalars().all()
+        
+        deleted_song_ids = []
+        for song in songs:
+            file_path = base_path / song.file_path
+            if not file_path.exists():
+                deleted_song_ids.append(song.id)
+                logger.info(f"Marking song for deletion (file not found): {song.file_path}")
+        
+        # Delete songs
+        if deleted_song_ids:
+            for song_id in deleted_song_ids:
+                song = await session.get(MusicSong, song_id)
+                if song:
+                    await session.delete(song)
+            await session.commit()
+            logger.info(f"Deleted {len(deleted_song_ids)} songs with missing files")
+        
+        # Get all albums and check if they have any songs left
+        result = await session.execute(select(MusicAlbum).options(selectinload(MusicAlbum.songs)))
+        albums = result.scalars().all()
+        
+        deleted_album_ids = []
+        for album in albums:
+            if not album.songs:
+                deleted_album_ids.append(album.id)
+                logger.info(f"Marking album for deletion (no songs): {album.title}")
+        
+        # Delete empty albums
+        if deleted_album_ids:
+            for album_id in deleted_album_ids:
+                album = await session.get(MusicAlbum, album_id)
+                if album:
+                    await session.delete(album)
+            await session.commit()
+            logger.info(f"Deleted {len(deleted_album_ids)} empty albums")
+        
+        # Get all artists and check if they have any albums left
+        result = await session.execute(select(MusicArtist).options(selectinload(MusicArtist.albums)))
+        artists = result.scalars().all()
+        
+        deleted_artist_ids = []
+        for artist in artists:
+            if not artist.albums:
+                deleted_artist_ids.append(artist.id)
+                logger.info(f"Marking artist for deletion (no albums): {artist.name}")
+        
+        # Delete empty artists
+        if deleted_artist_ids:
+            for artist_id in deleted_artist_ids:
+                artist = await session.get(MusicArtist, artist_id)
+                if artist:
+                    await session.delete(artist)
+            await session.commit()
+            logger.info(f"Deleted {len(deleted_artist_ids)} artists with no albums")
+
+
 @app.get("/api/music/library")
 async def get_music_library():
     """
@@ -702,6 +766,13 @@ async def scan_music_library():
         logger.info(f"Scan complete. Artists found: {sorted(artist_names_seen)}")
     except Exception as e:
         logger.error(f"Failed to persist music library: {e}", exc_info=True)
+
+    # Clean up deleted files from database
+    try:
+        await _cleanup_deleted_music(base_path)
+        logger.info("Cleanup of deleted music files complete")
+    except Exception as e:
+        logger.error(f"Failed to cleanup deleted music: {e}", exc_info=True)
 
     return {"success": True, "artists": sorted(artists_out, key=lambda a: a["name"].lower()), "found_artists": sorted(artist_names_seen)}
 
