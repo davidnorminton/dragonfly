@@ -169,7 +169,7 @@ export function MusicPage() {
     }
   }, [volume]);
 
-  const playIndex = useCallback(async (idx, list) => {
+  const playIndex = async (idx, list) => {
     const songList = list || playlistRef.current;
     if (!songList || idx < 0 || idx >= songList.length) return;
     playlistRef.current = songList;
@@ -191,12 +191,12 @@ export function MusicPage() {
         setIsPlaying(false);
       }
     }
-  }, []);
+  };
 
   // Update playIndex ref whenever it changes
   useEffect(() => {
     playIndexRef.current = playIndex;
-  }, [playIndex]);
+  }, []);
 
   const handlePlayPause = () => {
     if (!audioRef.current) return;
