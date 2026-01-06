@@ -1019,69 +1019,71 @@ export function MusicPage() {
                 )
               ) : (
                 <>
-                  <div className="album-section popular-section">
-                    <div className="album-section-title popular-title">
-                      <span>Popular</span>
-                      <div className="popular-actions">
-                        <button className="playlist-add-btn" onClick={handleGeneratePopular} disabled={popularLoading} title="Refresh popular songs">
-                          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className={popularLoading ? 'spinning' : ''}>
-                            <path fillRule="evenodd" d="M8 3a5 5 0 104.546 2.914.5.5 0 00-.908-.417A4 4 0 118 4v1H6.5a.5.5 0 000 1H9a.5.5 0 00.5-.5V2.5a.5.5 0 00-1 0V3z"/>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                    {popularError && <div className="music-error-inline">{popularError}</div>}
-                    {popularLoading && <div className="music-empty">Loading popular songs…</div>}
-                    {currentPopular.length > 0 && (
-                      <>
-                        <div className="tracklist-header">
-                          <span className="col-index">#</span>
-                          <span className="col-title">Title</span>
-                          <span className="col-length">Length</span>
-                          <span className="col-add" />
+                  {!(viewMode === 'albums' && selectedAlbum) && (
+                    <div className="album-section popular-section">
+                      <div className="album-section-title popular-title">
+                        <span>Popular</span>
+                        <div className="popular-actions">
+                          <button className="playlist-add-btn" onClick={handleGeneratePopular} disabled={popularLoading} title="Refresh popular songs">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className={popularLoading ? 'spinning' : ''}>
+                              <path fillRule="evenodd" d="M8 3a5 5 0 104.546 2.914.5.5 0 00-.908-.417A4 4 0 118 4v1H6.5a.5.5 0 000 1H9a.5.5 0 00.5-.5V2.5a.5.5 0 00-1 0V3z"/>
+                            </svg>
+                          </button>
                         </div>
-                        {currentPopular.map((song, idx) => {
-                          const active = playlist[currentIndex]?.path === song.path;
-                          const dur = song.duration ?? song.duration_seconds ?? lengths[song.path];
-                          return (
-                            <div
-                              key={`${song.path}-${idx}`}
-                              className={`track-row ${active ? 'active' : ''}`}
-                              onClick={() => handleSongClick(currentPopular, idx)}
-                            >
-                              <span className="col-index">
-                                {active && isPlaying ? (
-                                  <div className="playing-bars">
-                                    <span className="bar"></span>
-                                    <span className="bar"></span>
-                                    <span className="bar"></span>
-                                    <span className="bar"></span>
-                                  </div>
-                                ) : (
-                                  song.track_number || idx + 1
-                                )}
-                              </span>
-                              <span className="col-title">{song.title || song.name}</span>
-                              <span className="col-length">{formatTime(dur)}</span>
-                              <button
-                                className="track-add"
-                                title="Add to playlist"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAddToPlaylist({
-                                    ...song,
-                                    name: song.title || song.name,
-                                  });
-                                }}
+                      </div>
+                      {popularError && <div className="music-error-inline">{popularError}</div>}
+                      {popularLoading && <div className="music-empty">Loading popular songs…</div>}
+                      {currentPopular.length > 0 && (
+                        <>
+                          <div className="tracklist-header">
+                            <span className="col-index">#</span>
+                            <span className="col-title">Title</span>
+                            <span className="col-length">Length</span>
+                            <span className="col-add" />
+                          </div>
+                          {currentPopular.map((song, idx) => {
+                            const active = playlist[currentIndex]?.path === song.path;
+                            const dur = song.duration ?? song.duration_seconds ?? lengths[song.path];
+                            return (
+                              <div
+                                key={`${song.path}-${idx}`}
+                                className={`track-row ${active ? 'active' : ''}`}
+                                onClick={() => handleSongClick(currentPopular, idx)}
                               >
-                                +
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </>
-                    )}
-                  </div>
+                                <span className="col-index">
+                                  {active && isPlaying ? (
+                                    <div className="playing-bars">
+                                      <span className="bar"></span>
+                                      <span className="bar"></span>
+                                      <span className="bar"></span>
+                                      <span className="bar"></span>
+                                    </div>
+                                  ) : (
+                                    song.track_number || idx + 1
+                                  )}
+                                </span>
+                                <span className="col-title">{song.title || song.name}</span>
+                                <span className="col-length">{formatTime(dur)}</span>
+                                <button
+                                  className="track-add"
+                                  title="Add to playlist"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAddToPlaylist({
+                                      ...song,
+                                      name: song.title || song.name,
+                                    });
+                                  }}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+                    </div>
+                  )}
                   {(viewMode === 'albums' && selectedAlbum && currentAlbum ? [currentAlbum] : sortedAlbums).map((album) => {
                     const songsSorted = sortSongs(album.songs || []);
                     return (
