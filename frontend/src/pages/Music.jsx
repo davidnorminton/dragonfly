@@ -789,7 +789,7 @@ export function MusicPage() {
                 currentPlaylist?.songs?.length ? (
                   <div className="album-section">
                     <div className="album-section-title">{currentPlaylist.name}</div>
-                    <div className="tracklist-header">
+                    <div className="tracklist-header playlist-view">
                       <span className="col-index">#</span>
                       <span className="col-title">Title</span>
                       <span className="col-artist">Artist</span>
@@ -803,7 +803,7 @@ export function MusicPage() {
                       return (
                         <div
                           key={`${song.path}-${idx}`}
-                          className={`track-row ${active ? 'active' : ''}`}
+                          className={`track-row playlist-view ${active ? 'active' : ''}`}
                           onClick={() => handleSongClick(currentPlaylist.songs, idx)}
                         >
                           <span className="col-index">{song.track_number || idx + 1}</span>
@@ -855,8 +855,6 @@ export function MusicPage() {
                         <div className="tracklist-header">
                           <span className="col-index">#</span>
                           <span className="col-title">Title</span>
-                          <span className="col-artist">Artist</span>
-                          <span className="col-album">Album</span>
                           <span className="col-length">Length</span>
                           <span className="col-add" />
                         </div>
@@ -871,8 +869,6 @@ export function MusicPage() {
                             >
                               <span className="col-index">{song.track_number || idx + 1}</span>
                               <span className="col-title">{song.title || song.name}</span>
-                              <span className="col-artist">{song.artist || song.artistName || song.artist_name || currentArtist?.name || ''}</span>
-                              <span className="col-album">{song.album || song.album_title || song.albumName || ''}</span>
                               <span className="col-length">{formatTime(dur)}</span>
                               <button
                                 className="track-add"
@@ -901,8 +897,6 @@ export function MusicPage() {
                         <div className="tracklist-header">
                           <span className="col-index">#</span>
                           <span className="col-title">Title</span>
-                          <span className="col-artist">Artist</span>
-                          <span className="col-album">Album</span>
                           <span className="col-length">Length</span>
                           <span className="col-add" />
                         </div>
@@ -917,8 +911,6 @@ export function MusicPage() {
                             >
                               <span className="col-index">{song.track_number || idx + 1}</span>
                               <span className="col-title">{song.name}</span>
-                              <span className="col-artist">{song.artist || album.artistName}</span>
-                              <span className="col-album">{album.name}</span>
                               <span className="col-length">{formatTime(dur)}</span>
                               <button
                                 className="track-add"
