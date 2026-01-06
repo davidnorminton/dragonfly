@@ -1885,7 +1885,7 @@ body {
 
 .music-tracklist {
   padding: 16px;
-  padding-bottom: 200px;
+  padding-bottom: 300px;
   min-height: calc(100vh - 100px);
   flex: 1;
 }
@@ -2212,9 +2212,8 @@ body {
 }
 
 .tracklist-body {
-  max-height: calc(100vh);
   padding: 8px;
-  padding-bottom: 90px;
+  padding-bottom: 150px;
 }
 
 .music-player-shell {
@@ -2548,6 +2547,7 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 20px;
   padding: 16px 0;
+  margin-bottom: 32px;
 }
 
 .album-card {
@@ -2610,6 +2610,7 @@ body {
 /* About Section */
 .about-section {
   margin-top: 32px;
+  margin-bottom: 32px;
 }
 
 .about-content {
@@ -2646,6 +2647,7 @@ body {
 /* Full Discography Section */
 .discography-section {
   margin-top: 32px;
+  margin-bottom: 100px;
 }
 
 .discography-list {
