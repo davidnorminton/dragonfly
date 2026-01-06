@@ -933,9 +933,13 @@ export function MusicPage() {
                     <div className="tracklist-header playlist-view">
                       <span className="col-index">#</span>
                       <span className="col-title">Title</span>
-                      <span className="col-artist">Artist</span>
                       <span className="col-album">Album</span>
-                      <span className="col-length">Length</span>
+                      <span className="col-length">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z"/>
+                          <path d="M8 3.25a.75.75 0 01.75.75v3.25H11a.75.75 0 010 1.5H7.25V4A.75.75 0 018 3.25z"/>
+                        </svg>
+                      </span>
                       <span className="col-add" />
                     </div>
                     {currentPlaylist.songs.map((song, idx) => {
@@ -947,9 +951,22 @@ export function MusicPage() {
                           className={`track-row playlist-view ${active ? 'active' : ''}`}
                           onClick={() => handleSongClick(currentPlaylist.songs, idx)}
                         >
-                          <span className="col-index">{song.track_number || idx + 1}</span>
-                          <span className="col-title">{song.name}</span>
-                          <span className="col-artist">{song.artist || song.artistName || song.artist_name || ''}</span>
+                          <span className="col-index">
+                            {active && isPlaying ? (
+                              <div className="playing-bars">
+                                <span className="bar"></span>
+                                <span className="bar"></span>
+                                <span className="bar"></span>
+                                <span className="bar"></span>
+                              </div>
+                            ) : (
+                              idx + 1
+                            )}
+                          </span>
+                          <span className="col-title">
+                            <div className="title-main">{song.name}</div>
+                            <div className="title-sub">{song.artist || song.artistName || song.artist_name || ''}</div>
+                          </span>
                           <span className="col-album">{song.album || song.album_title || song.albumName || ''}</span>
                           <span className="col-length">{formatTime(dur)}</span>
                           <button

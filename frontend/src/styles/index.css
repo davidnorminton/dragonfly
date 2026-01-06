@@ -1953,7 +1953,102 @@ body {
 }
 
 .tracklist-header.playlist-view {
-  grid-template-columns: 40px 1.4fr 1fr 1fr 80px 40px;
+  grid-template-columns: 40px 2fr 1.2fr 60px 40px;
+}
+
+.track-row.playlist-view {
+  grid-template-columns: 40px 2fr 1.2fr 60px 40px;
+}
+
+.track-row.playlist-view .col-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+}
+
+.track-row.playlist-view .title-main {
+  font-size: 16px;
+  font-weight: 400;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-row.playlist-view.active .title-main {
+  color: #1db954;
+}
+
+.track-row.playlist-view .title-sub {
+  font-size: 14px;
+  font-weight: 400;
+  color: #b3b3b3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-row.playlist-view .col-album {
+  color: #b3b3b3;
+  font-size: 14px;
+}
+
+.track-row.playlist-view .col-length {
+  color: #b3b3b3;
+  font-size: 14px;
+  text-align: right;
+  justify-content: flex-end;
+  display: flex;
+  align-items: center;
+}
+
+.tracklist-header .col-length {
+  justify-content: flex-end;
+  display: flex;
+  align-items: center;
+}
+
+/* Animated playing bars */
+.playing-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 16px;
+  width: 16px;
+}
+
+.playing-bars .bar {
+  width: 3px;
+  background: #1db954;
+  border-radius: 2px;
+  animation: sound-wave 0ms -800ms linear infinite alternate;
+}
+
+.playing-bars .bar:nth-child(1) {
+  animation-duration: 474ms;
+}
+
+.playing-bars .bar:nth-child(2) {
+  animation-duration: 433ms;
+}
+
+.playing-bars .bar:nth-child(3) {
+  animation-duration: 407ms;
+}
+
+.playing-bars .bar:nth-child(4) {
+  animation-duration: 458ms;
+}
+
+@keyframes sound-wave {
+  0% {
+    height: 3px;
+  }
+  100% {
+    height: 16px;
+  }
 }
 
 .tracklist-body {
@@ -2240,10 +2335,6 @@ body {
   padding: 8px 8px;
   border-radius: 6px;
   cursor: pointer;
-}
-
-.track-row.playlist-view {
-  grid-template-columns: 40px 1.4fr 1fr 1fr 80px 40px;
 }
 
 .track-row:hover {
