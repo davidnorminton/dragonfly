@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { musicAPI } from '../services/api';
 
-export function MusicPage() {
+export function MusicPage({ searchQuery = '' }) {
   const [library, setLibrary] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -49,10 +49,47 @@ export function MusicPage() {
   const sortedAlbumsRef = useRef([]);
 
   // Define these early so they're available for useCallback dependencies
+  const filteredLibrary = useMemo(() => {
+    if (!searchQuery || !searchQuery.trim()) return library;
+    
+    const query = searchQuery.toLowerCase();
+    return library.map(artist => {
+      // Filter albums and songs based on search
+      const filteredAlbums = artist.albums.map(album => {
+        const songMatches = album.songs.filter(song => 
+          song.name?.toLowerCase().includes(query) ||
+          song.title?.toLowerCase().includes(query)
+        );
+        
+        const albumMatches = album.name?.toLowerCase().includes(query);
+        
+        // Include album if it matches or has matching songs
+        if (albumMatches || songMatches.length > 0) {
+          return {
+            ...album,
+            songs: songMatches.length > 0 ? songMatches : album.songs
+          };
+        }
+        return null;
+      }).filter(Boolean);
+      
+      const artistMatches = artist.name?.toLowerCase().includes(query);
+      
+      // Include artist if it matches or has matching albums
+      if (artistMatches || filteredAlbums.length > 0) {
+        return {
+          ...artist,
+          albums: filteredAlbums
+        };
+      }
+      return null;
+    }).filter(Boolean);
+  }, [library, searchQuery]);
+
   const currentArtist = useMemo(() => {
     if (!selectedArtist) return null;
-    return library.find((a) => a.name === selectedArtist) || null;
-  }, [selectedArtist, library]);
+    return filteredLibrary.find((a) => a.name === selectedArtist) || null;
+  }, [selectedArtist, filteredLibrary]);
 
   const sortedAlbums = useMemo(() => {
     if (!currentArtist?.albums) return [];
@@ -1016,7 +1053,7 @@ export function MusicPage() {
             </button>
           </div>
           <div className="music-library">
-            {library.length === 0 && !loading && <div className="music-empty">No music found yet.</div>}
+            {filteredLibrary.length === 0 && !loading && <div className="music-empty">{searchQuery ? 'No results found' : 'No music found yet.'}</div>}
             {viewMode === 'playlists' && (
               <div className="playlist-actions">
                 <button className="playlist-add-btn" onClick={handleCreatePlaylist}>
@@ -1025,7 +1062,7 @@ export function MusicPage() {
               </div>
             )}
             {viewMode === 'artists' &&
-              library.map((artist) => {
+              filteredLibrary.map((artist) => {
                 const artistCandidates = makeArtistImageCandidates(artist, artist.name);
                 const artistImg = artistCandidates[0];
                 return (

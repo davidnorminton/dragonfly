@@ -50,6 +50,49 @@ body {
   text-align: center;
   color: #a0a0a0;
   font-size: 0.9em;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.music-search-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #2a2a2a;
+  border-radius: 500px;
+  padding: 8px 16px;
+  max-width: 500px;
+  width: 100%;
+  transition: background 0.2s ease;
+}
+
+.music-search-box:hover {
+  background: #333;
+}
+
+.music-search-box:focus-within {
+  background: #3a3a3a;
+  outline: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.music-search-box .search-icon {
+  color: #a0a0a0;
+  flex-shrink: 0;
+}
+
+.music-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.music-search-input::placeholder {
+  color: #6a6a6a;
 }
 
 .top-bar-right {

@@ -39,6 +39,7 @@ function App() {
   const [showLeft, setShowLeft] = useState(true);
   const [showCenter, setShowCenter] = useState(true);
   const [showChat, setShowChat] = useState(true);
+  const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const { selectPersona } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -317,12 +318,14 @@ function App() {
         onSettingsClick={() => setSettingsOpen(true)}
         activePage={activePage}
         onNavigate={(page) => setActivePage(page)}
+        onMusicSearch={(query) => setMusicSearchQuery(query)}
       />
       {activePage === 'music' ? (
         <MusicPage 
           sessionId={sessionId}
           audioQueue={audioQueue}
           onMicClick={toggleAiFocus}
+          searchQuery={musicSearchQuery}
         />
       ) : activePage === 'music-editor' ? (
         <MusicEditor />
