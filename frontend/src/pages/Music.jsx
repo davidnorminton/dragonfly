@@ -147,11 +147,11 @@ export function MusicPage() {
     };
   }, []);
 
-  // Update refs whenever the handlers change
+  // Update refs every render so callbacks always point to latest implementations/state
   useEffect(() => {
     handleNextRef.current = handleNext;
     playIndexRef.current = playIndex;
-  }, [handleNext, playIndex]);
+  });
 
   // Set up ended event handler separately - uses ref to avoid dependency issues
   useEffect(() => {
@@ -199,11 +199,6 @@ export function MusicPage() {
       }
     }
   };
-
-  // Update playIndex ref whenever it changes
-  useEffect(() => {
-    playIndexRef.current = playIndex;
-  }, []);
 
   const handlePlayPause = () => {
     if (!audioRef.current) return;
