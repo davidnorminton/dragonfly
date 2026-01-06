@@ -29,6 +29,7 @@ export function MusicPage() {
   const [volume, setVolume] = useState(1.0); // 0.0 to 1.0
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
+  const handleNextRef = useRef(null);
 
   // Define these early so they're available for useCallback dependencies
   const currentArtist = useMemo(() => {
@@ -128,12 +129,19 @@ export function MusicPage() {
     };
   }, []);
 
-  // Set up ended event handler separately so it always has the latest handleNext
+  // Update ref whenever handleNext changes
+  useEffect(() => {
+    handleNextRef.current = handleNext;
+  }, [handleNext]);
+
+  // Set up ended event handler separately - uses ref to avoid dependency issues
   useEffect(() => {
     if (!audioRef.current) return;
     const onEnded = () => {
       console.log('Song ended, playing next...');
-      handleNext();
+      if (handleNextRef.current) {
+        handleNextRef.current();
+      }
     };
     audioRef.current.addEventListener('ended', onEnded);
     return () => {
@@ -141,7 +149,7 @@ export function MusicPage() {
         audioRef.current.removeEventListener('ended', onEnded);
       }
     };
-  }, [handleNext]);
+  }, []); // Empty deps - ref is updated separately
 
   useEffect(() => {
     if (audioRef.current) {
@@ -149,11 +157,12 @@ export function MusicPage() {
     }
   }, [volume]);
 
-  const playIndex = async (idx, list = playlist) => {
-    if (idx < 0 || idx >= list.length) return;
-    setPlaylist(list);
+  const playIndex = useCallback(async (idx, list) => {
+    const songList = list || playlist;
+    if (idx < 0 || idx >= songList.length) return;
+    setPlaylist(songList);
     setCurrentIndex(idx);
-    const track = list[idx];
+    const track = songList[idx];
     const src = `/api/music/stream?path=${encodeURIComponent(track.path)}`;
     const fallbackDuration = track.duration ?? lengths[track.path] ?? 0;
     setProgress(0);
@@ -169,7 +178,7 @@ export function MusicPage() {
         setIsPlaying(false);
       }
     }
-  };
+  }, [playlist, lengths]);
 
   const handlePlayPause = () => {
     if (!audioRef.current) return;
