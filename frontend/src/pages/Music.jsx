@@ -1082,7 +1082,7 @@ export function MusicPage() {
                       </>
                     )}
                   </div>
-                  {sortedAlbums.map((album) => {
+                  {(viewMode === 'albums' && selectedAlbum && currentAlbum ? [currentAlbum] : sortedAlbums).map((album) => {
                     const songsSorted = sortSongs(album.songs || []);
                     return (
                       <div key={album.name} className="album-section">
