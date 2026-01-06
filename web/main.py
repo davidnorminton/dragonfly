@@ -22,7 +22,7 @@ import os.path
 from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
-from database.base import AsyncSessionLocal
+from database.base import AsyncSessionLocal, engine
 from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong
 from sqlalchemy import select, desc, func, or_
 from sqlalchemy.orm.attributes import flag_modified
