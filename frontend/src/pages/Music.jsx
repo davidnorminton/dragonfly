@@ -288,15 +288,16 @@ export function MusicPage() {
   };
 
   const handleSeek = (e) => {
+    e.stopPropagation();
     if (!audioRef.current) return;
     const dur = audioRef.current.duration;
     if (!dur || isNaN(dur) || dur === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const newTime = pct * dur;
+    console.log('Seeking to:', newTime, 'seconds (', Math.round(pct * 100), '% of', dur, ')');
     audioRef.current.currentTime = newTime;
     setProgress(newTime);
-    setDuration(dur);
   };
 
   const handleVolumeChange = (e) => {
