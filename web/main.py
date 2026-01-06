@@ -1502,6 +1502,123 @@ async def remove_song_from_playlist(playlist_name: str, song_path: str):
             return {"success": False, "error": str(e)}
 
 
+@app.put("/api/music/artist/update")
+async def update_artist(artist_id: int, name: str = None, image_path: str = None):
+    """Update artist details."""
+    async with AsyncSessionLocal() as session:
+        try:
+            artist = await session.get(MusicArtist, artist_id)
+            if not artist:
+                return {"success": False, "error": "Artist not found"}
+            
+            if name:
+                artist.name = name
+            if image_path is not None:
+                artist.image_path = image_path
+            
+            await session.commit()
+            return {"success": True, "artist": {"id": artist.id, "name": artist.name, "image_path": artist.image_path}}
+        except Exception as e:
+            logger.error(f"Failed to update artist: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
+@app.put("/api/music/album/update")
+async def update_album(album_id: int, title: str = None, year: int = None, genre: str = None, cover_path: str = None):
+    """Update album details."""
+    async with AsyncSessionLocal() as session:
+        try:
+            album = await session.get(MusicAlbum, album_id)
+            if not album:
+                return {"success": False, "error": "Album not found"}
+            
+            if title:
+                album.title = title
+            if year is not None:
+                album.year = year
+            if genre:
+                album.genre = genre
+            if cover_path is not None:
+                album.cover_path = cover_path
+            
+            await session.commit()
+            return {"success": True, "album": {"id": album.id, "title": album.title, "year": album.year, "genre": album.genre}}
+        except Exception as e:
+            logger.error(f"Failed to update album: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
+@app.put("/api/music/song/update")
+async def update_song(song_id: int, title: str = None, track_number: int = None, duration_seconds: int = None):
+    """Update song details."""
+    async with AsyncSessionLocal() as session:
+        try:
+            song = await session.get(MusicSong, song_id)
+            if not song:
+                return {"success": False, "error": "Song not found"}
+            
+            if title:
+                song.title = title
+            if track_number is not None:
+                song.track_number = track_number
+            if duration_seconds is not None:
+                song.duration_seconds = duration_seconds
+            
+            await session.commit()
+            return {"success": True, "song": {"id": song.id, "title": song.title, "track_number": song.track_number}}
+        except Exception as e:
+            logger.error(f"Failed to update song: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
+@app.get("/api/music/editor/data")
+async def get_music_editor_data():
+    """Get all music data for the editor."""
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await session.execute(
+                select(MusicArtist).options(
+                    selectinload(MusicArtist.albums).selectinload(MusicAlbum.songs)
+                ).order_by(MusicArtist.name)
+            )
+            artists = result.scalars().all()
+            
+            data = []
+            for artist in artists:
+                albums_data = []
+                for album in sorted(artist.albums, key=lambda a: (a.year or 9999, a.title)):
+                    songs_data = []
+                    for song in sorted(album.songs, key=lambda s: s.track_number or 999):
+                        songs_data.append({
+                            "id": song.id,
+                            "title": song.title,
+                            "track_number": song.track_number,
+                            "duration_seconds": song.duration_seconds,
+                            "file_path": song.file_path,
+                        })
+                    
+                    albums_data.append({
+                        "id": album.id,
+                        "title": album.title,
+                        "year": album.year,
+                        "genre": album.genre,
+                        "cover_path": album.cover_path,
+                        "songs": songs_data,
+                    })
+                
+                data.append({
+                    "id": artist.id,
+                    "name": artist.name,
+                    "image_path": artist.image_path,
+                    "albums": albums_data,
+                })
+            
+            return {"success": True, "artists": data}
+        except Exception as e:
+            logger.error(f"Failed to load editor data: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""
     try:

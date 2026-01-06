@@ -10,6 +10,7 @@ import { usePersonas } from './hooks/usePersonas';
 import { useAudioQueue } from './hooks/useAudioQueue';
 import { routerAPI } from './services/api';
 import { MusicPage } from './pages/Music';
+import { MusicEditor } from './pages/MusicEditor';
 import './styles/index.css';
 
 function App() {
@@ -323,6 +324,8 @@ function App() {
           audioQueue={audioQueue}
           onMicClick={toggleAiFocus}
         />
+      ) : activePage === 'music-editor' ? (
+        <MusicEditor />
       ) : (
         <div 
           className="main-container"
@@ -392,6 +395,7 @@ function App() {
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onNavigate={(page) => setActivePage(page)}
       />
       {aiFocusMode && (
         <div className="ai-focus-overlay">

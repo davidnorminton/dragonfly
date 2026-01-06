@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { configAPI, systemAPI, routerAPI, musicAPI } from '../services/api';
 import { useRouterConfig } from '../hooks/useRouterConfig';
 
-export function Settings({ open, onClose }) {
+export function Settings({ open, onClose, onNavigate }) {
   const [activeTab, setActiveTab] = useState('personas');
   const [personas, setPersonas] = useState([]);
   const [selectedPersona, setSelectedPersona] = useState(null);
@@ -544,6 +544,22 @@ export function Settings({ open, onClose }) {
               <p className="settings-help">
                 Scan `/Users/davidnorminton/Music` for artists, albums, and songs, updating the library metadata.
               </p>
+              
+              <div className="settings-section" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                <h4 style={{ marginBottom: '12px', color: '#fff' }}>Music Library Editor</h4>
+                <p className="settings-help" style={{ marginBottom: '12px' }}>
+                  Edit artist names, album titles, song titles, and other metadata for your music library.
+                </p>
+                <button
+                  onClick={() => {
+                    if (onNavigate) onNavigate('music-editor');
+                    onClose();
+                  }}
+                  className="save-button"
+                >
+                  Open Music Editor
+                </button>
+              </div>
             </div>
           )}
 

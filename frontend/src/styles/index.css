@@ -2562,6 +2562,276 @@ body {
   transform: scale(1.05);
 }
 
+/* Music Editor Page */
+.music-editor-page {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  background: #1a1a2e;
+  min-height: 100vh;
+  color: #e0e0e0;
+}
+
+.editor-header {
+  margin-bottom: 32px;
+}
+
+.editor-header h2 {
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 8px 0;
+}
+
+.editor-header p {
+  color: #9da7b8;
+  margin: 0;
+}
+
+.editor-loading {
+  text-align: center;
+  padding: 60px 20px;
+  font-size: 18px;
+  color: #9da7b8;
+}
+
+.editor-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.editor-artist {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.editor-item-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.editor-item-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.artist-header {
+  background: rgba(11, 139, 230, 0.1);
+  font-size: 16px;
+}
+
+.album-header {
+  background: rgba(255, 255, 255, 0.03);
+  padding-left: 48px;
+  font-size: 15px;
+}
+
+.expand-icon {
+  width: 16px;
+  font-size: 12px;
+  color: #9da7b8;
+}
+
+.item-count {
+  color: #9da7b8;
+  font-size: 13px;
+}
+
+.album-meta {
+  color: #9da7b8;
+  font-size: 13px;
+}
+
+.edit-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  background: rgba(11, 139, 230, 0.2);
+  color: #0b8be6;
+  border: 1px solid rgba(11, 139, 230, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.edit-btn:hover {
+  background: rgba(11, 139, 230, 0.3);
+}
+
+.edit-btn.small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.editor-form {
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.editor-form.inline-form {
+  display: grid;
+  grid-template-columns: 60px 1fr 100px 150px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  background: rgba(11, 139, 230, 0.05);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.form-row label {
+  color: #9da7b8;
+  font-size: 14px;
+}
+
+.form-row input,
+.form-row textarea {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 14px;
+}
+
+.track-input {
+  width: 60px;
+}
+
+.title-input {
+  flex: 1;
+}
+
+.duration-input {
+  width: 100px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.save-btn,
+.cancel-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.save-btn.small,
+.cancel-btn.small {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.save-btn {
+  background: #1db954;
+  color: #fff;
+  border: none;
+}
+
+.save-btn:hover {
+  background: #1ed760;
+}
+
+.cancel-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.save-status {
+  color: #1db954;
+  font-size: 13px;
+}
+
+.save-status.small {
+  font-size: 12px;
+}
+
+.editor-albums {
+  padding: 0;
+}
+
+.editor-album {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.editor-songs {
+  padding: 0 16px 16px 64px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.songs-header {
+  display: grid;
+  grid-template-columns: 60px 1fr 100px 100px;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9da7b8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.editor-song {
+  display: grid;
+  grid-template-columns: 60px 1fr 100px 100px;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  align-items: center;
+}
+
+.editor-song:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.song-track {
+  color: #9da7b8;
+  font-size: 14px;
+}
+
+.song-title {
+  color: #fff;
+  font-size: 14px;
+}
+
+.song-duration {
+  color: #9da7b8;
+  font-size: 14px;
+}
+
+.song-actions {
+  text-align: right;
+}
+
 /* Album Grid */
 .album-grid {
   display: grid;
