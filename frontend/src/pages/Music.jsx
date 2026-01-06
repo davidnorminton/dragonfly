@@ -1064,7 +1064,24 @@ export function MusicPage() {
             <div className="hero-text">
               <div className="album-label">{heroLabel}</div>
               <h1 className="hero-title">{heroTitle}</h1>
-              <div className="album-artist">{heroSub}</div>
+              <div className="album-artist">
+                {selectedAlbum && currentAlbum ? (
+                  <>
+                    <span 
+                      className="artist-name-link" 
+                      onClick={() => {
+                        setSelectedAlbum(null);
+                        setViewMode('artists');
+                      }}
+                    >
+                      {currentAlbum.artist || selectedArtist || ''}
+                    </span>
+                    {currentAlbum.songs?.length ? ` • ${currentAlbum.songs.length} songs` : ''}
+                  </>
+                ) : (
+                  heroSub
+                )}
+              </div>
               <div className="hero-actions">
                 <button
                   className="hero-play"
@@ -1233,7 +1250,6 @@ export function MusicPage() {
                   {viewMode === 'albums' && selectedAlbum && currentAlbum ? (
                     // Single album view - show songs
                     <div className="album-section">
-                      <div className="album-section-title">{currentAlbum.name}</div>
                       <div className="tracklist-header">
                         <span className="col-index">#</span>
                         <span className="col-title">Title</span>

@@ -2003,6 +2003,16 @@ body {
   transition: all 0.3s ease;
 }
 
+.artist-name-link {
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s ease;
+}
+
+.artist-name-link:hover {
+  color: #1db954;
+}
+
 .hero-actions {
   display: flex;
   gap: 12px;
