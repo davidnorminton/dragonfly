@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { musicAPI } from '../services/api';
 
 export function MusicPage() {
@@ -98,23 +98,34 @@ export function MusicPage() {
       if (!audioRef.current) return;
       setDuration(audioRef.current.duration || 0);
     };
-    const onEnded = () => handleNext();
     audioRef.current.addEventListener('timeupdate', onTime);
     audioRef.current.addEventListener('loadedmetadata', onLoaded);
     audioRef.current.addEventListener('loadeddata', onLoaded);
     audioRef.current.addEventListener('durationchange', onLoaded);
-    audioRef.current.addEventListener('ended', onEnded);
     return () => {
       if (!audioRef.current) return;
       audioRef.current.removeEventListener('timeupdate', onTime);
       audioRef.current.removeEventListener('loadedmetadata', onLoaded);
       audioRef.current.removeEventListener('loadeddata', onLoaded);
       audioRef.current.removeEventListener('durationchange', onLoaded);
-      audioRef.current.removeEventListener('ended', onEnded);
       audioRef.current.pause();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Set up ended event handler separately so it always has the latest handleNext
+  useEffect(() => {
+    if (!audioRef.current) return;
+    const onEnded = () => {
+      console.log('Song ended, playing next...');
+      handleNext();
+    };
+    audioRef.current.addEventListener('ended', onEnded);
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.removeEventListener('ended', onEnded);
+      }
+    };
+  }, [handleNext]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -161,7 +172,7 @@ export function MusicPage() {
     playIndex(nextIdx);
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     if (!playlist.length) return;
     const nextIdx = currentIndex + 1;
     if (nextIdx < playlist.length) {
@@ -179,7 +190,7 @@ export function MusicPage() {
     }
     // Otherwise loop within playlist
     playIndex(0, playlist);
-  };
+  }, [playlist, currentIndex, viewMode, getNextAlbumSong, playIndex]);
 
   const handleSeek = (e) => {
     if (!audioRef.current || !duration) return;
@@ -215,7 +226,7 @@ export function MusicPage() {
       return ta - tb;
     });
 
-  const getNextAlbumSong = (currentPath) => {
+  const getNextAlbumSong = useCallback((currentPath) => {
     const albumsSeq = sortedAlbums
       .map((album) => ({
         album,
@@ -252,7 +263,7 @@ export function MusicPage() {
 
     // Wrap to first album
     return { songs: albumsSeq[0].songs, idx: 0 };
-  };
+  }, [sortedAlbums]);
 
   const openPlaylistModal = (song = null) => {
     setPendingSong(song);

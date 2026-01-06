@@ -597,19 +597,38 @@ def _match_popular_items(ai_items: List[Dict[str, Any]], songs_data: List[Dict[s
 
 
 async def _ensure_artist_in_db(session: AsyncSessionLocal, artist_name: str):
+    logger.debug(f"Looking for artist: '{artist_name}'")
     artist_row = await session.scalar(
         select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
     )
     if artist_row:
+        logger.debug(f"Artist '{artist_name}' found in DB")
         return artist_row
+    
+    logger.info(f"Artist '{artist_name}' not found, attempting rescan...")
     # Attempt a rescan to populate DB
     try:
         await scan_music_library()
+        logger.info(f"Rescan completed, querying for artist '{artist_name}' again...")
     except Exception as e:
         logger.error(f"Rescan failed while ensuring artist '{artist_name}': {e}", exc_info=True)
+        return None
+    
+    # Expire all and commit to ensure fresh query
+    session.expire_all()
+    await session.commit()
+    
+    # Query again - the scan commits in its own session, so data should be visible
     artist_row = await session.scalar(
         select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
     )
+    if artist_row:
+        logger.info(f"Artist '{artist_name}' found after rescan")
+    else:
+        # List all artists in DB for debugging
+        all_artists_res = await session.execute(select(MusicArtist.name))
+        artist_names = [a[0] for a in all_artists_res.all()]
+        logger.warning(f"Artist '{artist_name}' still not found after rescan. Available artists: {artist_names}")
     return artist_row
 
 
@@ -618,13 +637,24 @@ async def get_music_popular(artist: str):
     """
     Return cached popular songs for the artist from DB (extra_metadata.popular_songs).
     """
-    async with AsyncSessionLocal() as session:
-        artist_row = await _ensure_artist_in_db(session, artist)
-        if not artist_row:
-            return {"success": False, "error": "Artist not found"}
-        meta = artist_row.extra_metadata or {}
-        popular = meta.get("popular_songs") or []
-        return {"success": True, "popular": popular}
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await _ensure_artist_in_db(session, artist)
+            if not artist_row:
+                logger.warning(f"Artist '{artist}' not found in database after rescan attempt")
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+            meta = artist_row.extra_metadata or {}
+            popular = meta.get("popular_songs") or []
+            return {"success": True, "popular": popular}
+    except Exception as e:
+        logger.error(f"Error getting popular songs for '{artist}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
 
 
 @app.post("/api/music/popular")
@@ -635,69 +665,86 @@ async def generate_music_popular(req: PopularRequest):
     """
     artist_name = req.artist.strip()
     if not artist_name:
-        return {"success": False, "error": "artist is required"}
-
-    async with AsyncSessionLocal() as session:
-        artist_row = await _ensure_artist_in_db(session, artist_name)
-        if not artist_row:
-            return {"success": False, "error": "Artist not found"}
-
-        result = await session.execute(
-            select(MusicSong, MusicAlbum)
-            .join(MusicAlbum, MusicSong.album_id == MusicAlbum.id)
-            .where(MusicSong.artist_id == artist_row.id)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": "artist is required"}
         )
-        rows = result.all()
-        if not rows:
-            return {"success": False, "error": "No songs found for this artist"}
 
-        songs_data = []
-        albums_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for song, album in rows:
-            item = {
-                "title": song.title,
-                "album": album.title,
-                "track_number": song.track_number,
-                "duration": song.duration_seconds,
-                "path": song.file_path,
-            }
-            songs_data.append(item)
-            albums_map[album.title].append(item)
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await _ensure_artist_in_db(session, artist_name)
+            if not artist_row:
+                logger.warning(f"Artist '{artist_name}' not found in database after rescan attempt")
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
 
-        lines = [
-            f"You are selecting the most popular songs for artist '{artist_name}'.",
-            "Only choose songs that appear in the provided list. If you are unsure, skip it.",
-            'Return STRICT JSON: {"songs": [{"title": "song title", "album": "album title"}]} with at most 20 items.',
-            "Do not include songs not listed here.",
-            "Albums and songs we have:",
-        ]
-        for album_title, tracks in albums_map.items():
-            sorted_tracks = sorted(tracks, key=lambda t: t.get("track_number") or 9999)
-            lines.append(f"- Album: {album_title}")
-            for t in sorted_tracks:
-                tn = t.get("track_number")
-                tn_str = f"{tn}. " if tn else ""
-                lines.append(f"  - {tn_str}{t['title']}")
-        prompt = "\n".join(lines)
+            result = await session.execute(
+                select(MusicSong, MusicAlbum)
+                .join(MusicAlbum, MusicSong.album_id == MusicAlbum.id)
+                .where(MusicSong.artist_id == artist_row.id)
+            )
+            rows = result.all()
+            if not rows:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "No songs found for this artist"}
+                )
 
-        ai = AIService()
-        ai.reload_persona_config()
-        ai_resp = await ai.execute({"question": prompt})
-        raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
-        parsed = _extract_json_object(raw_answer) or {}
-        popular_items = parsed.get("songs") if isinstance(parsed, dict) else None
-        matched = _match_popular_items(popular_items or [], songs_data)
+            songs_data = []
+            albums_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for song, album in rows:
+                item = {
+                    "title": song.title,
+                    "album": album.title,
+                    "track_number": song.track_number,
+                    "duration": song.duration_seconds,
+                    "path": song.file_path,
+                }
+                songs_data.append(item)
+                albums_map[album.title].append(item)
 
-        # Fallback to first 10 tracks if AI failed
-        if not matched:
-            matched = songs_data[:10]
+            lines = [
+                f"You are selecting the most popular songs for artist '{artist_name}'.",
+                "Only choose songs that appear in the provided list. If you are unsure, skip it.",
+                'Return STRICT JSON: {"songs": [{"title": "song title", "album": "album title"}]} with at most 20 items.',
+                "Do not include songs not listed here.",
+                "Albums and songs we have:",
+            ]
+            for album_title, tracks in albums_map.items():
+                sorted_tracks = sorted(tracks, key=lambda t: t.get("track_number") or 9999)
+                lines.append(f"- Album: {album_title}")
+                for t in sorted_tracks:
+                    tn = t.get("track_number")
+                    tn_str = f"{tn}. " if tn else ""
+                    lines.append(f"  - {tn_str}{t['title']}")
+            prompt = "\n".join(lines)
 
-        artist_row.extra_metadata = artist_row.extra_metadata or {}
-        artist_row.extra_metadata["popular_songs"] = matched
-        flag_modified(artist_row, "extra_metadata")
-        await session.commit()
+            ai = AIService()
+            ai.reload_persona_config()
+            ai_resp = await ai.execute({"question": prompt})
+            raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
+            parsed = _extract_json_object(raw_answer) or {}
+            popular_items = parsed.get("songs") if isinstance(parsed, dict) else None
+            matched = _match_popular_items(popular_items or [], songs_data)
 
-        return {"success": True, "popular": matched}
+            # Fallback to first 10 tracks if AI failed
+            if not matched:
+                matched = songs_data[:10]
+
+            artist_row.extra_metadata = artist_row.extra_metadata or {}
+            artist_row.extra_metadata["popular_songs"] = matched
+            flag_modified(artist_row, "extra_metadata")
+            await session.commit()
+
+            return {"success": True, "popular": matched}
+    except Exception as e:
+        logger.error(f"Error generating popular songs for '{artist_name}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
 
 
 async def _ensure_playlist_tables():
