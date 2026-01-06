@@ -2116,8 +2116,8 @@ body {
   z-index: 1200;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: center;
+  gap: 20px;
 }
 
 .music-layout {
@@ -2360,8 +2360,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex: 1;
-  min-width: 0;
+  align-items: center;
+  max-width: 720px;
+  width: 100%;
 }
 
 .music-controls-row {
@@ -2411,6 +2412,8 @@ body {
   align-items: center;
   gap: 8px;
   width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
 }
 
 .music-progress {
@@ -2461,6 +2464,7 @@ body {
   gap: 8px;
   min-width: 120px;
   flex-shrink: 0;
+  margin-left: 16px;
 }
 
 .volume-icon {
