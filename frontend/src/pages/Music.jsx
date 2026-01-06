@@ -410,15 +410,27 @@ export function MusicPage() {
     (artist?.albums || []).forEach((al) => addCoverFields(al));
 
     const artistDir = guessArtistDirectoryFromSongs(artist);
-    const baseNames = ['cover', 'Cover', 'folder', 'Folder', 'album', 'Album'];
-    const exts = ['webp', 'jpg', 'jpeg', 'png'];
     const roots = [];
     if (artistDir) roots.push(artistDir);
     if (artistName) roots.push(`/Users/davidnorminton/Music/${artistName}`);
 
+    // Prioritize cover.jpg for artist images
+    roots.forEach((root) => {
+      push(`${root}/cover.jpg`);
+    });
+
+    // Then check other common names and extensions
+    const baseNames = ['cover', 'Cover', 'folder', 'Folder', 'album', 'Album'];
+    const exts = ['webp', 'jpg', 'jpeg', 'png'];
     roots.forEach((root) => {
       baseNames.forEach((b) => {
-        exts.forEach((ext) => push(`${root}/${b}.${ext}`));
+        exts.forEach((ext) => {
+          const path = `${root}/${b}.${ext}`;
+          // Skip cover.jpg as we already added it first
+          if (path !== `${root}/cover.jpg`) {
+            push(path);
+          }
+        });
       });
     });
 
@@ -630,11 +642,20 @@ export function MusicPage() {
     // Artist images
     makeArtistImageCandidates(currentArtist, selectedArtist).forEach((c) => push(c));
 
-    // Extra fallback to selected artist path
+    // Extra fallback to selected artist path - prioritize cover.jpg
     if (selectedArtist) {
+      push(`/Users/davidnorminton/Music/${selectedArtist}/cover.jpg`);
       const baseNames = ['cover', 'Cover', 'folder', 'Folder', 'album', 'Album'];
       const exts = ['webp', 'jpg', 'jpeg', 'png'];
-      baseNames.forEach((b) => exts.forEach((ext) => push(`/Users/davidnorminton/Music/${selectedArtist}/${b}.${ext}`)));
+      baseNames.forEach((b) => {
+        exts.forEach((ext) => {
+          const path = `/Users/davidnorminton/Music/${selectedArtist}/${b}.${ext}`;
+          // Skip cover.jpg as we already added it first
+          if (path !== `/Users/davidnorminton/Music/${selectedArtist}/cover.jpg`) {
+            push(path);
+          }
+        });
+      });
     }
 
     return Array.from(new Set(candidates.filter(Boolean)));

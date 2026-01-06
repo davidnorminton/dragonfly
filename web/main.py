@@ -408,7 +408,13 @@ async def scan_music_library():
                     rel_img = full_image_path.relative_to(base_path)
                     parts_img = rel_img.parts
                     if len(parts_img) == 1 and full_image_path.suffix.lower() in image_exts:
-                        artist_images[parts_img[0]] = str(rel_img)
+                        artist_name = parts_img[0]
+                        # Prioritize cover.jpg for artist images
+                        if f.lower() == "cover.jpg":
+                            artist_images[artist_name] = str(rel_img)
+                        elif artist_name not in artist_images:
+                            # Only set if not already set (cover.jpg takes priority)
+                            artist_images[artist_name] = str(rel_img)
                 except Exception:
                     pass
                 continue
@@ -718,36 +724,64 @@ class PlaylistAddSong(BaseModel):
 
 @app.get("/api/music/playlists")
 async def list_playlists():
-    await _ensure_playlist_tables()
-    async with AsyncSessionLocal() as session:
-        playlists = await session.execute(select(MusicPlaylist))
-        playlists = playlists.scalars().all()
-        result = []
-        for pl in playlists:
-            songs_res = await session.execute(
-                select(MusicPlaylistSong).where(MusicPlaylistSong.playlist_id == pl.id).order_by(MusicPlaylistSong.id)
-            )
-            songs = songs_res.scalars().all()
-            result.append(
-                {
-                    "id": pl.id,
-                    "name": pl.name,
-                    "songs": [
+    try:
+        await _ensure_playlist_tables()
+        async with AsyncSessionLocal() as session:
+            playlists = await session.execute(select(MusicPlaylist))
+            playlists = playlists.scalars().all()
+            result = []
+            for pl in playlists:
+                songs_res = await session.execute(
+                    select(MusicPlaylistSong).where(MusicPlaylistSong.playlist_id == pl.id).order_by(MusicPlaylistSong.id)
+                )
+                songs = songs_res.scalars().all()
+                playlist_songs = []
+                for s in songs:
+                    # Try to get artist/album from MusicSong if missing in playlist song
+                    artist_name = s.artist or None
+                    album_name = s.album or None
+                    if not artist_name or not album_name:
+                        try:
+                            song_lookup = await session.execute(
+                                select(MusicArtist.name.label('artist_name'), MusicAlbum.title.label('album_title'))
+                                .select_from(MusicSong)
+                                .join(MusicArtist, MusicSong.artist_id == MusicArtist.id)
+                                .join(MusicAlbum, MusicSong.album_id == MusicAlbum.id)
+                                .where(MusicSong.file_path == s.file_path)
+                                .limit(1)
+                            )
+                            row = song_lookup.first()
+                            if row:
+                                if not artist_name:
+                                    artist_name = row.artist_name
+                                if not album_name:
+                                    album_name = row.album_title
+                        except Exception as e:
+                            logger.warning(f"Failed to lookup song metadata for {s.file_path}: {e}")
+                            # Continue with existing values or None
+                    playlist_songs.append(
                         {
                             "id": s.id,
                             "path": s.file_path,
                             "name": s.title,
                             "title": s.title,
-                            "artist": s.artist,
-                            "album": s.album,
+                            "artist": artist_name,
+                            "album": album_name,
                             "track_number": s.track_number,
                             "duration": s.duration_seconds,
                         }
-                        for s in songs
-                    ],
-                }
-            )
-        return {"success": True, "playlists": result}
+                    )
+                result.append(
+                    {
+                        "id": pl.id,
+                        "name": pl.name,
+                        "songs": playlist_songs,
+                    }
+                )
+            return {"success": True, "playlists": result}
+    except Exception as e:
+        logger.error(f"Failed to list playlists: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/music/playlists")
@@ -796,12 +830,34 @@ async def add_song_to_playlist(payload: PlaylistAddSong):
                 )
             )
             if not existing:
+                # Look up artist/album from MusicSong if not provided
+                artist_name = payload.artist
+                album_name = payload.album
+                if not artist_name or not album_name:
+                    try:
+                        song_lookup = await session.execute(
+                            select(MusicArtist.name.label('artist_name'), MusicAlbum.title.label('album_title'))
+                            .select_from(MusicSong)
+                            .join(MusicArtist, MusicSong.artist_id == MusicArtist.id)
+                            .join(MusicAlbum, MusicSong.album_id == MusicAlbum.id)
+                            .where(MusicSong.file_path == payload.path)
+                            .limit(1)
+                        )
+                        row = song_lookup.first()
+                        if row:
+                            if not artist_name:
+                                artist_name = row.artist_name
+                            if not album_name:
+                                album_name = row.album_title
+                    except Exception as e:
+                        logger.warning(f"Failed to lookup song metadata for {payload.path}: {e}")
+                        # Continue with existing values or None
                 ps = MusicPlaylistSong(
                     playlist_id=playlist.id,
                     file_path=payload.path,
                     title=payload.title,
-                    artist=payload.artist,
-                    album=payload.album,
+                    artist=artist_name,
+                    album=album_name,
                     track_number=payload.track_number,
                     duration_seconds=payload.duration_seconds,
                 )
