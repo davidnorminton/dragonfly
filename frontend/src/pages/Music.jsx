@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { musicAPI } from '../services/api';
 
 export function MusicPage() {
@@ -33,6 +33,7 @@ export function MusicPage() {
   const playIndexRef = useRef(null);
   const playlistRef = useRef([]);
   const lengthsRef = useRef({});
+  const sortedAlbumsRef = useRef([]);
 
   // Define these early so they're available for useCallback dependencies
   const currentArtist = useMemo(() => {
@@ -49,6 +50,11 @@ export function MusicPage() {
       return a.name.localeCompare(b.name);
     });
   }, [currentArtist]);
+
+  // keep sorted albums in a ref for functions that avoid hook deps
+  useEffect(() => {
+    sortedAlbumsRef.current = sortedAlbums;
+  }, [sortedAlbums]);
 
   const toggleArtist = (artist) => {
     setSelectedArtist(artist);
@@ -141,10 +147,11 @@ export function MusicPage() {
     };
   }, []);
 
-  // Update ref whenever handleNext changes
+  // Update refs whenever the handlers change
   useEffect(() => {
     handleNextRef.current = handleNext;
-  }, [handleNext]);
+    playIndexRef.current = playIndex;
+  }, [handleNext, playIndex]);
 
   // Set up ended event handler separately - uses ref to avoid dependency issues
   useEffect(() => {
@@ -223,9 +230,10 @@ export function MusicPage() {
       return ta - tb;
     });
 
-  const getNextAlbumSong = useCallback((currentPath) => {
-    if (!sortedAlbums || !sortedAlbums.length) return null;
-    const albumsSeq = sortedAlbums
+  const getNextAlbumSong = (currentPath) => {
+    const albumsList = sortedAlbumsRef.current || [];
+    if (!albumsList.length) return null;
+    const albumsSeq = albumsList
       .map((album) => ({
         album,
         songs: sortSongs(album.songs || []),
@@ -261,9 +269,9 @@ export function MusicPage() {
 
     // Wrap to first album
     return { songs: albumsSeq[0].songs, idx: 0 };
-  }, [sortedAlbums]);
+  };
 
-  const handleNext = useCallback(() => {
+  const handleNext = () => {
     const list = playlistRef.current || playlist;
     if (!list.length) return;
     const nextIdx = currentIndex + 1;
@@ -282,7 +290,7 @@ export function MusicPage() {
     }
     // Otherwise loop within playlist
     if (playIndexRef.current) playIndexRef.current(0, list);
-  }, [currentIndex, viewMode, getNextAlbumSong]);
+  };
 
   const handleSeek = (e) => {
     if (!audioRef.current || !duration) return;
