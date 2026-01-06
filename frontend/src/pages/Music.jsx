@@ -33,8 +33,10 @@ export function MusicPage() {
   const [playlistLoading, setPlaylistLoading] = useState(false);
   const [playlistModalError, setPlaylistModalError] = useState('');
   const [volume, setVolume] = useState(1.0); // 0.0 to 1.0
+  const [isScrolled, setIsScrolled] = useState(false);
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
+  const mainContentRef = useRef(null);
   const handleNextRef = useRef(null);
   const playIndexRef = useRef(null);
   const playlistRef = useRef([]);
@@ -175,6 +177,22 @@ export function MusicPage() {
       }
     };
   }, []); // Empty deps - ref is updated separately
+
+  // Scroll detection for sticky hero
+  useEffect(() => {
+    const handleScroll = () => {
+      if (mainContentRef.current) {
+        const scrollTop = mainContentRef.current.scrollTop;
+        setIsScrolled(scrollTop > 50);
+      }
+    };
+
+    const mainContent = mainContentRef.current;
+    if (mainContent) {
+      mainContent.addEventListener('scroll', handleScroll);
+      return () => mainContent.removeEventListener('scroll', handleScroll);
+    }
+  }, []);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -975,8 +993,8 @@ export function MusicPage() {
           </div>
         </div>
 
-        <div className="music-main">
-          <div className="music-hero" style={heroBgStyle}>
+        <div className="music-main" ref={mainContentRef}>
+          <div className={`music-hero ${isScrolled ? 'scrolled' : ''}`} style={heroBgStyle}>
             {heroImageCandidates[0] ? (
               <img
                 src={`/api/music/stream?path=${encodeURIComponent(heroImageCandidates[0])}`}
@@ -1143,7 +1161,7 @@ export function MusicPage() {
                                       <span className="bar"></span>
                                     </div>
                                   ) : (
-                                    song.track_number || idx + 1
+                                    idx + 1
                                   )}
                                 </span>
                                 <span className="col-title">{song.title || song.name}</span>
