@@ -439,9 +439,30 @@ async def _persist_music(tree_songs: list):
                     await session.flush()
 
                 # Album
+                # First try to find album by title
                 album_stmt = select(MusicAlbum).where(MusicAlbum.artist_id == artist.id, MusicAlbum.title == album_title)
                 album_res = await session.execute(album_stmt)
                 album = album_res.scalars().first()
+                
+                # If not found by title, check if we have an existing song from the same album directory
+                # This handles cases where the album title changed in metadata
+                if not album and item.get("album_dir"):
+                    album_dir_pattern = f"{artist_name}/{item['album_dir']}/%"
+                    existing_song_stmt = (
+                        select(MusicAlbum)
+                        .join(MusicSong, MusicSong.album_id == MusicAlbum.id)
+                        .where(MusicAlbum.artist_id == artist.id)
+                        .where(MusicSong.file_path.like(album_dir_pattern))
+                        .limit(1)
+                    )
+                    existing_album_res = await session.execute(existing_song_stmt)
+                    album = existing_album_res.scalars().first()
+                    
+                    # If we found an album by directory but the title changed, update it
+                    if album and album.title != album_title:
+                        logger.info(f"Updating album title: '{album.title}' -> '{album_title}'")
+                        album.title = album_title
+                
                 if not album:
                     album = MusicAlbum(
                         artist_id=artist.id,
