@@ -32,6 +32,8 @@ export function MusicPage() {
   const [pendingSong, setPendingSong] = useState(null);
   const [playlistLoading, setPlaylistLoading] = useState(false);
   const [playlistModalError, setPlaylistModalError] = useState('');
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  const [songToRemove, setSongToRemove] = useState(null);
   const [volume, setVolume] = useState(1.0); // 0.0 to 1.0
   const [isScrolled, setIsScrolled] = useState(false);
   const [isShuffled, setIsShuffled] = useState(false);
@@ -534,6 +536,38 @@ export function MusicPage() {
     };
     setPendingSong(enriched);
     openPlaylistModal(enriched);
+  };
+
+  const handleRemoveFromPlaylist = (song) => {
+    setSongToRemove(song);
+    setRemoveConfirmOpen(true);
+  };
+
+  const confirmRemoveFromPlaylist = async () => {
+    if (!songToRemove || !selectedPlaylist) return;
+    
+    try {
+      const res = await musicAPI.removeFromPlaylist(selectedPlaylist, songToRemove.path);
+      if (res.success) {
+        // Reload playlists to reflect the change
+        const playlistRes = await musicAPI.getPlaylists();
+        if (playlistRes.success) {
+          setPlaylists(playlistRes.playlists || []);
+        }
+      } else {
+        console.error('Failed to remove song:', res.error);
+      }
+    } catch (err) {
+      console.error('Error removing song from playlist:', err);
+    } finally {
+      setRemoveConfirmOpen(false);
+      setSongToRemove(null);
+    }
+  };
+
+  const cancelRemoveFromPlaylist = () => {
+    setRemoveConfirmOpen(false);
+    setSongToRemove(null);
   };
 
   const currentPopular = selectedArtist ? popularMap[selectedArtist] || [] : [];
@@ -1235,18 +1269,14 @@ export function MusicPage() {
                           <span className="col-album">{song.album || song.album_title || song.albumName || ''}</span>
                           <span className="col-length">{formatTime(dur)}</span>
                           <button
-                            className="track-add"
-                            title="Add to playlist"
+                            className="track-remove"
+                            title="Remove from playlist"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleAddToPlaylist(
-                                song,
-                                song.album || song.album_title || song.albumName || '',
-                                song.artist || song.artistName || song.artist_name || currentArtist?.name || ''
-                              );
+                              handleRemoveFromPlaylist(song);
                             }}
                           >
-                            +
+                            −
                           </button>
                         </div>
                       );
@@ -1612,6 +1642,29 @@ export function MusicPage() {
                 disabled={!playlistModalExisting && !playlistModalName.trim()}
               >
                 {pendingSong ? 'Add' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {removeConfirmOpen && (
+        <div className="playlist-modal-overlay" onClick={cancelRemoveFromPlaylist}>
+          <div className="playlist-modal" onClick={(e) => e.stopPropagation()}>
+            <h4>Remove from playlist</h4>
+            <p style={{ marginBottom: '20px', color: '#e0e0e0' }}>
+              Are you sure you want to remove "{songToRemove?.name || songToRemove?.title}" from this playlist?
+            </p>
+            <div className="modal-actions">
+              <button className="save-button secondary" onClick={cancelRemoveFromPlaylist}>
+                Cancel
+              </button>
+              <button
+                className="save-button"
+                onClick={confirmRemoveFromPlaylist}
+                style={{ background: '#dc3545' }}
+              >
+                Remove
               </button>
             </div>
           </div>

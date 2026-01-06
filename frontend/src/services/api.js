@@ -68,6 +68,7 @@ export const musicAPI = {
   getPlaylists: () => api.get('/music/playlists').then(res => res.data),
   createPlaylist: (name) => api.post('/music/playlists', { name }).then(res => res.data),
   addToPlaylist: (payload) => api.post('/music/playlists/add', payload).then(res => res.data),
+  removeFromPlaylist: (playlistName, songPath) => api.delete('/music/playlists/remove', { params: { playlist_name: playlistName, song_path: songPath } }).then(res => res.data),
 };
 
 export const weatherAPI = {

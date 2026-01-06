@@ -1443,6 +1443,44 @@ async def add_song_to_playlist(payload: PlaylistAddSong):
             logger.error(f"Failed to add to playlist '{name or playlist_id}': {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+
+@app.delete("/api/music/playlists/remove")
+async def remove_song_from_playlist(playlist_name: str, song_path: str):
+    """Remove a song from a playlist by playlist name and song file path."""
+    await _ensure_playlist_tables()
+    if not playlist_name or not song_path:
+        return {"success": False, "error": "playlist_name and song_path required"}
+    
+    async with AsyncSessionLocal() as session:
+        try:
+            # Find playlist by name
+            playlist = await session.scalar(
+                select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == playlist_name.lower())
+            )
+            if not playlist:
+                return {"success": False, "error": f"Playlist '{playlist_name}' not found"}
+            
+            # Find and delete the playlist song entry
+            result = await session.execute(
+                select(MusicPlaylistSong).where(
+                    MusicPlaylistSong.playlist_id == playlist.id,
+                    MusicPlaylistSong.file_path == song_path
+                )
+            )
+            playlist_song = result.scalars().first()
+            
+            if not playlist_song:
+                return {"success": False, "error": "Song not found in playlist"}
+            
+            await session.delete(playlist_song)
+            await session.commit()
+            
+            return {"success": True, "message": f"Song removed from playlist '{playlist_name}'"}
+        except Exception as e:
+            logger.error(f"Failed to remove song from playlist '{playlist_name}': {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
 def get_system_uptime() -> float:
     """Get system uptime in seconds using platform-specific methods."""
     try:
