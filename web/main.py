@@ -177,16 +177,35 @@ async def restart_system():
     try:
         def _restart():
             try:
-                cmd = [sys.executable] + sys.argv
-                env = os.environ.copy()
-                cwd = os.getcwd()
-                logger.info(f"Spawning new process for restart: {cmd} (cwd={cwd})")
-                subprocess.Popen(cmd, env=env, cwd=cwd)
+                # Get the project root directory
+                project_root = Path(__file__).parent.parent.resolve()
+                venv_python = project_root / "venv" / "bin" / "python"
+                
+                # Build the restart command
+                restart_script = f"""
+cd {project_root}
+source venv/bin/activate
+nohup python -m uvicorn web.main:app --host 0.0.0.0 --port 1337 > /tmp/dragonfly.log 2>&1 &
+"""
+                
+                logger.info(f"Executing restart script from: {project_root}")
+                
+                # Execute the restart command in a shell after a delay
+                subprocess.Popen(
+                    ["sh", "-c", f"sleep 1 && {restart_script}"],
+                    start_new_session=True,
+                    cwd=str(project_root)
+                )
+                
+                # Give the response time to be sent
+                time.sleep(0.5)
             finally:
+                # Exit the current process
+                logger.info("Exiting current process for restart")
                 os._exit(0)
 
         # Run restart in a separate thread after a short delay to let the response flush
-        threading.Timer(1.0, _restart).start()
+        threading.Timer(0.5, _restart).start()
         return {"success": True, "message": "Server restart scheduled"}
     except Exception as e:
         logger.error(f"Failed to schedule restart: {e}", exc_info=True)
