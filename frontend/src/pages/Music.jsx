@@ -179,25 +179,35 @@ export function MusicPage() {
     };
   }, []); // Empty deps - ref is updated separately
 
-  // Scroll detection for sticky hero - only stick when play button reaches top
+  // Scroll detection for sticky hero using Intersection Observer
   useEffect(() => {
-    const handleScroll = () => {
-      if (mainContentRef.current && heroRef.current) {
-        const scrollTop = mainContentRef.current.scrollTop;
-        const heroHeight = heroRef.current.offsetHeight;
-        const stickyThreshold = heroHeight - 80; // 80px is the minimized height
-        
-        // Only become sticky when we've scrolled past the point where the play button would disappear
-        setIsScrolled(scrollTop > stickyThreshold);
-      }
-    };
+    if (!heroRef.current || !mainContentRef.current) return;
 
-    const mainContent = mainContentRef.current;
-    if (mainContent) {
-      mainContent.addEventListener('scroll', handleScroll);
-      return () => mainContent.removeEventListener('scroll', handleScroll);
-    }
-  }, []);
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        // When the hero top is out of view (intersectionRatio < 1), stick it
+        console.log('Intersection:', { 
+          isIntersecting: entry.isIntersecting, 
+          intersectionRatio: entry.intersectionRatio,
+          boundingClientRect: entry.boundingClientRect.top 
+        });
+        
+        // Stick when hero has scrolled up and top is at/above viewport top
+        setIsScrolled(!entry.isIntersecting || entry.intersectionRatio < 0.3);
+      },
+      {
+        root: mainContentRef.current,
+        threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
+        rootMargin: '-80px 0px 0px 0px', // Trigger when 80px from top (minimized hero height)
+      }
+    );
+
+    observer.observe(heroRef.current);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [selectedArtist, selectedAlbum, selectedPlaylist]);
 
   useEffect(() => {
     if (audioRef.current) {
