@@ -1893,13 +1893,13 @@ body {
   background-position: center;
   background-repeat: no-repeat;
   transition: all 0.3s ease;
-  position: sticky;
-  top: 0;
-  z-index: 100;
   min-height: 280px;
 }
 
 .music-hero.scrolled {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   min-height: 80px;
   padding: 12px 16px;
   background: rgba(11, 139, 230, 0.95);

@@ -37,6 +37,7 @@ export function MusicPage() {
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
   const mainContentRef = useRef(null);
+  const heroRef = useRef(null);
   const handleNextRef = useRef(null);
   const playIndexRef = useRef(null);
   const playlistRef = useRef([]);
@@ -178,12 +179,16 @@ export function MusicPage() {
     };
   }, []); // Empty deps - ref is updated separately
 
-  // Scroll detection for sticky hero
+  // Scroll detection for sticky hero - only stick when play button reaches top
   useEffect(() => {
     const handleScroll = () => {
-      if (mainContentRef.current) {
+      if (mainContentRef.current && heroRef.current) {
         const scrollTop = mainContentRef.current.scrollTop;
-        setIsScrolled(scrollTop > 50);
+        const heroHeight = heroRef.current.offsetHeight;
+        const stickyThreshold = heroHeight - 80; // 80px is the minimized height
+        
+        // Only become sticky when we've scrolled past the point where the play button would disappear
+        setIsScrolled(scrollTop > stickyThreshold);
       }
     };
 
@@ -994,7 +999,7 @@ export function MusicPage() {
         </div>
 
         <div className="music-main" ref={mainContentRef}>
-          <div className={`music-hero ${isScrolled ? 'scrolled' : ''}`} style={heroBgStyle}>
+          <div ref={heroRef} className={`music-hero ${isScrolled ? 'scrolled' : ''}`} style={heroBgStyle}>
             {heroImageCandidates[0] ? (
               <img
                 src={`/api/music/stream?path=${encodeURIComponent(heroImageCandidates[0])}`}
