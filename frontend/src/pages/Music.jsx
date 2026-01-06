@@ -31,6 +31,8 @@ export function MusicPage() {
   const heroImgRef = useRef(null);
   const handleNextRef = useRef(null);
   const playIndexRef = useRef(null);
+  const playlistRef = useRef([]);
+  const lengthsRef = useRef({});
 
   // Define these early so they're available for useCallback dependencies
   const currentArtist = useMemo(() => {
@@ -106,6 +108,15 @@ export function MusicPage() {
     }
   }, [viewMode, playlists, selectedPlaylist]);
 
+  // Keep refs in sync with latest state
+  useEffect(() => {
+    playlistRef.current = playlist;
+  }, [playlist]);
+
+  useEffect(() => {
+    lengthsRef.current = lengths;
+  }, [lengths]);
+
   useEffect(() => {
     audioRef.current = new Audio();
     const onTime = () => {
@@ -159,13 +170,14 @@ export function MusicPage() {
   }, [volume]);
 
   const playIndex = useCallback(async (idx, list) => {
-    const songList = list || playlist;
-    if (idx < 0 || idx >= songList.length) return;
+    const songList = list || playlistRef.current;
+    if (!songList || idx < 0 || idx >= songList.length) return;
+    playlistRef.current = songList;
     setPlaylist(songList);
     setCurrentIndex(idx);
     const track = songList[idx];
     const src = `/api/music/stream?path=${encodeURIComponent(track.path)}`;
-    const fallbackDuration = track.duration ?? lengths[track.path] ?? 0;
+    const fallbackDuration = track.duration ?? lengthsRef.current[track.path] ?? 0;
     setProgress(0);
     setDuration(fallbackDuration);
     if (audioRef.current) {
@@ -179,7 +191,7 @@ export function MusicPage() {
         setIsPlaying(false);
       }
     }
-  }, [playlist, lengths]);
+  }, []);
 
   // Update playIndex ref whenever it changes
   useEffect(() => {
@@ -198,9 +210,10 @@ export function MusicPage() {
   };
 
   const handlePrev = () => {
-    if (!playlist.length) return;
-    const nextIdx = currentIndex > 0 ? currentIndex - 1 : playlist.length - 1;
-    if (playIndexRef.current) playIndexRef.current(nextIdx);
+    const list = playlistRef.current || playlist;
+    if (!list.length) return;
+    const nextIdx = currentIndex > 0 ? currentIndex - 1 : list.length - 1;
+    if (playIndexRef.current) playIndexRef.current(nextIdx, list);
   };
 
   const sortSongs = (songs = []) =>
@@ -251,15 +264,16 @@ export function MusicPage() {
   }, [sortedAlbums]);
 
   const handleNext = useCallback(() => {
-    if (!playlist.length) return;
+    const list = playlistRef.current || playlist;
+    if (!list.length) return;
     const nextIdx = currentIndex + 1;
-    if (nextIdx < playlist.length) {
-      if (playIndexRef.current) playIndexRef.current(nextIdx);
+    if (nextIdx < list.length) {
+      if (playIndexRef.current) playIndexRef.current(nextIdx, list);
       return;
     }
     // End of playlist
     if (viewMode !== 'playlists') {
-      const currentPath = playlist[currentIndex]?.path;
+      const currentPath = list[currentIndex]?.path;
       const next = getNextAlbumSong(currentPath);
       if (next && playIndexRef.current) {
         playIndexRef.current(next.idx, next.songs);
@@ -267,8 +281,8 @@ export function MusicPage() {
       }
     }
     // Otherwise loop within playlist
-    if (playIndexRef.current) playIndexRef.current(0, playlist);
-  }, [playlist, currentIndex, viewMode, getNextAlbumSong]);
+    if (playIndexRef.current) playIndexRef.current(0, list);
+  }, [currentIndex, viewMode, getNextAlbumSong]);
 
   const handleSeek = (e) => {
     if (!audioRef.current || !duration) return;
