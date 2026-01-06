@@ -288,12 +288,15 @@ export function MusicPage() {
   };
 
   const handleSeek = (e) => {
-    if (!audioRef.current || !duration) return;
+    if (!audioRef.current) return;
+    const dur = audioRef.current.duration || duration || 0;
+    if (!dur) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    const newTime = pct * duration;
+    const newTime = pct * dur;
     audioRef.current.currentTime = newTime;
     setProgress(newTime);
+    setDuration(dur);
   };
 
   const handleVolumeChange = (e) => {

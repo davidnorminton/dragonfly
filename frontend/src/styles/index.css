@@ -2109,10 +2109,10 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 8px 16px;
-  background: rgba(0, 0, 0, 0.95);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
+  padding: 10px 18px;
+  background: #121212;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.4);
   z-index: 1200;
   display: flex;
   align-items: center;
@@ -2367,60 +2367,43 @@ body {
 .music-controls-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
-.control-icon {
+.control-icon,
+.control-btn {
   background: transparent;
   border: none;
-  color: #fff;
+  color: #eaeaea;
   cursor: pointer;
   padding: 8px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
-  transition: background 0.2s;
+  font-size: 1.05rem;
+  transition: background 0.15s, color 0.15s;
   width: 40px;
   height: 40px;
-}
-
-.control-icon:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.control-btn {
-  background: transparent;
-  border: none;
-  color: #fff;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  cursor: pointer;
-  font-size: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
 }
 
 .control-btn.play-btn {
-  width: 48px;
-  height: 48px;
-  font-size: 1.3rem;
-  background: #fff;
+  width: 52px;
+  height: 52px;
+  font-size: 1.2rem;
+  background: #1db954;
   color: #000;
+  box-shadow: 0 6px 16px rgba(29, 185, 84, 0.35);
 }
 
 .control-btn.play-btn:hover {
-  background: rgba(255, 255, 255, 0.9);
+  background: #1ed760;
 }
 
 .control-btn:hover,
 .control-icon:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 
 .music-progress-container {
@@ -2432,9 +2415,9 @@ body {
 
 .music-progress {
   flex: 1;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
+  height: 6px;
+  background: #535353;
+  border-radius: 999px;
   overflow: hidden;
   cursor: pointer;
   position: relative;
@@ -2442,9 +2425,10 @@ body {
 
 .music-progress-fill {
   height: 100%;
-  background: #fff;
+  background: #1db954;
   width: 0%;
-  border-radius: 2px;
+  border-radius: 999px;
+  transition: width 0.1s linear;
 }
 
 .music-progress-handle {
@@ -2455,13 +2439,8 @@ body {
   border-radius: 50%;
   background: #fff;
   transform: translate(-50%, -50%);
-  opacity: 0;
-  transition: opacity 0.2s;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
   pointer-events: none;
-}
-
-.music-progress:hover .music-progress-handle {
-  opacity: 1;
 }
 
 .time-stamp {
@@ -2506,9 +2485,9 @@ body {
 
 .music-volume-slider {
   flex: 1;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
+  height: 6px;
+  background: #535353;
+  border-radius: 999px;
   overflow: hidden;
   cursor: pointer;
   position: relative;
@@ -2518,9 +2497,9 @@ body {
 
 .music-volume-fill {
   height: 100%;
-  background: #fff;
+  background: #1db954;
   width: 0%;
-  border-radius: 2px;
+  border-radius: 999px;
 }
 
 .music-volume-handle {
