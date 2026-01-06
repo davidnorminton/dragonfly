@@ -795,6 +795,42 @@ async def generate_music_popular(req: PopularRequest):
         )
 
 
+@app.get("/api/music/artist/about")
+async def get_artist_about(artist: str):
+    """
+    Retrieve cached about info for an artist.
+    """
+    artist_name = artist.strip()
+    if not artist_name:
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": "artist is required"}
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await session.scalar(
+                select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
+            )
+            if not artist_row:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+
+            # Return cached about info if it exists
+            if artist_row.extra_metadata and artist_row.extra_metadata.get("about"):
+                return {"success": True, "about": artist_row.extra_metadata["about"]}
+            else:
+                return {"success": True, "about": None}
+    except Exception as e:
+        logger.error(f"Error fetching about info for '{artist_name}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
 @app.post("/api/music/artist/about")
 async def generate_artist_about(req: AboutRequest):
     """

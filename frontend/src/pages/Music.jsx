@@ -468,12 +468,32 @@ export function MusicPage() {
     }
   };
 
+  const fetchAbout = async (artistName) => {
+    if (!artistName) return;
+    setAboutError('');
+    setAboutLoading(true);
+    try {
+      const res = await musicAPI.getAbout(artistName);
+      if (res.success) {
+        if (res.about) {
+          setAboutMap((prev) => ({ ...prev, [artistName]: res.about }));
+        }
+      } else {
+        setAboutError(res.error || 'Failed to load about info');
+      }
+    } catch (e) {
+      setAboutError(e?.message || 'Failed to load about info');
+    } finally {
+      setAboutLoading(false);
+    }
+  };
+
   const handleGenerateAbout = async () => {
     if (!selectedArtist) return;
     setAboutError('');
     setAboutLoading(true);
     try {
-      const res = await musicAPI.getArtistAbout(selectedArtist);
+      const res = await musicAPI.generateAbout(selectedArtist);
       if (res.success) {
         setAboutMap((prev) => ({ ...prev, [selectedArtist]: res.about || '' }));
       } else {
@@ -699,6 +719,7 @@ export function MusicPage() {
     if (viewMode === 'playlists') return;
     if (!selectedArtist) return;
     fetchPopular(selectedArtist);
+    fetchAbout(selectedArtist);
   }, [selectedArtist, viewMode]);
 
   const handleAlbumSelect = (artistName, albumName) => {
