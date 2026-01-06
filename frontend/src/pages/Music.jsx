@@ -30,6 +30,22 @@ export function MusicPage() {
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
 
+  // Define these early so they're available for useCallback dependencies
+  const currentArtist = useMemo(() => {
+    if (!selectedArtist) return null;
+    return library.find((a) => a.name === selectedArtist) || null;
+  }, [selectedArtist, library]);
+
+  const sortedAlbums = useMemo(() => {
+    if (!currentArtist?.albums) return [];
+    return [...currentArtist.albums].sort((a, b) => {
+      const ya = a.year || (a.date ? parseInt(String(a.date).split('-')[0]) : 0);
+      const yb = b.year || (b.date ? parseInt(String(b.date).split('-')[0]) : 0);
+      if (yb !== ya) return (yb || 0) - (ya || 0); // newest first
+      return a.name.localeCompare(b.name);
+    });
+  }, [currentArtist]);
+
   const toggleArtist = (artist) => {
     setSelectedArtist(artist);
     setSelectedAlbum(null);
@@ -172,6 +188,53 @@ export function MusicPage() {
     playIndex(nextIdx);
   };
 
+  const sortSongs = (songs = []) =>
+    songs.slice().sort((a, b) => {
+      const ta = a.track_number ?? 9999;
+      const tb = b.track_number ?? 9999;
+      return ta - tb;
+    });
+
+  const getNextAlbumSong = useCallback((currentPath) => {
+    if (!sortedAlbums || !sortedAlbums.length) return null;
+    const albumsSeq = sortedAlbums
+      .map((album) => ({
+        album,
+        songs: sortSongs(album.songs || []),
+      }))
+      .filter((a) => a.songs.length);
+    if (!albumsSeq.length) return null;
+
+    let foundAlbumIdx = -1;
+    let foundSongIdx = -1;
+    albumsSeq.forEach((al, ai) => {
+      const si = al.songs.findIndex((s) => s.path === currentPath);
+      if (si !== -1) {
+        foundAlbumIdx = ai;
+        foundSongIdx = si;
+      }
+    });
+
+    // If not found, start from the first album/song
+    if (foundAlbumIdx === -1) {
+      return { songs: albumsSeq[0].songs, idx: 0 };
+    }
+
+    // Next song in same album
+    if (foundSongIdx + 1 < albumsSeq[foundAlbumIdx].songs.length) {
+      return { songs: albumsSeq[foundAlbumIdx].songs, idx: foundSongIdx + 1 };
+    }
+
+    // Move to next album
+    const nextAlbumIdx = foundAlbumIdx + 1;
+    if (nextAlbumIdx < albumsSeq.length) {
+      return { songs: albumsSeq[nextAlbumIdx].songs, idx: 0 };
+    }
+
+    // Wrap to first album
+    return { songs: albumsSeq[0].songs, idx: 0 };
+  }, [sortedAlbums]);
+
   const handleNext = useCallback(() => {
     if (!playlist.length) return;
     const nextIdx = currentIndex + 1;
@@ -218,52 +281,6 @@ export function MusicPage() {
   const handleSongClick = (songs, idx) => {
     playIndex(idx, songs);
   };
-
-  const sortSongs = (songs = []) =>
-    songs.slice().sort((a, b) => {
-      const ta = a.track_number ?? 9999;
-      const tb = b.track_number ?? 9999;
-      return ta - tb;
-    });
-
-  const getNextAlbumSong = useCallback((currentPath) => {
-    const albumsSeq = sortedAlbums
-      .map((album) => ({
-        album,
-        songs: sortSongs(album.songs || []),
-      }))
-      .filter((a) => a.songs.length);
-    if (!albumsSeq.length) return null;
-
-    let foundAlbumIdx = -1;
-    let foundSongIdx = -1;
-    albumsSeq.forEach((al, ai) => {
-      const si = al.songs.findIndex((s) => s.path === currentPath);
-      if (si !== -1) {
-        foundAlbumIdx = ai;
-        foundSongIdx = si;
-      }
-    });
-
-    // If not found, start from the first album/song
-    if (foundAlbumIdx === -1) {
-      return { songs: albumsSeq[0].songs, idx: 0 };
-    }
-
-    // Next song in same album
-    if (foundSongIdx + 1 < albumsSeq[foundAlbumIdx].songs.length) {
-      return { songs: albumsSeq[foundAlbumIdx].songs, idx: foundSongIdx + 1 };
-    }
-
-    // Move to next album
-    const nextAlbumIdx = foundAlbumIdx + 1;
-    if (nextAlbumIdx < albumsSeq.length) {
-      return { songs: albumsSeq[nextAlbumIdx].songs, idx: 0 };
-    }
-
-    // Wrap to first album
-    return { songs: albumsSeq[0].songs, idx: 0 };
-  }, [sortedAlbums]);
 
   const openPlaylistModal = (song = null) => {
     setPendingSong(song);
@@ -482,11 +499,6 @@ export function MusicPage() {
     }
   };
 
-  const currentArtist = useMemo(() => {
-    if (!selectedArtist) return null;
-    return library.find((a) => a.name === selectedArtist) || null;
-  }, [selectedArtist, library]);
-
   const currentPlaylist = useMemo(() => {
     if (!selectedPlaylist) return null;
     return playlists.find((p) => p.name === selectedPlaylist) || null;
@@ -508,16 +520,6 @@ export function MusicPage() {
       return dateB.getTime() - dateA.getTime();
     });
   }, [library]);
-
-  const sortedAlbums = useMemo(() => {
-    if (!currentArtist?.albums) return [];
-    return [...currentArtist.albums].sort((a, b) => {
-      const ya = a.year || (a.date ? parseInt(String(a.date).split('-')[0]) : 0);
-      const yb = b.year || (b.date ? parseInt(String(b.date).split('-')[0]) : 0);
-      if (yb !== ya) return (yb || 0) - (ya || 0); // newest first
-      return a.name.localeCompare(b.name);
-    });
-  }, [currentArtist]);
 
   const currentAlbum = useMemo(() => {
     if (!selectedArtist || !selectedAlbum) return null;
