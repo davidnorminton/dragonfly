@@ -559,7 +559,7 @@ export function MusicPage() {
     setViewMode('albums');
   };
 
-  const heroLabel = selectedAlbum && currentAlbum ? 'Album' : 'Artist';
+  const heroLabel = viewMode === 'playlists' && selectedPlaylist ? 'Playlist' : selectedAlbum && currentAlbum ? 'Album' : 'Artist';
   const heroTitle = viewMode === 'playlists' && selectedPlaylist ? selectedPlaylist : selectedAlbum && currentAlbum ? currentAlbum.name : selectedArtist || 'Select an artist';
   const heroSub =
     viewMode === 'playlists' && selectedPlaylist
@@ -586,9 +586,22 @@ export function MusicPage() {
     // Playlist cover guess from first song
     if (viewMode === 'playlists' && selectedPlaylist) {
       const pl = playlists.find((p) => p.name === selectedPlaylist);
-      const firstSongPath = pl?.songs?.[0]?.path;
-      const coverGuess = guessCoverFromSongPath(firstSongPath);
-      push(coverGuess);
+      const firstSong = pl?.songs?.[0];
+      if (firstSong) {
+        // Try to find album cover from library
+        const albumName = firstSong.album || firstSong.album_title || firstSong.albumName;
+        const artistName = firstSong.artist || firstSong.artistName || firstSong.artist_name;
+        if (albumName && artistName) {
+          const artist = library.find((a) => a.name === artistName);
+          const album = artist?.albums?.find((al) => al.name === albumName);
+          if (album) {
+            push(album.image || album.cover_path || album.coverPath || album.image_path || album.imagePath);
+          }
+        }
+        // Fallback to guessing from song path
+        const coverGuess = guessCoverFromSongPath(firstSong.path);
+        push(coverGuess);
+      }
     }
 
     // Artist images
@@ -602,20 +615,20 @@ export function MusicPage() {
     }
 
     return Array.from(new Set(candidates.filter(Boolean)));
-  }, [currentAlbum, currentArtist, selectedArtist, viewMode, selectedPlaylist, playlists]);
+  }, [currentAlbum, currentArtist, selectedArtist, viewMode, selectedPlaylist, playlists, library]);
 
-  const heroBgStyle =
-    heroImageCandidates.length > 0
-      ? {
-          backgroundImage: [
+  const heroBgStyle = {
+    backgroundImage:
+      heroImageCandidates.length > 0
+        ? [
             'linear-gradient(180deg, rgba(11, 139, 230, 0.82) 0%, rgba(5, 47, 107, 0.92) 100%)',
             ...heroImageCandidates.map((p) => `url(/api/music/stream?path=${encodeURIComponent(p)})`),
-          ].join(', '),
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-        }
-      : undefined;
+          ].join(', ')
+        : 'linear-gradient(180deg, rgba(11, 139, 230, 0.82) 0%, rgba(5, 47, 107, 0.92) 100%)',
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  };
 
   return (
     <div className="music-page">
@@ -739,14 +752,18 @@ export function MusicPage() {
 
         <div className="music-main">
           <div className="music-hero" style={heroBgStyle}>
-            {heroImageCandidates[0] && (
+            {heroImageCandidates[0] ? (
               <img
                 src={`/api/music/stream?path=${encodeURIComponent(heroImageCandidates[0])}`}
-                alt={currentArtist?.name || currentAlbum?.name || 'Artist'}
+                alt={currentArtist?.name || currentAlbum?.name || currentPlaylist?.name || 'Artist'}
                 className="album-hero"
                 data-idx="0"
                 onError={(e) => nextImageFallback(e, heroImageCandidates)}
               />
+            ) : (
+              <div className="album-hero" style={{ background: 'rgba(0, 0, 0, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.9em' }}>
+                {viewMode === 'playlists' ? '🎵' : '🎤'}
+              </div>
             )}
             <div className="hero-text">
               <div className="album-label">{heroLabel}</div>
@@ -791,7 +808,7 @@ export function MusicPage() {
                         >
                           <span className="col-index">{song.track_number || idx + 1}</span>
                           <span className="col-title">{song.name}</span>
-                          <span className="col-artist">{song.artist || song.artistName || song.artist_name || currentArtist?.name || ''}</span>
+                          <span className="col-artist">{song.artist || song.artistName || song.artist_name || ''}</span>
                           <span className="col-album">{song.album || song.album_title || song.albumName || ''}</span>
                           <span className="col-length">{formatTime(dur)}</span>
                           <button
