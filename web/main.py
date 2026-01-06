@@ -245,13 +245,13 @@ async def router_route(request: Request):
 
 
 def _extract_audio_meta(path: Path) -> Dict[str, Any]:
-    """Extract audio metadata using mutagen."""
+    """Extract audio metadata using mutagen; supports common formats with duration fallback."""
     meta: Dict[str, Any] = {
         "duration_seconds": 0,
         "bitrate": None,
         "sample_rate": None,
         "channels": None,
-        "codec": "mp3",
+        "codec": path.suffix.lower().lstrip(".") or "audio",
         "title": None,
         "artist": None,
         "album": None,
@@ -262,34 +262,70 @@ def _extract_audio_meta(path: Path) -> Dict[str, Any]:
         "date": None,
     }
     try:
-        audio = MP3(str(path))
-        if audio and audio.info:
-            meta["duration_seconds"] = int(audio.info.length)
-            meta["bitrate"] = int((audio.info.bitrate or 0) / 1000) if audio.info.bitrate else None
-            meta["sample_rate"] = audio.info.sample_rate
-            meta["channels"] = audio.info.channels
-        try:
-            tags = EasyID3(str(path))
-            meta["title"] = tags.get("title", [None])[0]
-            meta["artist"] = tags.get("artist", [None])[0]
-            meta["album"] = tags.get("album", [None])[0]
-            meta["genre"] = tags.get("genre", [None])[0]
-            meta["year"] = tags.get("date", [None])[0] or tags.get("originaldate", [None])[0]
-            meta["date"] = tags.get("originaldate", [None])[0] or tags.get("date", [None])[0]
-            trk = tags.get("tracknumber", [None])[0]
-            if trk:
-                try:
-                    meta["track_number"] = int(str(trk).split("/")[0])
-                except Exception:
-                    meta["track_number"] = None
-            disc = tags.get("discnumber", [None])[0]
-            if disc:
-                try:
-                    meta["disc_number"] = int(str(disc).split("/")[0])
-                except Exception:
-                    meta["disc_number"] = None
-        except Exception:
-            pass
+        suffix = path.suffix.lower()
+        if suffix == ".mp3":
+            audio = MP3(str(path))
+            if audio and audio.info:
+                meta["duration_seconds"] = int(audio.info.length)
+                meta["bitrate"] = int((audio.info.bitrate or 0) / 1000) if audio.info.bitrate else None
+                meta["sample_rate"] = audio.info.sample_rate
+                meta["channels"] = audio.info.channels
+            try:
+                tags = EasyID3(str(path))
+                meta["title"] = tags.get("title", [None])[0]
+                meta["artist"] = tags.get("artist", [None])[0]
+                meta["album"] = tags.get("album", [None])[0]
+                meta["genre"] = tags.get("genre", [None])[0]
+                meta["year"] = tags.get("date", [None])[0] or tags.get("originaldate", [None])[0]
+                meta["date"] = tags.get("originaldate", [None])[0] or tags.get("date", [None])[0]
+                trk = tags.get("tracknumber", [None])[0]
+                if trk:
+                    try:
+                        meta["track_number"] = int(str(trk).split("/")[0])
+                    except Exception:
+                        meta["track_number"] = None
+                disc = tags.get("discnumber", [None])[0]
+                if disc:
+                    try:
+                        meta["disc_number"] = int(str(disc).split("/")[0])
+                    except Exception:
+                        meta["disc_number"] = None
+            except Exception:
+                pass
+        else:
+            import mutagen
+
+            audio = mutagen.File(str(path))
+            if audio and audio.info:
+                meta["duration_seconds"] = int(audio.info.length)
+                meta["bitrate"] = getattr(audio.info, "bitrate", None)
+                if meta["bitrate"]:
+                    try:
+                        meta["bitrate"] = int(meta["bitrate"] / 1000)
+                    except Exception:
+                        pass
+                meta["sample_rate"] = getattr(audio.info, "sample_rate", None)
+                meta["channels"] = getattr(audio.info, "channels", None)
+            tags = getattr(audio, "tags", None)
+            if tags:
+                meta["title"] = tags.get("title", [None])[0] if isinstance(tags.get("title"), list) else tags.get("title")
+                meta["artist"] = tags.get("artist", [None])[0] if isinstance(tags.get("artist"), list) else tags.get("artist")
+                meta["album"] = tags.get("album", [None])[0] if isinstance(tags.get("album"), list) else tags.get("album")
+                tn = tags.get("tracknumber") or tags.get("track_number")
+                if tn:
+                    try:
+                        meta["track_number"] = int(str(tn[0] if isinstance(tn, list) else tn).split("/")[0])
+                    except Exception:
+                        meta["track_number"] = None
+                dn = tags.get("discnumber")
+                if dn:
+                    try:
+                        meta["disc_number"] = int(str(dn[0] if isinstance(dn, list) else dn).split("/")[0])
+                    except Exception:
+                        meta["disc_number"] = None
+                meta["genre"] = tags.get("genre", [None])[0] if isinstance(tags.get("genre"), list) else tags.get("genre")
+                meta["year"] = tags.get("date", [None])[0] if isinstance(tags.get("date"), list) else tags.get("date")
+                meta["date"] = meta["year"]
     except Exception as e:
         logger.warning(f"Failed to read metadata for {path}: {e}")
     return meta
@@ -397,11 +433,13 @@ async def scan_music_library():
     tree = defaultdict(lambda: defaultdict(lambda: {"songs": [], "image": None, "year": None, "date": None}))  # artist -> album -> {songs, image, year, date}
     artist_images: Dict[str, str] = {}
     image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    audio_exts = {".mp3", ".m4a", ".flac", ".wav", ".ogg"}
     collected_songs = []
 
     for root, _, files in os.walk(base_path):
         for f in files:
-            if not f.lower().endswith(".mp3"):
+            suffix = Path(f).suffix.lower()
+            if suffix not in audio_exts:
                 # Capture artist hero image from artist root folder
                 full_image_path = Path(root) / f
                 try:
