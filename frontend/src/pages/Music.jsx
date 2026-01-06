@@ -179,23 +179,30 @@ export function MusicPage() {
     };
   }, []); // Empty deps - ref is updated separately
 
-  // Scroll detection for sticky hero using scroll event
+  // Scroll detection for sticky hero using scroll event with hysteresis
   useEffect(() => {
     if (!heroRef.current || !mainContentRef.current) return;
 
     // Capture the initial hero height (before it becomes sticky)
     const initialHeroHeight = 280; // Fixed height from CSS min-height
-    const stickyThreshold = initialHeroHeight - 80; // When play button would disappear
+    const stickThreshold = 210; // Stick when scrolling down past this point
+    const unstickThreshold = 190; // Unstick when scrolling up below this point
 
     const handleScroll = () => {
       if (!mainContentRef.current) return;
       
       const scrollTop = mainContentRef.current.scrollTop;
       
-      console.log('Scroll event:', { scrollTop, threshold: stickyThreshold, shouldStick: scrollTop >= stickyThreshold });
-      
-      // Stick when scrolled past the threshold, unstick when scrolled back up
-      setIsScrolled(scrollTop >= stickyThreshold);
+      // Use hysteresis to prevent flickering at the boundary
+      setIsScrolled((prevScrolled) => {
+        if (scrollTop >= stickThreshold) {
+          return true; // Stick
+        } else if (scrollTop <= unstickThreshold) {
+          return false; // Unstick
+        }
+        // Between thresholds: maintain current state
+        return prevScrolled;
+      });
     };
 
     const mainContent = mainContentRef.current;
