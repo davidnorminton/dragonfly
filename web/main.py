@@ -25,6 +25,7 @@ from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
 from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong
 from sqlalchemy import select, desc, func, or_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
 from pydantic import BaseModel
@@ -481,6 +482,61 @@ async def _persist_music(tree_songs: list):
 
         await session.commit()
         logger.info(f"Persisted {len(tree_songs)} songs for artists: {sorted(artists_persisted)}")
+
+
+@app.get("/api/music/library")
+async def get_music_library():
+    """
+    Load the music library from the database (no filesystem scan).
+    Returns the same structure as /api/music/scan but from cached DB data.
+    """
+    async with get_async_session() as session:
+        try:
+            # Load all artists with their albums and songs
+            result = await session.execute(
+                select(MusicArtist).options(
+                    selectinload(MusicArtist.albums).selectinload(MusicAlbum.songs)
+                )
+            )
+            artists = result.scalars().all()
+            
+            artists_out = []
+            for artist in artists:
+                albums_out = []
+                for album in artist.albums:
+                    songs_out = []
+                    for song in album.songs:
+                        songs_out.append({
+                            "name": song.title or Path(song.path).stem,
+                            "path": song.path,
+                            "duration": song.duration,
+                            "track": song.track_number,
+                        })
+                    
+                    # Sort songs by track number
+                    songs_out.sort(key=lambda s: s.get("track") or 999)
+                    
+                    albums_out.append({
+                        "name": album.title,
+                        "songs": songs_out,
+                        "image": album.image_path,
+                        "year": album.year,
+                        "date": album.release_date,
+                    })
+                
+                artists_out.append({
+                    "name": artist.name,
+                    "image": artist.image_path,
+                    "albums": albums_out,
+                })
+            
+            return {
+                "success": True,
+                "artists": sorted(artists_out, key=lambda a: a["name"].lower())
+            }
+        except Exception as e:
+            logger.error(f"Failed to load music library: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
 
 @app.get("/api/music/scan")

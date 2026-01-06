@@ -71,6 +71,28 @@ export function MusicPage() {
     setViewMode('artists');
   };
 
+  const loadLibrary = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await musicAPI.getLibrary();
+      if (res.success) {
+        setLibrary(res.artists || []);
+        const firstArtist = res.artists?.[0];
+        if (firstArtist) {
+          setSelectedArtist(firstArtist.name);
+          // album selection will auto-set to top sorted album later
+        }
+      } else {
+        setError(res.error || 'Failed to load library');
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to load library');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const scanLibrary = async () => {
     setLoading(true);
     setError('');
@@ -108,7 +130,7 @@ export function MusicPage() {
   };
 
   useEffect(() => {
-    scanLibrary();
+    loadLibrary();
     loadPlaylists();
   }, []);
 

@@ -56,6 +56,7 @@ export const routerAPI = {
 };
 
 export const musicAPI = {
+  getLibrary: () => api.get('/music/library').then(res => res.data),
   scanMusic: () => api.get('/music/scan').then(res => res.data),
   getMetadata: (path) => api.get('/music/metadata', { params: { path } }).then(res => res.data),
   getPopular: (artist) => api.get('/music/popular', { params: { artist } }).then(res => res.data),
