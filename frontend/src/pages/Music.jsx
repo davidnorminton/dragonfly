@@ -1084,57 +1084,99 @@ export function MusicPage() {
                       )}
                     </div>
                   )}
-                  {(viewMode === 'albums' && selectedAlbum && currentAlbum ? [currentAlbum] : sortedAlbums).map((album) => {
-                    const songsSorted = sortSongs(album.songs || []);
-                    return (
-                      <div key={album.name} className="album-section">
-                        <div className="album-section-title">{album.name}</div>
-                        <div className="tracklist-header">
-                          <span className="col-index">#</span>
-                          <span className="col-title">Title</span>
-                          <span className="col-length">Length</span>
-                          <span className="col-add" />
-                        </div>
-                        {songsSorted.map((song, idx) => {
-                          const active = playlist[currentIndex]?.path === song.path;
-                          const dur = song.duration ?? lengths[song.path];
-                          return (
-                            <div
-                              key={song.path}
-                              className={`track-row ${active ? 'active' : ''}`}
-                              onClick={() => handleSongClick(songsSorted, idx)}
-                            >
-                              <span className="col-index">
-                                {active && isPlaying ? (
-                                  <div className="playing-bars">
-                                    <span className="bar"></span>
-                                    <span className="bar"></span>
-                                    <span className="bar"></span>
-                                    <span className="bar"></span>
-                                  </div>
-                                ) : (
-                                  song.track_number || idx + 1
-                                )}
-                              </span>
-                              <span className="col-title">{song.name}</span>
-                              <span className="col-length">{formatTime(dur)}</span>
-                              <button
-                                className="track-add"
-                                title="Add to playlist"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAddToPlaylist(song);
-                                }}
-                              >
-                                +
-                              </button>
-                            </div>
-                          );
-                        })}
+                  {viewMode === 'albums' && selectedAlbum && currentAlbum ? (
+                    // Single album view - show songs
+                    <div className="album-section">
+                      <div className="album-section-title">{currentAlbum.name}</div>
+                      <div className="tracklist-header">
+                        <span className="col-index">#</span>
+                        <span className="col-title">Title</span>
+                        <span className="col-length">Length</span>
+                        <span className="col-add" />
                       </div>
-                    );
-                  })}
-                  {!sortedAlbums.length && <div className="music-empty">Select an artist to view tracks</div>}
+                      {sortSongs(currentAlbum.songs || []).map((song, idx) => {
+                        const active = playlist[currentIndex]?.path === song.path;
+                        const dur = song.duration ?? lengths[song.path];
+                        const songsSorted = sortSongs(currentAlbum.songs || []);
+                        return (
+                          <div
+                            key={song.path}
+                            className={`track-row ${active ? 'active' : ''}`}
+                            onClick={() => handleSongClick(songsSorted, idx)}
+                          >
+                            <span className="col-index">
+                              {active && isPlaying ? (
+                                <div className="playing-bars">
+                                  <span className="bar"></span>
+                                  <span className="bar"></span>
+                                  <span className="bar"></span>
+                                  <span className="bar"></span>
+                                </div>
+                              ) : (
+                                song.track_number || idx + 1
+                              )}
+                            </span>
+                            <span className="col-title">{song.name}</span>
+                            <span className="col-length">{formatTime(dur)}</span>
+                            <button
+                              className="track-add"
+                              title="Add to playlist"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAddToPlaylist(song);
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // Artist view - show album tiles
+                    <>
+                      {sortedAlbums.length > 0 && (
+                        <div className="album-section">
+                          <div className="album-section-title">Albums</div>
+                          <div className="album-grid">
+                            {sortedAlbums.map((album) => {
+                              const albumImg =
+                                album.image ||
+                                album.cover_path ||
+                                album.coverPath ||
+                                (album.songs?.[0]?.path ? guessCoverFromSongPath(album.songs?.[0]?.path) : null);
+                              return (
+                                <div
+                                  key={album.name}
+                                  className="album-card"
+                                  onClick={() => handleAlbumSelect(selectedArtist, album.name)}
+                                >
+                                  {albumImg ? (
+                                    <img
+                                      src={`/api/music/stream?path=${encodeURIComponent(albumImg)}`}
+                                      alt={`${album.name} cover`}
+                                      className="album-card-img"
+                                    />
+                                  ) : (
+                                    <div className="album-card-placeholder">
+                                      <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor">
+                                        <path d="M8 0a8 8 0 100 16A8 8 0 008 0zM3.5 6.5a.5.5 0 11-1 0 .5.5 0 011 0zm9.5 0a.5.5 0 11-1 0 .5.5 0 011 0zM8 13a4.5 4.5 0 01-3.848-2.13c-.178-.3.162-.654.478-.472C5.564 11.152 6.762 11.5 8 11.5s2.437-.348 3.37-1.102c.316-.182.656.172.478.472A4.5 4.5 0 018 13z"/>
+                                      </svg>
+                                    </div>
+                                  )}
+                                  <div className="album-card-title">{album.name}</div>
+                                  <div className="album-card-meta">
+                                    {album.year || (album.date ? new Date(album.date).getFullYear() : '')}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {!sortedAlbums.length && <div className="music-empty">Select an artist to view albums</div>}
+                    </>
+                  )}
                 </>
               )}
             </div>
