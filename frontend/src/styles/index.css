@@ -1912,6 +1912,7 @@ body {
 
 .music-hero.scrolled {
   align-items: center;
+  gap: 16px;
 }
 
 .music-hero.scrolled .album-hero {
@@ -1923,6 +1924,7 @@ body {
   flex-direction: row;
   align-items: center;
   order: 2;
+  flex: 1;
 }
 
 .music-hero.scrolled .album-label {
@@ -1941,6 +1943,7 @@ body {
 .music-hero.scrolled .hero-actions {
   gap: 12px;
   order: 1;
+  flex-shrink: 0;
 }
 
 .music-hero.scrolled .hero-play {

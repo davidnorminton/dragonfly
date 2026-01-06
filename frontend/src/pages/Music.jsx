@@ -183,17 +183,19 @@ export function MusicPage() {
   useEffect(() => {
     if (!heroRef.current || !mainContentRef.current) return;
 
+    // Capture the initial hero height (before it becomes sticky)
+    const initialHeroHeight = 280; // Fixed height from CSS min-height
+    const stickyThreshold = initialHeroHeight - 80; // When play button would disappear
+
     const handleScroll = () => {
-      if (!mainContentRef.current || !heroRef.current) return;
+      if (!mainContentRef.current) return;
       
       const scrollTop = mainContentRef.current.scrollTop;
-      const heroHeight = heroRef.current.offsetHeight;
-      const threshold = heroHeight - 80; // When play button would disappear
       
-      console.log('Scroll event:', { scrollTop, heroHeight, threshold, shouldStick: scrollTop >= threshold });
+      console.log('Scroll event:', { scrollTop, threshold: stickyThreshold, shouldStick: scrollTop >= stickyThreshold });
       
-      // Stick when scrolled past the threshold
-      setIsScrolled(scrollTop >= threshold);
+      // Stick when scrolled past the threshold, unstick when scrolled back up
+      setIsScrolled(scrollTop >= stickyThreshold);
     };
 
     const mainContent = mainContentRef.current;
