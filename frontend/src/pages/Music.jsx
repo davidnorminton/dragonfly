@@ -25,6 +25,7 @@ export function MusicPage() {
   const [playlistModalExisting, setPlaylistModalExisting] = useState('');
   const [pendingSong, setPendingSong] = useState(null);
   const [playlistLoading, setPlaylistLoading] = useState(false);
+  const [playlistModalError, setPlaylistModalError] = useState('');
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
 
@@ -266,6 +267,7 @@ export function MusicPage() {
     const song = pendingSong;
     if (song) {
       try {
+        setPlaylistModalError('');
         await musicAPI.addToPlaylist({
           name,
           path: song.path,
@@ -283,6 +285,7 @@ export function MusicPage() {
       }
     } else {
       try {
+        setPlaylistModalError('');
         await musicAPI.createPlaylist(name);
         await loadPlaylists();
       } catch (e) {
@@ -773,7 +776,8 @@ export function MusicPage() {
                       <span className="col-index">#</span>
                       <span className="col-title">Title</span>
                       <span className="col-artist">Artist</span>
-                      <span className="col-length">Album</span>
+                      <span className="col-album">Album</span>
+                      <span className="col-length">Length</span>
                       <span className="col-add" />
                     </div>
                     {currentPlaylist.songs.map((song, idx) => {
@@ -788,7 +792,7 @@ export function MusicPage() {
                           <span className="col-index">{song.track_number || idx + 1}</span>
                           <span className="col-title">{song.name}</span>
                           <span className="col-artist">{song.artist || song.artistName || song.artist_name || currentArtist?.name || ''}</span>
-                          <span className="col-length">{song.album || song.album_title || song.albumName || ''}</span>
+                          <span className="col-album">{song.album || song.album_title || song.albumName || ''}</span>
                           <span className="col-length">{formatTime(dur)}</span>
                           <button
                             className="track-add"
@@ -834,6 +838,8 @@ export function MusicPage() {
                         <div className="tracklist-header">
                           <span className="col-index">#</span>
                           <span className="col-title">Title</span>
+                          <span className="col-artist">Artist</span>
+                          <span className="col-album">Album</span>
                           <span className="col-length">Length</span>
                           <span className="col-add" />
                         </div>
@@ -848,6 +854,8 @@ export function MusicPage() {
                             >
                               <span className="col-index">{song.track_number || idx + 1}</span>
                               <span className="col-title">{song.title || song.name}</span>
+                              <span className="col-artist">{song.artist || song.artistName || song.artist_name || currentArtist?.name || ''}</span>
+                              <span className="col-album">{song.album || song.album_title || song.albumName || ''}</span>
                               <span className="col-length">{formatTime(dur)}</span>
                               <button
                                 className="track-add"
@@ -877,6 +885,7 @@ export function MusicPage() {
                           <span className="col-index">#</span>
                           <span className="col-title">Title</span>
                           <span className="col-artist">Artist</span>
+                          <span className="col-album">Album</span>
                           <span className="col-length">Length</span>
                           <span className="col-add" />
                         </div>
@@ -892,6 +901,7 @@ export function MusicPage() {
                               <span className="col-index">{song.track_number || idx + 1}</span>
                               <span className="col-title">{song.name}</span>
                               <span className="col-artist">{song.artist || album.artistName}</span>
+                              <span className="col-album">{album.name}</span>
                               <span className="col-length">{formatTime(dur)}</span>
                               <button
                                 className="track-add"

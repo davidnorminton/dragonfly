@@ -2227,7 +2227,7 @@ body {
 
 .tracklist-header {
   display: grid;
-  grid-template-columns: 40px 1fr 80px 40px;
+  grid-template-columns: 40px 1.4fr 1fr 1fr 80px 40px;
   color: #9da7b8;
   font-size: 0.85em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -2241,7 +2241,7 @@ body {
 
 .track-row {
   display: grid;
-  grid-template-columns: 40px 1.4fr 1fr 80px 40px;
+  grid-template-columns: 40px 1.4fr 1fr 1fr 80px 40px;
   align-items: center;
   padding: 8px 8px;
   border-radius: 6px;
