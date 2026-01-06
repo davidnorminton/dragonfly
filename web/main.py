@@ -655,14 +655,23 @@ async def get_music_popular(artist: str):
         async with AsyncSessionLocal() as session:
             artist_row = await _ensure_artist_in_db(session, artist)
             if not artist_row:
-                logger.warning(f"Artist '{artist}' not found in database after rescan attempt")
-                # Include available artists to aid debugging
-                all_artists_res = await session.execute(select(MusicArtist.name))
-                artist_names = [a[0] for a in all_artists_res.all()]
-                return JSONResponse(
-                    status_code=200,
-                    content={"success": False, "error": "Artist not found", "artists": artist_names},
-                )
+                logger.warning(f"Artist '{artist}' not found in database after rescan attempt, forcing rescan and requery")
+                try:
+                    await scan_music_library()
+                except Exception as e:
+                    logger.error(f"Forced rescan failed for artist '{artist}': {e}", exc_info=True)
+                # Use a fresh session after forced rescan
+                async with AsyncSessionLocal() as fresh:
+                    artist_row = await fresh.scalar(
+                        select(MusicArtist).where(func.lower(MusicArtist.name) == artist.lower())
+                    )
+                    if not artist_row:
+                        all_artists_res = await fresh.execute(select(MusicArtist.name))
+                        artist_names = [a[0] for a in all_artists_res.all()]
+                        return JSONResponse(
+                            status_code=200,
+                            content={"success": False, "error": "Artist not found", "artists": artist_names},
+                        )
             meta = artist_row.extra_metadata or {}
             popular = meta.get("popular_songs") or []
             return {"success": True, "popular": popular}
@@ -691,13 +700,22 @@ async def generate_music_popular(req: PopularRequest):
         async with AsyncSessionLocal() as session:
             artist_row = await _ensure_artist_in_db(session, artist_name)
             if not artist_row:
-                logger.warning(f"Artist '{artist_name}' not found in database after rescan attempt")
-                all_artists_res = await session.execute(select(MusicArtist.name))
-                artist_names = [a[0] for a in all_artists_res.all()]
-                return JSONResponse(
-                    status_code=200,
-                    content={"success": False, "error": "Artist not found", "artists": artist_names},
-                )
+                logger.warning(f"Artist '{artist_name}' not found in database after rescan attempt, forcing rescan and requery")
+                try:
+                    await scan_music_library()
+                except Exception as e:
+                    logger.error(f"Forced rescan failed for artist '{artist_name}': {e}", exc_info=True)
+                async with AsyncSessionLocal() as fresh:
+                    artist_row = await fresh.scalar(
+                        select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
+                    )
+                    if not artist_row:
+                        all_artists_res = await fresh.execute(select(MusicArtist.name))
+                        artist_names = [a[0] for a in all_artists_res.all()]
+                        return JSONResponse(
+                            status_code=200,
+                            content={"success": False, "error": "Artist not found", "artists": artist_names},
+                        )
 
             result = await session.execute(
                 select(MusicSong, MusicAlbum)
