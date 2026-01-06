@@ -401,7 +401,7 @@ async def scan_music_library():
     if not base_path.exists():
         return {"success": False, "error": f"{base_path} does not exist"}
 
-    tree = defaultdict(lambda: defaultdict(lambda: {"songs": [], "image": None, "year": None, "date": None}))  # artist -> album -> {songs, image, year, date}
+    tree = defaultdict(lambda: defaultdict(lambda: {"songs": [], "image": None, "year": None, "date": None, "title": None}))  # artist -> album -> {songs, image, year, date, title}
     artist_images: Dict[str, str] = {}
     image_exts = {".jpg", ".jpeg", ".png", ".webp"}
     audio_exts = {".mp3"}
@@ -435,13 +435,19 @@ async def scan_music_library():
                 if len(parts) < 3:
                     # Not in Artist/Album/Song; skip
                     continue
-                artist, album = parts[0], parts[1]
+                artist, album_dir = parts[0], parts[1]
                 artist_names_seen.add(artist)
                 song = Path(parts[-1]).stem
                 rel_path = str(full_path.relative_to(base_path))
                 meta = _extract_audio_meta(full_path)
                 title_from_meta = meta.get("title") or song
-                tree[artist][album]["songs"].append(
+                album_title_from_meta = meta.get("album") or album_dir
+                
+                # Store the metadata album title (use first song's metadata album name)
+                if not tree[artist][album_dir]["title"]:
+                    tree[artist][album_dir]["title"] = album_title_from_meta
+                
+                tree[artist][album_dir]["songs"].append(
                     {
                         "name": title_from_meta,
                         "path": rel_path,
@@ -450,17 +456,18 @@ async def scan_music_library():
                     }
                 )
                 # Capture year/date for album ordering
-                if meta.get("year") and not tree[artist][album]["year"]:
+                if meta.get("year") and not tree[artist][album_dir]["year"]:
                     try:
-                        tree[artist][album]["year"] = int(str(meta.get("year")).split("-")[0])
+                        tree[artist][album_dir]["year"] = int(str(meta.get("year")).split("-")[0])
                     except Exception:
-                        tree[artist][album]["year"] = None
-                if meta.get("date") and not tree[artist][album]["date"]:
-                    tree[artist][album]["date"] = meta.get("date")
+                        tree[artist][album_dir]["year"] = None
+                if meta.get("date") and not tree[artist][album_dir]["date"]:
+                    tree[artist][album_dir]["date"] = meta.get("date")
                 collected_songs.append(
                     {
                         "artist": artist,
-                        "album": album,
+                        "album": album_title_from_meta,
+                        "album_dir": album_dir,
                         "title": title_from_meta,
                         "path": rel_path,
                         "album_image": None,
@@ -478,29 +485,29 @@ async def scan_music_library():
         except Exception:
           rel_album = None
         if rel_album and len(rel_album.parts) >= 2:
-            artist, album = rel_album.parts[0], rel_album.parts[1]
-            if tree[artist][album]["image"] is None:
+            artist, album_dir_name = rel_album.parts[0], rel_album.parts[1]
+            if tree[artist][album_dir_name]["image"] is None:
                 for img in album_dir.iterdir():
                     if img.is_file() and img.suffix.lower() in image_exts:
                         rel_img = str(img.relative_to(base_path))
-                        tree[artist][album]["image"] = rel_img
-                        # update collected_songs album_image for this album
+                        tree[artist][album_dir_name]["image"] = rel_img
+                        # update collected_songs album_image for this album directory
                         for cs in collected_songs:
-                            if cs["artist"] == artist and cs["album"] == album:
+                            if cs["artist"] == artist and cs["album_dir"] == album_dir_name:
                                 cs["album_image"] = rel_img
                         break
 
     artists_out = []
     for artist, albums in tree.items():
         albums_out = []
-        for album, songs in albums.items():
+        for album_dir, album_data in albums.items():
             albums_out.append(
                 {
-                    "name": album,
-                    "songs": songs["songs"],
-                    "image": songs.get("image"),
-                    "year": songs.get("year"),
-                    "date": songs.get("date"),
+                    "name": album_data.get("title") or album_dir,  # Use metadata album title, fallback to directory name
+                    "songs": album_data["songs"],
+                    "image": album_data.get("image"),
+                    "year": album_data.get("year"),
+                    "date": album_data.get("date"),
                 }
             )
         artists_out.append({"name": artist, "image": artist_images.get(artist), "albums": albums_out})
