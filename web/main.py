@@ -304,6 +304,39 @@ async def _download_album_cover(artist: str, album: str, save_dir: Path) -> Opti
         return None
 
 
+def _extract_album_art_from_mp3(mp3_path: Path, save_dir: Path) -> Optional[str]:
+    """
+    Extract embedded album art from MP3 file and save as cover.jpg.
+    Returns the relative path to the saved cover, or None if not found.
+    """
+    try:
+        from mutagen.id3 import ID3, APIC
+        
+        audio = ID3(str(mp3_path))
+        
+        # Look for APIC (Attached Picture) frames
+        for tag in audio.values():
+            if isinstance(tag, APIC):
+                # Save the image
+                save_dir.mkdir(parents=True, exist_ok=True)
+                cover_path = save_dir / "cover.jpg"
+                
+                with open(cover_path, "wb") as f:
+                    f.write(tag.data)
+                
+                logger.info(f"Extracted album art from {mp3_path.name} to {cover_path}")
+                
+                # Return relative path
+                base_path = Path("/Users/davidnorminton/Music")
+                rel_path = str(cover_path.relative_to(base_path))
+                return rel_path
+        
+        return None
+    except Exception as e:
+        logger.debug(f"No album art found in {mp3_path.name}: {e}")
+        return None
+
+
 def _extract_audio_meta(path: Path) -> Dict[str, Any]:
     """Extract audio metadata using mutagen; supports common formats with duration fallback."""
     meta: Dict[str, Any] = {
@@ -557,20 +590,40 @@ async def scan_music_library():
                                 cs["album_image"] = rel_img
                         break
 
-    # Download missing album covers from MusicBrainz
+    # Extract album covers from MP3 metadata or download from MusicBrainz
     logger.info("Checking for missing album covers...")
     for artist, albums in tree.items():
         for album_dir, album_data in albums.items():
-            if album_data["image"] is None and album_data["title"]:
-                logger.info(f"No cover found for {artist} - {album_data['title']}, trying MusicBrainz...")
+            if album_data["image"] is None:
                 album_path = base_path / artist / album_dir
-                downloaded_cover = await _download_album_cover(artist, album_data["title"], album_path)
-                if downloaded_cover:
-                    album_data["image"] = downloaded_cover
+                
+                # Try to extract from first MP3 in the album
+                logger.info(f"No cover image file for {artist} - {album_dir}, trying to extract from MP3...")
+                extracted_cover = None
+                for song in album_data["songs"]:
+                    song_path = base_path / song["path"]
+                    if song_path.exists():
+                        extracted_cover = _extract_album_art_from_mp3(song_path, album_path)
+                        if extracted_cover:
+                            logger.info(f"Successfully extracted cover art from {song_path.name}")
+                            break
+                
+                if extracted_cover:
+                    album_data["image"] = extracted_cover
                     # Update collected_songs with the new cover
                     for cs in collected_songs:
                         if cs["artist"] == artist and cs["album_dir"] == album_dir:
-                            cs["album_image"] = downloaded_cover
+                            cs["album_image"] = extracted_cover
+                elif album_data["title"]:
+                    # If still no cover, try MusicBrainz as last resort
+                    logger.info(f"No embedded cover art, trying MusicBrainz for {artist} - {album_data['title']}...")
+                    downloaded_cover = await _download_album_cover(artist, album_data["title"], album_path)
+                    if downloaded_cover:
+                        album_data["image"] = downloaded_cover
+                        # Update collected_songs with the new cover
+                        for cs in collected_songs:
+                            if cs["artist"] == artist and cs["album_dir"] == album_dir:
+                                cs["album_image"] = downloaded_cover
 
     artists_out = []
     for artist, albums in tree.items():
