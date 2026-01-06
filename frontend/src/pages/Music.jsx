@@ -1022,7 +1022,18 @@ export function MusicPage() {
                               className={`track-row ${active ? 'active' : ''}`}
                               onClick={() => handleSongClick(currentPopular, idx)}
                             >
-                              <span className="col-index">{song.track_number || idx + 1}</span>
+                              <span className="col-index">
+                                {active && isPlaying ? (
+                                  <div className="playing-bars">
+                                    <span className="bar"></span>
+                                    <span className="bar"></span>
+                                    <span className="bar"></span>
+                                    <span className="bar"></span>
+                                  </div>
+                                ) : (
+                                  song.track_number || idx + 1
+                                )}
+                              </span>
                               <span className="col-title">{song.title || song.name}</span>
                               <span className="col-length">{formatTime(dur)}</span>
                               <button
@@ -1064,7 +1075,18 @@ export function MusicPage() {
                               className={`track-row ${active ? 'active' : ''}`}
                               onClick={() => handleSongClick(songsSorted, idx)}
                             >
-                              <span className="col-index">{song.track_number || idx + 1}</span>
+                              <span className="col-index">
+                                {active && isPlaying ? (
+                                  <div className="playing-bars">
+                                    <span className="bar"></span>
+                                    <span className="bar"></span>
+                                    <span className="bar"></span>
+                                    <span className="bar"></span>
+                                  </div>
+                                ) : (
+                                  song.track_number || idx + 1
+                                )}
+                              </span>
                               <span className="col-title">{song.name}</span>
                               <span className="col-length">{formatTime(dur)}</span>
                               <button
