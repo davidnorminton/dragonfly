@@ -1910,41 +1910,46 @@ body {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
+.music-hero.scrolled {
+  align-items: center;
+}
+
 .music-hero.scrolled .album-hero {
-  width: 56px;
-  height: 56px;
-  border-radius: 6px;
+  display: none;
 }
 
 .music-hero.scrolled .hero-text {
-  gap: 2px;
+  gap: 0;
+  flex-direction: row;
+  align-items: center;
+  order: 2;
 }
 
 .music-hero.scrolled .album-label {
-  font-size: 0.7em;
   display: none;
 }
 
 .music-hero.scrolled .hero-title {
-  font-size: 1.4rem;
+  font-size: 1.2rem;
+  margin: 0;
 }
 
 .music-hero.scrolled .album-artist {
-  font-size: 0.9em;
+  display: none;
 }
 
 .music-hero.scrolled .hero-actions {
-  gap: 8px;
+  gap: 12px;
+  order: 1;
 }
 
 .music-hero.scrolled .hero-play {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
 }
 
-.music-hero.scrolled .hero-icon {
-  width: 32px;
-  height: 32px;
+.music-hero.scrolled .hero-icon:not(.hero-play) {
+  display: none;
 }
 
 .album-hero {
