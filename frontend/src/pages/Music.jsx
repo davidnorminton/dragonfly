@@ -179,14 +179,15 @@ export function MusicPage() {
     };
   }, []); // Empty deps - ref is updated separately
 
-  // Scroll detection for sticky hero using scroll event with hysteresis
+  // Scroll detection for showing minimal hero
   useEffect(() => {
     if (!heroRef.current || !mainContentRef.current) return;
 
-    // Capture the initial hero height (before it becomes sticky)
-    const initialHeroHeight = 280; // Fixed height from CSS min-height
-    const stickThreshold = 210; // Stick when scrolling down past this point
-    const unstickThreshold = 190; // Unstick when scrolling up below this point
+    // Show minimal hero when main hero's play button reaches the top
+    // Main hero height: 280px, minimal hero height: 64px
+    // Threshold: when scrolled ~216px (280px - 64px)
+    const stickThreshold = 220; // Show minimal hero
+    const unstickThreshold = 200; // Hide minimal hero
 
     const handleScroll = () => {
       if (!mainContentRef.current) return;
@@ -196,9 +197,9 @@ export function MusicPage() {
       // Use hysteresis to prevent flickering at the boundary
       setIsScrolled((prevScrolled) => {
         if (scrollTop >= stickThreshold) {
-          return true; // Stick
+          return true; // Show minimal hero
         } else if (scrollTop <= unstickThreshold) {
-          return false; // Unstick
+          return false; // Hide minimal hero
         }
         // Between thresholds: maintain current state
         return prevScrolled;
@@ -994,7 +995,28 @@ export function MusicPage() {
         </div>
 
         <div className="music-main" ref={mainContentRef}>
-          <div ref={heroRef} className={`music-hero ${isScrolled ? 'scrolled' : ''}`} style={heroBgStyle}>
+          {/* Minimal sticky hero - shows when scrolled */}
+          <div className={`music-hero-minimal ${isScrolled ? 'visible' : ''}`}>
+            <button
+              className="hero-play-minimal"
+              onClick={handleHeroToggle}
+              title={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? (
+                <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2.7 1a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7H2.7zm8 0a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7h-2.6z"/>
+                </svg>
+              ) : (
+                <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3 1.713a.7.7 0 011.05-.607l10.89 6.288a.7.7 0 010 1.212L4.05 14.894A.7.7 0 013 14.288V1.713z"/>
+                </svg>
+              )}
+            </button>
+            <h2 className="hero-title-minimal">{heroTitle}</h2>
+          </div>
+
+          {/* Main full-size hero - scrolls normally */}
+          <div ref={heroRef} className="music-hero" style={heroBgStyle}>
             {heroImageCandidates[0] ? (
               <img
                 src={`/api/music/stream?path=${encodeURIComponent(heroImageCandidates[0])}`}
