@@ -155,8 +155,22 @@ export function MusicPage() {
 
   const handleNext = () => {
     if (!playlist.length) return;
-    const nextIdx = currentIndex + 1 < playlist.length ? currentIndex + 1 : 0;
-    playIndex(nextIdx);
+    const nextIdx = currentIndex + 1;
+    if (nextIdx < playlist.length) {
+      playIndex(nextIdx);
+      return;
+    }
+    // End of playlist
+    if (viewMode !== 'playlists') {
+      const currentPath = playlist[currentIndex]?.path;
+      const next = getNextAlbumSong(currentPath);
+      if (next) {
+        playIndex(next.idx, next.songs);
+        return;
+      }
+    }
+    // Otherwise loop within playlist
+    playIndex(0, playlist);
   };
 
   const handleSeek = (e) => {
@@ -178,6 +192,45 @@ export function MusicPage() {
       const tb = b.track_number ?? 9999;
       return ta - tb;
     });
+
+  const getNextAlbumSong = (currentPath) => {
+    const albumsSeq = sortedAlbums
+      .map((album) => ({
+        album,
+        songs: sortSongs(album.songs || []),
+      }))
+      .filter((a) => a.songs.length);
+    if (!albumsSeq.length) return null;
+
+    let foundAlbumIdx = -1;
+    let foundSongIdx = -1;
+    albumsSeq.forEach((al, ai) => {
+      const si = al.songs.findIndex((s) => s.path === currentPath);
+      if (si !== -1) {
+        foundAlbumIdx = ai;
+        foundSongIdx = si;
+      }
+    });
+
+    // If not found, start from the first album/song
+    if (foundAlbumIdx === -1) {
+      return { songs: albumsSeq[0].songs, idx: 0 };
+    }
+
+    // Next song in same album
+    if (foundSongIdx + 1 < albumsSeq[foundAlbumIdx].songs.length) {
+      return { songs: albumsSeq[foundAlbumIdx].songs, idx: foundSongIdx + 1 };
+    }
+
+    // Move to next album
+    const nextAlbumIdx = foundAlbumIdx + 1;
+    if (nextAlbumIdx < albumsSeq.length) {
+      return { songs: albumsSeq[nextAlbumIdx].songs, idx: 0 };
+    }
+
+    // Wrap to first album
+    return { songs: albumsSeq[0].songs, idx: 0 };
+  };
 
   const openPlaylistModal = (song = null) => {
     setPendingSong(song);
