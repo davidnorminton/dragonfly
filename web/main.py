@@ -507,9 +507,9 @@ async def get_music_library():
                     songs_out = []
                     for song in album.songs:
                         songs_out.append({
-                            "name": song.title or Path(song.path).stem,
-                            "path": song.path,
-                            "duration": song.duration,
+                            "name": song.title or Path(song.file_path).stem,
+                            "path": song.file_path,
+                            "duration": song.duration_seconds,
                             "track": song.track_number,
                         })
                     
