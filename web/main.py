@@ -519,9 +519,9 @@ async def get_music_library():
                     albums_out.append({
                         "name": album.title,
                         "songs": songs_out,
-                        "image": album.image_path,
+                        "image": album.cover_path,
                         "year": album.year,
-                        "date": album.release_date,
+                        "date": None,  # Not stored separately in DB
                     })
                 
                 artists_out.append({
