@@ -2109,14 +2109,15 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.92);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.55);
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.95);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
   z-index: 1200;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .music-layout {
@@ -2355,65 +2356,85 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.music-controls {
+.music-player-left {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  color: #e0e0e0;
-}
-
-.music-track {
-  font-weight: 600;
-  color: #e0e0e0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .music-controls-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
+}
+
+.control-icon {
+  background: transparent;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  transition: background 0.2s;
+  width: 40px;
+  height: 40px;
+}
+
+.control-icon:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .control-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  border: none;
   color: #fff;
   border-radius: 50%;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   cursor: pointer;
   font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
 }
 
 .control-btn.play-btn {
   width: 48px;
   height: 48px;
-  font-size: 1.2rem;
+  font-size: 1.3rem;
+  background: #fff;
+  color: #000;
+}
+
+.control-btn.play-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .control-btn:hover,
-.hero-icon:hover {
-  background: rgba(255, 255, 255, 0.16);
+.control-icon:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
-.music-progress-row {
-  display: grid;
-  grid-template-columns: 60px 1fr 60px;
+.music-progress-container {
+  display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  max-width: 720px;
 }
 
 .music-progress {
-  width: 100%;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
   overflow: hidden;
   cursor: pointer;
   position: relative;
@@ -2421,9 +2442,9 @@ body {
 
 .music-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea, #16c782);
+  background: #fff;
   width: 0%;
-  border-radius: 999px;
+  border-radius: 2px;
 }
 
 .music-progress-handle {
@@ -2434,35 +2455,49 @@ body {
   border-radius: 50%;
   background: #fff;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.2s;
   pointer-events: none;
 }
 
+.music-progress:hover .music-progress-handle {
+  opacity: 1;
+}
+
 .time-stamp {
-  font-size: 0.85em;
-  color: #9da7b8;
-  text-align: center;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: left;
+}
+
+.time-stamp:last-child {
+  text-align: right;
 }
 
 .music-volume-control {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 120px;
-  position: absolute;
-  left: 75%;
-  transform: translateX(-50%);
+  flex-shrink: 0;
 }
 
 .volume-icon {
   background: transparent;
   border: none;
-  color: #e0e0e0;
-  font-size: 1.2rem;
+  color: #fff;
+  font-size: 1.1rem;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
+  padding: 8px;
+  border-radius: 50%;
   transition: background 0.2s;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .volume-icon:hover {
@@ -2471,20 +2506,21 @@ body {
 
 .music-volume-slider {
   flex: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
   overflow: hidden;
   cursor: pointer;
   position: relative;
   min-width: 80px;
+  max-width: 120px;
 }
 
 .music-volume-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea, #16c782);
+  background: #fff;
   width: 0%;
-  border-radius: 999px;
+  border-radius: 2px;
 }
 
 .music-volume-handle {
@@ -2495,6 +2531,11 @@ body {
   border-radius: 50%;
   background: #fff;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.2s;
   pointer-events: none;
+}
+
+.music-volume-slider:hover .music-volume-handle {
+  opacity: 1;
 }

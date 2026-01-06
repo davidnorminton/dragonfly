@@ -1003,17 +1003,17 @@ export function MusicPage() {
 
       <div className="music-bottom-spacer" />
       <div className="music-player-footer">
-        <div className="music-controls">
+        <div className="music-player-left">
           <div className="music-controls-row">
-            <button className="hero-icon" title="Shuffle">🔀</button>
+            <button className="control-icon" title="Shuffle">🔀</button>
             <button className="control-btn" onClick={handlePrev} title="Previous">⏮</button>
             <button className="control-btn play-btn" onClick={handlePlayPause} title={isPlaying ? 'Pause' : 'Play'}>
               {isPlaying ? '⏸' : '▶'}
             </button>
             <button className="control-btn" onClick={handleNext} title="Next">⏭</button>
-            <button className="hero-icon" title="Repeat">🔁</button>
+            <button className="control-icon" title="Repeat">🔁</button>
           </div>
-          <div className="music-progress-row">
+          <div className="music-progress-container">
             <span className="time-stamp">{formatTime(progress)}</span>
             <div className="music-progress" onClick={handleSeek}>
               <div
