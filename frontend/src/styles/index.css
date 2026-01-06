@@ -1896,7 +1896,7 @@ body {
   gap: 16px;
   padding: 16px;
   margin: 0;
-  background: linear-gradient(180deg, #0b8be6 0%, #052f6b 100%);
+  background: linear-gradient(180deg, #a855f7 0%, #5b21b6 100%);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -1916,7 +1916,7 @@ body {
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  background: #0b8be6;
+  background: #a855f7;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.9);
   height: 64px;
   width: 100%;
