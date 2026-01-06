@@ -20,6 +20,9 @@ export function MusicPage() {
   const [popularMap, setPopularMap] = useState({});
   const [popularLoading, setPopularLoading] = useState(false);
   const [popularError, setPopularError] = useState('');
+  const [aboutMap, setAboutMap] = useState({});
+  const [aboutLoading, setAboutLoading] = useState(false);
+  const [aboutError, setAboutError] = useState('');
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [playlistModalName, setPlaylistModalName] = useState('');
   const [playlistModalExisting, setPlaylistModalExisting] = useState('');
@@ -462,6 +465,24 @@ export function MusicPage() {
       console.error('Popular refresh exception:', e);
     } finally {
       setPopularLoading(false);
+    }
+  };
+
+  const handleGenerateAbout = async () => {
+    if (!selectedArtist) return;
+    setAboutError('');
+    setAboutLoading(true);
+    try {
+      const res = await musicAPI.getArtistAbout(selectedArtist);
+      if (res.success) {
+        setAboutMap((prev) => ({ ...prev, [selectedArtist]: res.about || '' }));
+      } else {
+        setAboutError(res.error || 'Failed to generate about info');
+      }
+    } catch (e) {
+      setAboutError(e?.message || 'Failed to generate about info');
+    } finally {
+      setAboutLoading(false);
     }
   };
 
@@ -1137,7 +1158,7 @@ export function MusicPage() {
                     <>
                       {sortedAlbums.length > 0 && (
                         <div className="album-section">
-                          <div className="album-section-title">Albums</div>
+                          <div className="album-section-title">Discography</div>
                           <div className="album-grid">
                             {sortedAlbums.map((album) => {
                               const albumImg =
@@ -1172,6 +1193,23 @@ export function MusicPage() {
                               );
                             })}
                           </div>
+                        </div>
+                      )}
+                      {selectedArtist && (
+                        <div className="album-section about-section">
+                          <div className="album-section-title">About</div>
+                          {aboutMap[selectedArtist] ? (
+                            <div className="about-content">{aboutMap[selectedArtist]}</div>
+                          ) : (
+                            <button 
+                              className="about-generate-btn" 
+                              onClick={handleGenerateAbout}
+                              disabled={aboutLoading}
+                            >
+                              {aboutLoading ? 'Generating...' : 'Generate About Info'}
+                            </button>
+                          )}
+                          {aboutError && <div className="music-error-inline">{aboutError}</div>}
                         </div>
                       )}
                       {!sortedAlbums.length && <div className="music-empty">Select an artist to view albums</div>}

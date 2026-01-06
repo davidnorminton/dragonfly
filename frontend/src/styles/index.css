@@ -2502,6 +2502,42 @@ body {
   margin-top: 20px;
 }
 
+/* About Section */
+.about-section {
+  margin-top: 32px;
+}
+
+.about-content {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  color: #e0e0e0;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.about-generate-btn {
+  padding: 12px 24px;
+  background: rgba(29, 185, 84, 0.2);
+  color: #1db954;
+  border: 1px solid #1db954;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.about-generate-btn:hover:not(:disabled) {
+  background: rgba(29, 185, 84, 0.3);
+  transform: scale(1.05);
+}
+
+.about-generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .playlist-modal-overlay {
   position: fixed;
   inset: 0;

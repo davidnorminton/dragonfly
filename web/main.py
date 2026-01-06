@@ -565,6 +565,10 @@ class PopularRequest(BaseModel):
     artist: str
 
 
+class AboutRequest(BaseModel):
+    artist: str
+
+
 def _extract_json_object(payload: str):
     if not payload:
         return None
@@ -785,6 +789,62 @@ async def generate_music_popular(req: PopularRequest):
             return {"success": True, "popular": matched}
     except Exception as e:
         logger.error(f"Error generating popular songs for '{artist_name}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.post("/api/music/artist/about")
+async def generate_artist_about(req: AboutRequest):
+    """
+    Use AI to generate a summary about the artist in 250 words or less.
+    Stores the summary in artist.extra_metadata.about and returns it.
+    """
+    artist_name = req.artist.strip()
+    if not artist_name:
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": "artist is required"}
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await _ensure_artist_in_db(session, artist_name)
+            if not artist_row:
+                logger.warning(f"Artist '{artist_name}' not found in database")
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+
+            # Check if we already have about info cached
+            if artist_row.extra_metadata and artist_row.extra_metadata.get("about"):
+                return {"success": True, "about": artist_row.extra_metadata["about"]}
+
+            # Generate about info using AI
+            prompt = f"Write a concise summary about the band/artist '{artist_name}' in 250 words or less. Include their musical style, notable achievements, and influence. Be factual and informative."
+
+            ai = AIService()
+            ai.reload_persona_config()
+            ai_resp = await ai.execute({"question": prompt})
+            about_text = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
+
+            if not about_text:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Failed to generate about info"}
+                )
+
+            # Store in database
+            artist_row.extra_metadata = artist_row.extra_metadata or {}
+            artist_row.extra_metadata["about"] = about_text
+            flag_modified(artist_row, "extra_metadata")
+            await session.commit()
+
+            return {"success": True, "about": about_text}
+    except Exception as e:
+        logger.error(f"Error generating about info for '{artist_name}': {e}", exc_info=True)
         return JSONResponse(
             status_code=200,
             content={"success": False, "error": str(e)}
