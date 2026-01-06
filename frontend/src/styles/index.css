@@ -1882,6 +1882,7 @@ body {
 
 .music-tracklist {
   padding: 16px;
+  padding-bottom: 100px;
   min-height: calc(100vh - 200px);
 }
 
@@ -2402,17 +2403,6 @@ body {
   border-radius: 6px;
   flex-shrink: 0;
   border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.music-main {
-  background: rgba(20, 20, 32, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  padding: 12px;
-  height: calc(100vh - 100px);
-  overflow-y: scroll;
-  overflow-x: hidden;
-  position: relative;
 }
 
 .music-main-header {
