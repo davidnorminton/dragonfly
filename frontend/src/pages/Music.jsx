@@ -30,6 +30,7 @@ export function MusicPage() {
   const audioRef = useRef(null);
   const heroImgRef = useRef(null);
   const handleNextRef = useRef(null);
+  const playIndexRef = useRef(null);
 
   // Define these early so they're available for useCallback dependencies
   const currentArtist = useMemo(() => {
@@ -180,6 +181,11 @@ export function MusicPage() {
     }
   }, [playlist, lengths]);
 
+  // Update playIndex ref whenever it changes
+  useEffect(() => {
+    playIndexRef.current = playIndex;
+  }, [playIndex]);
+
   const handlePlayPause = () => {
     if (!audioRef.current) return;
     if (isPlaying) {
@@ -194,7 +200,7 @@ export function MusicPage() {
   const handlePrev = () => {
     if (!playlist.length) return;
     const nextIdx = currentIndex > 0 ? currentIndex - 1 : playlist.length - 1;
-    playIndex(nextIdx);
+    if (playIndexRef.current) playIndexRef.current(nextIdx);
   };
 
   const sortSongs = (songs = []) =>
@@ -248,21 +254,21 @@ export function MusicPage() {
     if (!playlist.length) return;
     const nextIdx = currentIndex + 1;
     if (nextIdx < playlist.length) {
-      playIndex(nextIdx);
+      if (playIndexRef.current) playIndexRef.current(nextIdx);
       return;
     }
     // End of playlist
     if (viewMode !== 'playlists') {
       const currentPath = playlist[currentIndex]?.path;
       const next = getNextAlbumSong(currentPath);
-      if (next) {
-        playIndex(next.idx, next.songs);
+      if (next && playIndexRef.current) {
+        playIndexRef.current(next.idx, next.songs);
         return;
       }
     }
     // Otherwise loop within playlist
-    playIndex(0, playlist);
-  }, [playlist, currentIndex, viewMode, getNextAlbumSong, playIndex]);
+    if (playIndexRef.current) playIndexRef.current(0, playlist);
+  }, [playlist, currentIndex, viewMode, getNextAlbumSong]);
 
   const handleSeek = (e) => {
     if (!audioRef.current || !duration) return;
@@ -288,7 +294,7 @@ export function MusicPage() {
   };
 
   const handleSongClick = (songs, idx) => {
-    playIndex(idx, songs);
+    if (playIndexRef.current) playIndexRef.current(idx, songs);
   };
 
   const openPlaylistModal = (song = null) => {
@@ -554,13 +560,13 @@ export function MusicPage() {
     }
     // Choose songs from playlist, selected album, otherwise from the latest album
     if (viewMode === 'playlists' && currentPlaylist?.songs?.length) {
-      playIndex(0, currentPlaylist.songs);
+      if (playIndexRef.current) playIndexRef.current(0, currentPlaylist.songs);
       return;
     }
     const baseAlbum = currentAlbum || sortedAlbums[0];
     const songs = sortSongs(baseAlbum?.songs || []);
-    if (songs.length) {
-      playIndex(0, songs);
+    if (songs.length && playIndexRef.current) {
+      playIndexRef.current(0, songs);
     }
   };
 
