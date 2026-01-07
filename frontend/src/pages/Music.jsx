@@ -385,8 +385,14 @@ export function MusicPage({ searchQuery = '' }) {
       if (playIndexRef.current) playIndexRef.current(nextIdx, list);
       return;
     }
-    // End of playlist
-    if (viewMode !== 'playlists') {
+    // End of current list
+    // Check if we're playing from popular list (don't auto-advance to albums)
+    const isPlayingPopular = currentPopular.length > 0 && 
+                             list.length === currentPopular.length &&
+                             list[0]?.path === currentPopular[0]?.path;
+    
+    if (viewMode !== 'playlists' && !isPlayingPopular) {
+      // Only auto-advance to next album if not playing from popular list
       const currentPath = list[currentIndex]?.path;
       const next = getNextAlbumSong(currentPath);
       if (next && playIndexRef.current) {
@@ -394,7 +400,7 @@ export function MusicPage({ searchQuery = '' }) {
         return;
       }
     }
-    // Otherwise loop within playlist
+    // Loop back to beginning of current list
     if (playIndexRef.current) playIndexRef.current(0, list);
   };
 
@@ -473,10 +479,15 @@ export function MusicPage({ searchQuery = '' }) {
         songsToShuffle = currentPlaylistData?.songs || [];
       } else if (selectedAlbum && currentAlbum) {
         songsToShuffle = sortSongs(currentAlbum.songs || []);
-      } else if (currentArtist) {
-        // All songs from current artist
-        const allSongs = sortedAlbums.flatMap((album) => sortSongs(album.songs || []));
-        songsToShuffle = allSongs;
+      } else if (currentArtist && !selectedAlbum) {
+        // On artist page - use popular songs if available, otherwise all songs
+        if (currentPopular && currentPopular.length > 0) {
+          songsToShuffle = currentPopular;
+        } else {
+          // Fallback to all songs from current artist
+          const allSongs = sortedAlbums.flatMap((album) => sortSongs(album.songs || []));
+          songsToShuffle = allSongs;
+        }
       }
       
       if (songsToShuffle.length > 0) {
