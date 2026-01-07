@@ -240,10 +240,13 @@ function App() {
                   console.error('Audio playback error:', err);
                   setMicStatus('idle');
                 };
-                await audio.play().catch((err) => {
+                try {
+                  await audio.play();
+                  console.log('Audio playback started successfully');
+                } catch (err) {
                   console.error('Audio play failed', err);
                   setMicStatus('idle');
-                });
+                }
               } else if (blob) {
                 // Try to parse JSON error/success message
                 try {
@@ -265,9 +268,10 @@ function App() {
           // Keep transcript/router info only in console (no UI)
           setTranscript('');
           setRouterText('');
-          if (micStatus !== 'playing') {
-            setMicStatus('idle');
-          }
+          // Don't reset to idle here - let audio.onended handle it
+          // if (micStatus !== 'playing') {
+          //   setMicStatus('idle');
+          // }
         } else {
           // Stay in listening mode on no transcript/error
           console.warn('Transcription failed or empty; continuing to listen', data.error);
