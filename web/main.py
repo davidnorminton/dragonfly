@@ -1514,6 +1514,61 @@ async def clear_all_videos():
         )
 
 
+@app.post("/api/music/cleanup/titles")
+async def cleanup_song_titles():
+    """
+    Clean up all song titles in the database that have artist/track prefixes.
+    Also clears the popular songs cache so they can be regenerated with clean titles.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get all songs
+            result = await session.execute(select(MusicSong).join(MusicArtist, MusicSong.artist_id == MusicArtist.id))
+            songs = result.scalars().all()
+            
+            cleaned_count = 0
+            for song in songs:
+                if song.title and re.search(r'-\s*\d+\s*-\s*', song.title):
+                    # Get the artist name for cleaning
+                    artist_result = await session.execute(
+                        select(MusicArtist).where(MusicArtist.id == song.artist_id)
+                    )
+                    artist = artist_result.scalars().first()
+                    artist_name = artist.name if artist else None
+                    
+                    # Clean the title
+                    cleaned_title = _clean_song_title(song.title, artist_name)
+                    if cleaned_title != song.title:
+                        logger.info(f"Cleaning title: '{song.title}' -> '{cleaned_title}'")
+                        song.title = cleaned_title
+                        cleaned_count += 1
+            
+            # Also clear popular songs cache from all artists so they get regenerated
+            result = await session.execute(select(MusicArtist))
+            artists = result.scalars().all()
+            cleared_popular = 0
+            for artist in artists:
+                if artist.extra_metadata and artist.extra_metadata.get("popular_songs"):
+                    artist.extra_metadata.pop("popular_songs", None)
+                    flag_modified(artist, "extra_metadata")
+                    cleared_popular += 1
+            
+            await session.commit()
+            
+            return {
+                "success": True, 
+                "cleaned": cleaned_count, 
+                "popular_cleared": cleared_popular,
+                "message": f"Cleaned {cleaned_count} song titles and cleared popular songs cache from {cleared_popular} artists"
+            }
+    except Exception as e:
+        logger.error(f"Error cleaning song titles: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
 @app.post("/api/music/artist/videos")
 async def generate_artist_videos(req: VideosRequest):
     """
