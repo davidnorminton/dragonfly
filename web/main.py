@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import logging
 import asyncio
+import aiohttp
 import json
 import mimetypes
 from typing import Optional, List, Dict, Any
@@ -1336,6 +1337,35 @@ class VideosRequest(BaseModel):
     artist: str
 
 
+@app.delete("/api/music/artist/videos")
+async def clear_all_videos():
+    """
+    Clear all cached video data from all artists.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get all artists
+            result = await session.execute(select(MusicArtist))
+            artists = result.scalars().all()
+            
+            cleared_count = 0
+            for artist in artists:
+                if artist.extra_metadata and artist.extra_metadata.get("videos"):
+                    artist.extra_metadata.pop("videos", None)
+                    flag_modified(artist, "extra_metadata")
+                    cleared_count += 1
+            
+            await session.commit()
+            
+            return {"success": True, "cleared": cleared_count, "message": f"Cleared videos from {cleared_count} artists"}
+    except Exception as e:
+        logger.error(f"Error clearing videos: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
 @app.post("/api/music/artist/videos")
 async def generate_artist_videos(req: VideosRequest):
     """
@@ -1364,14 +1394,26 @@ async def generate_artist_videos(req: VideosRequest):
                 return {"success": True, "videos": artist_row.extra_metadata["videos"]}
 
             # Generate video list using AI
-            prompt = f"""List 8-10 official YouTube videos for the band/artist '{artist_name}'. Include their most popular music videos, live performances, or official content.
+            prompt = f"""List 8-10 widely-available official YouTube videos for '{artist_name}'. 
 
-For each video, provide the YouTube video ID (the part after "watch?v=" in the URL) and a short title.
+IMPORTANT: Only include videos that are:
+- Official uploads from the artist's verified channel or major record labels
+- Likely to be available globally (including UK)
+- Their most famous/popular songs that would be widely distributed
+- Not region-restricted, live bootlegs, or unofficial uploads
 
-Return ONLY a JSON array with this exact format:
-{{"videos": [{{"videoId": "dQw4w9WgXcQ", "title": "Song Name (Official Video)"}}, {{"videoId": "abcdefghijk", "title": "Another Song (Live)"}}]}}
+Return ONLY a JSON object in this EXACT format (no other text):
+{{
+  "videos": [
+    {{"videoId": "abc12345678", "title": "Song Name (Official Music Video)"}},
+    {{"videoId": "def98765432", "title": "Another Song (Official Video)"}}
+  ]
+}}
 
-IMPORTANT: Provide REAL YouTube video IDs for actual videos by this artist. The video IDs should be 11 characters long."""
+Rules:
+- videoId should be plausible 11-character YouTube IDs
+- Focus on globally-available content from official channels
+- Return valid JSON only, no markdown, no explanation"""
 
             ai = AIService()
             ai.reload_persona_config()
@@ -1379,31 +1421,39 @@ IMPORTANT: Provide REAL YouTube video IDs for actual videos by this artist. The 
             raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
 
             # Try to extract JSON from response
+            logger.info(f"AI raw answer for videos: {raw_answer[:500]}")
             parsed = _extract_json_object(raw_answer) or {}
+            logger.info(f"Parsed videos data: {parsed}")
             videos_list = parsed.get("videos") if isinstance(parsed, dict) else None
 
             if not videos_list or not isinstance(videos_list, list):
+                logger.warning(f"Failed to parse videos list. Parsed: {parsed}, videos_list: {videos_list}")
                 return JSONResponse(
                     status_code=200,
                     content={"success": False, "error": "Failed to generate videos list"}
                 )
 
-            # Validate video IDs (should be 11 characters)
+            # Validate video IDs and check if they're actually available
             validated_videos = []
             for video in videos_list:
                 if isinstance(video, dict) and "videoId" in video and "title" in video:
                     video_id = str(video["videoId"]).strip()
                     # YouTube video IDs are typically 11 characters
                     if len(video_id) >= 8:  # Allow some flexibility
-                        validated_videos.append({
-                            "videoId": video_id,
-                            "title": video["title"]
-                        })
+                        # Verify video exists and is embeddable using YouTube oEmbed (no API key needed)
+                        if await _verify_youtube_video(video_id):
+                            validated_videos.append({
+                                "videoId": video_id,
+                                "title": video["title"]
+                            })
+                            logger.info(f"✓ Video validated: {video_id} - {video['title']}")
+                        else:
+                            logger.warning(f"✗ Video failed validation: {video_id} - {video['title']}")
 
             if not validated_videos:
                 return JSONResponse(
                     status_code=200,
-                    content={"success": False, "error": "No valid videos found"}
+                    content={"success": False, "error": "No valid/available videos found. Videos may be region-restricted or unavailable."}
                 )
 
             # Store in database
@@ -1419,6 +1469,30 @@ IMPORTANT: Provide REAL YouTube video IDs for actual videos by this artist. The 
             status_code=200,
             content={"success": False, "error": str(e)}
         )
+
+
+async def _verify_youtube_video(video_id: str) -> bool:
+    """
+    Verify a YouTube video exists and is embeddable using oEmbed API (no API key required).
+    Returns True if video is available, False otherwise.
+    """
+    try:
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # If oEmbed returns data, the video exists and is embeddable
+                    return "title" in data
+                else:
+                    return False
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout verifying video: {video_id}")
+        return False
+    except Exception as e:
+        logger.warning(f"Error verifying video {video_id}: {e}")
+        return False
 
 
 async def _ensure_playlist_tables():
