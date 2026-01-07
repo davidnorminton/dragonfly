@@ -366,6 +366,8 @@ def _clean_song_title(title: str, artist: str = None) -> str:
         "Green Day -06- Going to Pasalacqua" -> "Going to Pasalacqua"
         "Artist Name-05-Song Title" -> "Song Title"
         "-03- Song Name" -> "Song Name"
+        "08. Lay Me Down" -> "Lay Me Down"
+        "3. Hey Brother" -> "Hey Brother"
     """
     if not title:
         return title
@@ -386,13 +388,15 @@ def _clean_song_title(title: str, artist: str = None) -> str:
     if match:
         return match.group(1).strip()
     
-    # Pattern 3: "XX. Song Title" or "XX Song Title"
-    pattern = r'^\s*\d+[\.\s]+(.+)$'
+    # Pattern 3: "XX. Song Title" or "XX Song Title" (track number prefix)
+    # Match 1-3 digit numbers followed by dot/space at the start
+    pattern = r'^\s*(\d{1,3})[\.\s]+(.+)$'
     match = re.match(pattern, title)
     if match:
-        # Only apply if it looks like a track number (1-99)
-        potential_title = match.group(1).strip()
-        if title[0:2].strip().isdigit() and int(title[0:2].strip()) <= 99:
+        track_num = int(match.group(1))
+        potential_title = match.group(2).strip()
+        # Only clean if track number is reasonable (1-999)
+        if 1 <= track_num <= 999 and len(potential_title) > 0:
             return potential_title
     
     return title
@@ -553,11 +557,11 @@ async def _persist_music(tree_songs: list):
                     session.add(song)
                 else:
                     # Check if the current DB title looks like it needs cleaning
-                    # (has artist/track prefix like "Green Day -06- Song Title")
+                    # (has artist/track prefix like "Green Day -06- Song Title" or "08. Song Title")
                     needs_cleaning = False
                     if song.title:
-                        # Check for patterns like "Artist -XX- Title" or "-XX- Title"
-                        if re.search(r'-\s*\d+\s*-\s*', song.title):
+                        # Check for patterns like "Artist -XX- Title", "-XX- Title", or "XX. Title"
+                        if re.search(r'-\s*\d+\s*-\s*', song.title) or re.match(r'^\s*\d{1,3}[\.\s]+', song.title):
                             needs_cleaning = True
                     
                     # Update title only if it needs cleaning OR if it's empty
@@ -1528,7 +1532,8 @@ async def cleanup_song_titles():
             
             cleaned_count = 0
             for song in songs:
-                if song.title and re.search(r'-\s*\d+\s*-\s*', song.title):
+                # Check if title needs cleaning (has -XX- pattern or XX. pattern)
+                if song.title and (re.search(r'-\s*\d+\s*-\s*', song.title) or re.match(r'^\s*\d{1,3}[\.\s]+', song.title)):
                     # Get the artist name for cleaning
                     artist_result = await session.execute(
                         select(MusicArtist).where(MusicArtist.id == song.artist_id)
