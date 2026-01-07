@@ -1280,7 +1280,10 @@ async def generate_artist_discography(req: DiscographyRequest):
     Stores the list in artist.extra_metadata.discography and returns it.
     """
     artist_name = req.artist.strip()
+    logger.info(f"=== DISCOGRAPHY REQUEST for '{artist_name}' ===")
+    
     if not artist_name:
+        logger.error("No artist name provided")
         return JSONResponse(
             status_code=200,
             content={"success": False, "error": "artist is required"}
@@ -1288,6 +1291,7 @@ async def generate_artist_discography(req: DiscographyRequest):
 
     try:
         async with AsyncSessionLocal() as session:
+            logger.info(f"Looking up artist '{artist_name}' in database...")
             artist_row = await _ensure_artist_in_db(session, artist_name)
             if not artist_row:
                 logger.warning(f"Artist '{artist_name}' not found in database")
@@ -1295,9 +1299,12 @@ async def generate_artist_discography(req: DiscographyRequest):
                     status_code=200,
                     content={"success": False, "error": "Artist not found"}
                 )
+            
+            logger.info(f"Artist found: {artist_row.name} (id={artist_row.id})")
 
             # Check if we already have discography cached
             if artist_row.extra_metadata and artist_row.extra_metadata.get("discography"):
+                logger.info("Returning cached discography")
                 return {"success": True, "discography": artist_row.extra_metadata["discography"]}
 
             # Generate discography using AI
@@ -1307,30 +1314,41 @@ Return ONLY a JSON array with this exact format:
 
 Include only official studio albums, not live albums, compilations, or EPs. Be accurate and factual."""
 
+            logger.info(f"Sending prompt to AI:\n{prompt[:200]}...")
             ai = AIService()
             ai.reload_persona_config()
             ai_resp = await ai.execute({"question": prompt})
             raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
+            
+            logger.info(f"AI Response (raw): {raw_answer[:500]}...")
+            logger.info(f"AI Response length: {len(raw_answer)} chars")
 
             # Try to extract JSON from response
             parsed = _extract_json_object(raw_answer) or {}
+            logger.info(f"Parsed JSON object: {parsed}")
+            
             albums_list = parsed.get("albums") if isinstance(parsed, dict) else None
+            logger.info(f"Albums list extracted: {albums_list}")
 
             if not albums_list or not isinstance(albums_list, list):
+                logger.error(f"Failed to parse albums list. Parsed type: {type(parsed)}, albums_list type: {type(albums_list)}")
+                logger.error(f"Full raw response: {raw_answer}")
                 return JSONResponse(
                     status_code=200,
-                    content={"success": False, "error": "Failed to generate discography"}
+                    content={"success": False, "error": "Failed to generate discography", "debug": {"raw": raw_answer[:500], "parsed": str(parsed)}}
                 )
 
             # Sort by year
             albums_list = sorted(albums_list, key=lambda x: x.get("year", 9999))
+            logger.info(f"Sorted albums list: {albums_list}")
 
             # Store in database
             artist_row.extra_metadata = artist_row.extra_metadata or {}
             artist_row.extra_metadata["discography"] = albums_list
             flag_modified(artist_row, "extra_metadata")
             await session.commit()
-
+            
+            logger.info(f"Successfully stored {len(albums_list)} albums for '{artist_name}'")
             return {"success": True, "discography": albums_list}
     except Exception as e:
         logger.error(f"Error generating discography for '{artist_name}': {e}", exc_info=True)

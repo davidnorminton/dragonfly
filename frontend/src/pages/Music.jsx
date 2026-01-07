@@ -771,16 +771,23 @@ export function MusicPage({ searchQuery = '' }) {
 
   const handleGenerateDiscography = async () => {
     if (!selectedArtist) return;
+    console.log('=== GENERATE DISCOGRAPHY ===');
+    console.log('Artist:', selectedArtist);
     setDiscographyError('');
     setDiscographyLoading(true);
     try {
       const res = await musicAPI.generateDiscography(selectedArtist);
+      console.log('Discography response:', res);
       if (res.success) {
+        console.log('Success! Discography:', res.discography);
         setDiscographyMap((prev) => ({ ...prev, [selectedArtist]: res.discography || [] }));
       } else {
+        console.error('Discography generation failed:', res.error);
+        console.error('Debug info:', res.debug);
         setDiscographyError(res.error || 'Failed to generate discography');
       }
     } catch (e) {
+      console.error('Discography exception:', e);
       setDiscographyError(e?.message || 'Failed to generate discography');
     } finally {
       setDiscographyLoading(false);
