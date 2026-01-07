@@ -553,11 +553,12 @@ async def _persist_music(tree_songs: list):
                     if meta:
                         album.extra_metadata = meta
 
-                # Song
+                # Song - Only add if it doesn't exist (scan now skips existing songs entirely)
                 song_stmt = select(MusicSong).where(MusicSong.file_path == item["path"])
                 song_res = await session.execute(song_stmt)
                 song = song_res.scalars().first()
                 if not song:
+                    # New song - add with cleaned title from metadata
                     song = MusicSong(
                         album_id=album.id,
                         artist_id=artist.id,
@@ -575,35 +576,10 @@ async def _persist_music(tree_songs: list):
                         extra_metadata=meta,
                     )
                     session.add(song)
+                    logger.debug(f"Added new song: '{song_title}' at {item['path']}")
                 else:
-                    # Check if the current DB title looks like it needs cleaning
-                    # (has artist/track prefix like "Green Day -06- Song Title", "08. Song Title", or "03-metallica-song_title")
-                    needs_cleaning = False
-                    if song.title:
-                        # Check for various bad patterns
-                        if (re.search(r'-\s*\d+\s*-\s*', song.title) or 
-                            re.match(r'^\s*\d{1,3}[\.\s]+', song.title) or
-                            re.match(r'^\s*\d{1,3}-[^-]+-', song.title)):
-                            needs_cleaning = True
-                    
-                    # Update title only if it needs cleaning OR if it's empty
-                    if needs_cleaning or not song.title:
-                        if song.title != song_title:
-                            logger.info(f"Cleaning song title: '{song.title}' -> '{song_title}'")
-                            song.title = song_title
-                    elif song.title != song_title:
-                        logger.debug(f"Song title differs (DB: '{song.title}', File: '{song_title}'). Preserving DB title.")
-                    
-                    # DO NOT update track_number or duration - preserve manual edits
-                    # Only update technical metadata that users wouldn't manually edit
-                    song.bitrate = meta.get("bitrate")
-                    song.sample_rate = meta.get("sample_rate")
-                    song.channels = meta.get("channels")
-                    song.codec = meta.get("codec")
-                    # Update genre/year only if not already set
-                    song.genre = song.genre or meta.get("genre")
-                    song.year = song.year or year_val
-                    song.extra_metadata = meta
+                    # Song already exists - skip completely (preserve database values)
+                    logger.debug(f"Song already exists, skipping: {item['path']}")
             except Exception as e:
                 logger.error(f"Failed to persist song {item.get('path')}: {e}", exc_info=True)
                 continue
@@ -805,17 +781,16 @@ async def scan_music_library():
                 song = Path(parts[-1]).stem
                 rel_path = str(full_path.relative_to(base_path))
                 
-                # Skip metadata extraction for songs already in database (optimization)
+                # Skip existing songs entirely - do NOT extract metadata or add to collected_songs
+                # This preserves any manual edits made in the Music Editor
                 if rel_path in existing_song_paths:
-                    logger.debug(f"Skipping metadata extraction for existing song: {rel_path}")
-                    # Still need basic info, but use cached title from filename
-                    title_from_meta = song
-                    album_title_from_meta = album_dir
-                    meta = {"title": song, "album": album_dir}
-                else:
-                    meta = _extract_audio_meta(full_path)
-                    title_from_meta = meta.get("title") or song
-                    album_title_from_meta = meta.get("album") or album_dir
+                    logger.debug(f"Skipping existing song (already in database): {rel_path}")
+                    continue
+                
+                # Only process NEW songs
+                meta = _extract_audio_meta(full_path)
+                title_from_meta = meta.get("title") or song
+                album_title_from_meta = meta.get("album") or album_dir
                 
                 # Store the metadata album title (use first song's metadata album name)
                 if not tree[artist][album_dir]["title"]:
@@ -837,6 +812,8 @@ async def scan_music_library():
                         tree[artist][album_dir]["year"] = None
                 if meta.get("date") and not tree[artist][album_dir]["date"]:
                     tree[artist][album_dir]["date"] = meta.get("date")
+                
+                # Only add new songs to collected_songs for database insertion
                 collected_songs.append(
                     {
                         "artist": artist,
