@@ -221,15 +221,25 @@ function App() {
               const textTime = Date.now() - startTime;
               console.log(`Text response received in ${textTime}ms`);
               
+              console.log('Text response:', textResp);
+              
               let responseText = '';
-              if (textResp?.data?.answer) {
-                responseText = textResp.data.answer;
+              if (textResp?.answer) {
+                responseText = textResp.answer;
                 setAiResponseText(responseText);
                 console.log('Displaying text response:', responseText.substring(0, 100) + '...');
+              } else if (textResp?.success === false) {
+                console.error('AI request failed:', textResp.error);
+                setMicStatus('idle');
+                return;
+              } else {
+                console.error('Unexpected response format:', textResp);
+                setMicStatus('idle');
+                return;
               }
               
               // Now get audio - send the text we already have to skip AI call
-              console.log('Requesting audio generation with pre-fetched text...');
+              console.log('Requesting audio generation with pre-fetched text, length:', responseText.length);
               const audioStartTime = Date.now();
               
               const audioResp = await aiAPI.askQuestionAudio({ text: responseText });
