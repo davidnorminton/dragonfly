@@ -289,6 +289,7 @@ export function MusicPage({ searchQuery = '' }) {
   const playIndex = async (idx, list) => {
     const songList = list || playlistRef.current;
     if (!songList || idx < 0 || idx >= songList.length) return;
+    // Update both ref and state for proper highlighting in shuffle mode
     playlistRef.current = songList;
     setPlaylist(songList);
     setCurrentIndex(idx);
