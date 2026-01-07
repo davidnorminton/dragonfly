@@ -1037,12 +1037,8 @@ export function MusicPage({ searchQuery = '' }) {
     if (viewMode === 'playlists') return;
     if (!selectedArtist) return;
     
-    // Stop current playback when switching artists
-    if (audioRef.current && !audioRef.current.paused) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-      console.log('Stopped playback due to artist switch');
-    }
+    // Don't stop playback when switching artists - let it continue
+    // It will only stop when user clicks a new song
     
     fetchPopular(selectedArtist);
     fetchAbout(selectedArtist);
