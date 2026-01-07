@@ -209,9 +209,9 @@ function App() {
           
           // Handle based on AI focus mode
           if (aiFocusMode === 'question') {
-            // Direct AI question mode with streaming
+            // Direct AI question mode - optimized for speed
             try {
-              console.log('[QUESTION MODE] Starting streaming pipeline...');
+              console.log('[QUESTION MODE] Starting fast pipeline...');
               const startTime = Date.now();
               
               let responseText = '';
@@ -219,7 +219,7 @@ function App() {
               
               // Stream text response and display chunks as they arrive
               console.log('Streaming text response...');
-              aiAPI.askQuestionStream({ question: transcript }, (data) => {
+              const textPromise = aiAPI.askQuestionStream({ question: transcript }, (data) => {
                 if (data.chunk) {
                   if (firstChunkTime === null) {
                     firstChunkTime = Date.now() - startTime;
@@ -238,14 +238,15 @@ function App() {
                 }
               }).catch(err => {
                 console.error('Text streaming failed:', err);
-                setMicStatus('idle');
+                // Don't set idle - let audio continue
               });
               
-              // Start streaming audio immediately (in parallel with text)
-              console.log('Streaming audio...');
+              // Start audio generation immediately (in parallel with text)
+              // Use fast endpoint with optimized TTS engine
+              console.log('Requesting fast audio...');
               const audioStartTime = Date.now();
               
-              const audioResp = await aiAPI.askQuestionAudioStream({ question: transcript });
+              const audioResp = await aiAPI.askQuestionAudioFast({ question: transcript });
               
               const audioResponseTime = Date.now() - audioStartTime;
               console.log(`Audio received in ${audioResponseTime}ms (total: ${Date.now() - startTime}ms)`);

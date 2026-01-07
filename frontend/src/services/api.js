@@ -104,6 +104,7 @@ export const aiAPI = {
     });
   },
   askQuestionAudioStream: (payload) => api.post('/ai/ask-audio-stream', payload, { responseType: 'blob' }),
+  askQuestionAudioFast: (payload) => api.post('/ai/ask-audio-fast', payload, { responseType: 'blob' }),
 };
 
 export const musicAPI = {

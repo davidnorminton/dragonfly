@@ -335,11 +335,12 @@ async def ai_ask_question_audio_stream(request: Request):
         
         logger.info(f"[AI STREAM] Question: {question[:100]}...")
         
-        # Get TTS config
+        # Get TTS config - use fastest engine for streaming
         persona_config = load_persona_config()
         fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
         voice_id = fish_cfg.get("voice_id")
-        voice_engine = fish_cfg.get("voice_engine", "s1")
+        # Override to use fastest engine for AI focus mode (s1-mini is fastest)
+        voice_engine = "s1-mini"  # Fastest, lowest latency engine
         
         if not voice_id:
             logger.error("[AI STREAM] No voice ID configured")
@@ -399,6 +400,77 @@ async def ai_ask_question_audio_stream(request: Request):
             
     except Exception as e:
         logger.error(f"[AI STREAM] Failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/ai/ask-audio-fast")
+async def ai_ask_question_audio_fast(request: Request):
+    """
+    Optimized AI question with audio - uses fastest TTS engine and minimal processing.
+    Returns audio blob as fast as possible.
+    """
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        text = payload.get("text", "")
+        
+        if not question and not text:
+            return JSONResponse(status_code=400, content={"error": "No question or text provided"})
+        
+        import time
+        start_time = time.time()
+        logger.info(f"[AI FAST] Starting fast pipeline for: {(question or text)[:50]}...")
+        
+        # Get text - either from AI or from payload
+        if not text:
+            from services.ai_service import AIService
+            ai = AIService()
+            result = await ai.execute({"question": question})
+            
+            if result.get("error"):
+                return JSONResponse(status_code=500, content={"error": result.get("error")})
+            
+            text = result.get("answer", "")
+            if not text:
+                return JSONResponse(status_code=500, content={"error": "Empty AI response"})
+            
+            ai_time = time.time() - start_time
+            logger.info(f"[AI FAST] AI done in {ai_time:.2f}s")
+        
+        # Generate audio with fastest engine
+        persona_config = load_persona_config()
+        fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+        voice_id = fish_cfg.get("voice_id")
+        
+        if not voice_id:
+            return JSONResponse(status_code=500, content={"error": "TTS not configured"})
+        
+        tts_start = time.time()
+        from services.tts_service import TTSService
+        tts = TTSService()
+        
+        # Use s1-mini for fastest generation
+        audio_bytes, _ = await tts.generate_audio(
+            text,
+            voice_id=voice_id,
+            voice_engine="s1-mini",  # Fastest engine
+            save_to_file=False
+        )
+        
+        if audio_bytes:
+            total_time = time.time() - start_time
+            tts_time = time.time() - tts_start
+            logger.info(f"[AI FAST] Complete - TTS: {tts_time:.2f}s, Total: {total_time:.2f}s, Size: {len(audio_bytes)}")
+            return Response(
+                content=audio_bytes,
+                media_type="audio/mpeg",
+                headers={"Cache-Control": "no-cache"}
+            )
+        else:
+            return JSONResponse(status_code=500, content={"error": "TTS failed"})
+            
+    except Exception as e:
+        logger.error(f"[AI FAST] Failed: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
