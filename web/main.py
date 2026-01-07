@@ -661,6 +661,30 @@ async def scan_music_library():
     audio_exts = {".mp3"}
     collected_songs = []
     artist_names_seen = set()
+    
+    # Load existing albums and songs from database to optimize scanning
+    logger.info("Loading existing data from database...")
+    existing_albums_with_covers = set()  # Albums that already have covers
+    existing_song_paths = set()  # Songs already in DB
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get albums with covers
+            result = await session.execute(
+                select(MusicArtist.name, MusicAlbum.title, MusicAlbum.cover_path)
+                .join(MusicAlbum)
+                .where(MusicAlbum.cover_path.isnot(None))
+            )
+            for artist_name, album_title, cover_path in result.all():
+                existing_albums_with_covers.add((artist_name, album_title))
+            
+            # Get all existing song paths
+            result = await session.execute(select(MusicSong.file_path))
+            for (file_path,) in result.all():
+                existing_song_paths.add(file_path)
+                
+        logger.info(f"Found {len(existing_albums_with_covers)} albums with covers, {len(existing_song_paths)} existing songs")
+    except Exception as e:
+        logger.warning(f"Failed to load existing data: {e}")
 
     for root, _, files in os.walk(base_path):
         for f in files:
@@ -693,9 +717,18 @@ async def scan_music_library():
                 artist_names_seen.add(artist)
                 song = Path(parts[-1]).stem
                 rel_path = str(full_path.relative_to(base_path))
-                meta = _extract_audio_meta(full_path)
-                title_from_meta = meta.get("title") or song
-                album_title_from_meta = meta.get("album") or album_dir
+                
+                # Skip metadata extraction for songs already in database (optimization)
+                if rel_path in existing_song_paths:
+                    logger.debug(f"Skipping metadata extraction for existing song: {rel_path}")
+                    # Still need basic info, but use cached title from filename
+                    title_from_meta = song
+                    album_title_from_meta = album_dir
+                    meta = {"title": song, "album": album_dir}
+                else:
+                    meta = _extract_audio_meta(full_path)
+                    title_from_meta = meta.get("title") or song
+                    album_title_from_meta = meta.get("album") or album_dir
                 
                 # Store the metadata album title (use first song's metadata album name)
                 if not tree[artist][album_dir]["title"]:
@@ -756,6 +789,13 @@ async def scan_music_library():
     for artist, albums in tree.items():
         for album_dir, album_data in albums.items():
             if album_data["image"] is None:
+                album_title = album_data.get("title") or album_dir
+                
+                # Skip cover extraction/download if album already has cover in database
+                if (artist, album_title) in existing_albums_with_covers:
+                    logger.debug(f"Skipping cover extraction for {artist} - {album_title} (already has cover in DB)")
+                    continue
+                
                 album_path = base_path / artist / album_dir
                 
                 # Try to extract from first MP3 in the album
@@ -803,8 +843,11 @@ async def scan_music_library():
 
     # Persist to DB
     try:
+        total_songs = len(collected_songs)
+        new_songs = len([s for s in collected_songs if s["path"] not in existing_song_paths])
         await _persist_music(collected_songs)
         logger.info(f"Scan complete. Artists found: {sorted(artist_names_seen)}")
+        logger.info(f"Total songs: {total_songs}, New songs: {new_songs}, Skipped: {len(existing_song_paths)}")
     except Exception as e:
         logger.error(f"Failed to persist music library: {e}", exc_info=True)
 
