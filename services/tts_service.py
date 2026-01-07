@@ -39,6 +39,56 @@ class TTSService:
         """Get the path to the audio directory."""
         return Path(__file__).parent.parent / "data" / "audio"
     
+    async def generate_audio_simple(self, text: str, voice_id: str, voice_engine: str = "s1") -> Optional[bytes]:
+        """
+        Generate audio using simple HTTP request (faster, more reliable than websocket).
+        
+        Args:
+            text: Text to convert to speech
+            voice_id: Voice ID from persona config
+            voice_engine: Voice engine/backend (default: "s1")
+        
+        Returns:
+            bytes: Audio data or None if error
+        """
+        if not self.fish_api_key:
+            logger.error("Fish Audio API key not configured")
+            return None
+        
+        try:
+            import httpx
+            from utils.text_cleaner import clean_text_for_tts
+            
+            cleaned_text = clean_text_for_tts(text)
+            logger.info(f"Generating audio via HTTP (voice_id: {voice_id}, backend: {voice_engine})")
+            
+            url = "https://api.fish.audio/v1/tts"
+            headers = {
+                "Authorization": f"Bearer {self.fish_api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "text": cleaned_text,
+                "reference_id": voice_id,
+                "format": "mp3",
+                "backend": voice_engine
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                
+                if response.status_code == 200:
+                    audio_bytes = response.content
+                    logger.info(f"Generated audio via HTTP: {len(audio_bytes)} bytes")
+                    return audio_bytes
+                else:
+                    logger.error(f"Fish Audio HTTP API error: {response.status_code} - {response.text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error generating audio via HTTP: {e}", exc_info=True)
+            return None
+    
     async def generate_audio_stream(self, text_stream, voice_id: str, voice_engine: str = "s1"):
         """
         Generate audio from streaming text using Fish Audio API.

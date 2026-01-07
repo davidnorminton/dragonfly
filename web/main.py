@@ -497,12 +497,11 @@ async def ai_ask_question_audio_fast(request: Request):
         from services.tts_service import TTSService
         tts = TTSService()
         
-        # Use s1-mini for fastest generation
-        audio_bytes, _ = await tts.generate_audio(
+        # Use simple HTTP method for reliability and speed
+        audio_bytes = await tts.generate_audio_simple(
             text,
             voice_id=voice_id,
-            voice_engine="s1-mini",  # Fastest engine
-            save_to_file=False
+            voice_engine="s1-mini"  # Fastest engine
         )
         
         if audio_bytes:
@@ -586,12 +585,22 @@ async def ai_ask_question_audio(request: Request):
         from services.tts_service import TTSService
         tts = TTSService()
         
-        audio_bytes, _ = await tts.generate_audio(
+        # Try simple HTTP method first (more reliable)
+        audio_bytes = await tts.generate_audio_simple(
             text,
             voice_id=voice_id,
-            voice_engine=voice_engine,
-            save_to_file=False
+            voice_engine=voice_engine
         )
+        
+        # Fallback to websocket method if HTTP fails
+        if not audio_bytes:
+            logger.warning("[AI ASK AUDIO] HTTP method failed, trying websocket...")
+            audio_bytes, _ = await tts.generate_audio(
+                text,
+                voice_id=voice_id,
+                voice_engine=voice_engine,
+                save_to_file=False
+            )
         
         tts_time = time.time() - tts_start
         total_time = time.time() - start_time
