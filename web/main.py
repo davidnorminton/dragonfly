@@ -1308,11 +1308,16 @@ async def generate_artist_discography(req: DiscographyRequest):
                 return {"success": True, "discography": artist_row.extra_metadata["discography"]}
 
             # Generate discography using AI
-            prompt = f"""List all studio albums by the band/artist '{artist_name}' in chronological order. 
-Return ONLY a JSON array with this exact format:
-{{"albums": [{{"year": 1990, "title": "Album Name"}}, {{"year": 1992, "title": "Another Album"}}]}}
+            prompt = f"""You are a music database API. Return ONLY valid JSON, no explanations, no commentary, no additional text.
 
-Include only official studio albums, not live albums, compilations, or EPs. Be accurate and factual."""
+Task: List all official studio albums by '{artist_name}' in chronological order.
+
+Rules:
+- Include ONLY official studio albums (no live albums, compilations, EPs, singles, or bootlegs)
+- Return valid JSON in this EXACT format (nothing else):
+{{"albums": [{{"year": 1977, "title": "Album Title"}}, {{"year": 1979, "title": "Another Album"}}]}}
+
+CRITICAL: Your response must be ONLY the JSON object above. Do not include any explanation, greeting, or commentary. Just the JSON."""
 
             logger.info(f"Sending prompt to AI:\n{prompt[:200]}...")
             ai = AIService()
@@ -1322,9 +1327,20 @@ Include only official studio albums, not live albums, compilations, or EPs. Be a
             
             logger.info(f"AI Response (raw): {raw_answer[:500]}...")
             logger.info(f"AI Response length: {len(raw_answer)} chars")
+            
+            # Clean up response - remove markdown code blocks if present
+            cleaned = raw_answer.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+            logger.info(f"Cleaned response: {cleaned[:500]}...")
 
             # Try to extract JSON from response
-            parsed = _extract_json_object(raw_answer) or {}
+            parsed = _extract_json_object(cleaned) or {}
             logger.info(f"Parsed JSON object: {parsed}")
             
             albums_list = parsed.get("albums") if isinstance(parsed, dict) else None
@@ -1333,9 +1349,12 @@ Include only official studio albums, not live albums, compilations, or EPs. Be a
             if not albums_list or not isinstance(albums_list, list):
                 logger.error(f"Failed to parse albums list. Parsed type: {type(parsed)}, albums_list type: {type(albums_list)}")
                 logger.error(f"Full raw response: {raw_answer}")
+                error_msg = "AI returned invalid format. Expected JSON with 'albums' array."
+                if not parsed:
+                    error_msg = "Could not find valid JSON in AI response."
                 return JSONResponse(
                     status_code=200,
-                    content={"success": False, "error": "Failed to generate discography", "debug": {"raw": raw_answer[:500], "parsed": str(parsed)}}
+                    content={"success": False, "error": error_msg, "debug": {"raw": raw_answer[:500], "parsed": str(parsed)}}
                 )
 
             # Sort by year
