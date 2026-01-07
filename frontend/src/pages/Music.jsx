@@ -298,7 +298,20 @@ export function MusicPage({ searchQuery = '' }) {
     setPlaylist(songList);
     setCurrentIndex(idx);
     const track = songList[idx];
+    
+    // Debug logging
+    console.log('Playing track:', track);
+    console.log('Track path:', track.path);
+    
+    if (!track.path) {
+      console.error('Track has no path!', track);
+      setIsPlaying(false);
+      return;
+    }
+    
     const src = `/api/music/stream?path=${encodeURIComponent(track.path)}`;
+    console.log('Audio src:', src);
+    
     const fallbackDuration = track.duration ?? lengthsRef.current[track.path] ?? 0;
     setProgress(0);
     setDuration(fallbackDuration);
@@ -309,7 +322,7 @@ export function MusicPage({ searchQuery = '' }) {
         await audioRef.current.play();
         setIsPlaying(true);
       } catch (e) {
-        console.error('Play error', e);
+        console.error('Play error', e, 'for src:', src);
         setIsPlaying(false);
       }
     }
@@ -463,10 +476,27 @@ export function MusicPage({ searchQuery = '' }) {
   };
 
   const handleSongClick = (songs, idx) => {
+    console.log('handleSongClick called with:', { songCount: songs.length, index: idx, firstSong: songs[0] });
+    
     // Clear shuffle when manually clicking a song
     setIsShuffled(false);
     setShuffleQueue([]);
-    if (playIndexRef.current) playIndexRef.current(idx, songs);
+    
+    // Make sure we have valid songs and index
+    if (!songs || !Array.isArray(songs) || idx < 0 || idx >= songs.length) {
+      console.error('Invalid songs or index:', { songs, idx });
+      return;
+    }
+    
+    // Stop current playback before starting new song
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+      console.log('Paused current song before switching');
+    }
+    
+    if (playIndexRef.current) {
+      playIndexRef.current(idx, songs);
+    }
   };
 
   const handleShuffle = () => {
@@ -632,7 +662,23 @@ export function MusicPage({ searchQuery = '' }) {
     try {
       const res = await musicAPI.getPopular(artistName);
       if (res.success) {
-        setPopularMap((prev) => ({ ...prev, [artistName]: res.popular || [] }));
+        const popularSongs = res.popular || [];
+        console.log('Popular songs loaded for', artistName, ':', popularSongs);
+        
+        // Verify all songs have required fields
+        const validSongs = popularSongs.filter(song => {
+          if (!song.path) {
+            console.error('Popular song missing path:', song);
+            return false;
+          }
+          return true;
+        });
+        
+        if (validSongs.length !== popularSongs.length) {
+          console.warn(`Filtered out ${popularSongs.length - validSongs.length} invalid songs`);
+        }
+        
+        setPopularMap((prev) => ({ ...prev, [artistName]: validSongs }));
       } else {
         setPopularError(res.error || 'Failed to load popular songs');
       }
@@ -990,6 +1036,14 @@ export function MusicPage({ searchQuery = '' }) {
   useEffect(() => {
     if (viewMode === 'playlists') return;
     if (!selectedArtist) return;
+    
+    // Stop current playback when switching artists
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+      console.log('Stopped playback due to artist switch');
+    }
+    
     fetchPopular(selectedArtist);
     fetchAbout(selectedArtist);
     fetchDiscography(selectedArtist);
