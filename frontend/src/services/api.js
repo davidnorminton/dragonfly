@@ -59,6 +59,51 @@ export const routerAPI = {
 export const aiAPI = {
   askQuestion: (payload) => api.post('/ai/ask', payload).then(res => res.data),
   askQuestionAudio: (payload) => api.post('/ai/ask-audio', payload, { responseType: 'blob' }),
+  askQuestionStream: (payload, onChunk) => {
+    // Use EventSource for Server-Sent Events
+    return new Promise((resolve, reject) => {
+      fetch(`${api.defaults.baseURL}/ai/ask-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(response => {
+        if (!response.ok) {
+          reject(new Error(`HTTP ${response.status}`));
+          return;
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        const processText = ({ done, value }) => {
+          if (done) {
+            resolve();
+            return;
+          }
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                onChunk(data);
+              } catch (e) {
+                console.error('Failed to parse SSE:', e);
+              }
+            }
+          }
+          
+          reader.read().then(processText);
+        };
+        
+        reader.read().then(processText);
+      }).catch(reject);
+    });
+  },
+  askQuestionAudioStream: (payload) => api.post('/ai/ask-audio-stream', payload, { responseType: 'blob' }),
 };
 
 export const musicAPI = {

@@ -209,40 +209,43 @@ function App() {
           
           // Handle based on AI focus mode
           if (aiFocusMode === 'question') {
-            // Direct AI question mode - bypass router entirely
+            // Direct AI question mode with streaming
             try {
-              console.log('[QUESTION MODE] Sending directly to AI...');
+              console.log('[QUESTION MODE] Starting streaming pipeline...');
               const startTime = Date.now();
               
-              // First, get the text response immediately for display
-              console.log('Requesting text response...');
-              const textResp = await aiAPI.askQuestion({ question: transcript });
-              
-              const textTime = Date.now() - startTime;
-              console.log(`Text response received in ${textTime}ms`);
-              
-              console.log('Text response:', textResp);
-              
               let responseText = '';
-              if (textResp?.answer) {
-                responseText = textResp.answer;
-                setAiResponseText(responseText);
-                console.log('Displaying text response:', responseText.substring(0, 100) + '...');
-              } else if (textResp?.success === false) {
-                console.error('AI request failed:', textResp.error);
-                setMicStatus('idle');
-                return;
-              } else {
-                console.error('Unexpected response format:', textResp);
-                setMicStatus('idle');
-                return;
-              }
+              let firstChunkTime = null;
               
-              // Now get audio - send the text we already have to skip AI call
-              console.log('Requesting audio generation with pre-fetched text, length:', responseText.length);
+              // Stream text response and display chunks as they arrive
+              console.log('Streaming text response...');
+              aiAPI.askQuestionStream({ question: transcript }, (data) => {
+                if (data.chunk) {
+                  if (firstChunkTime === null) {
+                    firstChunkTime = Date.now() - startTime;
+                    console.log(`First text chunk received in ${firstChunkTime}ms`);
+                  }
+                  responseText += data.chunk;
+                  setAiResponseText(responseText);
+                } else if (data.done) {
+                  const textTime = Date.now() - startTime;
+                  console.log(`Text streaming complete in ${textTime}ms, length: ${responseText.length}`);
+                  responseText = data.full_text || responseText;
+                  setAiResponseText(responseText);
+                } else if (data.error) {
+                  console.error('Text streaming error:', data.error);
+                  setMicStatus('idle');
+                }
+              }).catch(err => {
+                console.error('Text streaming failed:', err);
+                setMicStatus('idle');
+              });
+              
+              // Start streaming audio immediately (in parallel with text)
+              console.log('Streaming audio...');
               const audioStartTime = Date.now();
               
-              const audioResp = await aiAPI.askQuestionAudio({ text: responseText });
+              const audioResp = await aiAPI.askQuestionAudioStream({ question: transcript });
               
               const audioResponseTime = Date.now() - audioStartTime;
               console.log(`Audio received in ${audioResponseTime}ms (total: ${Date.now() - startTime}ms)`);

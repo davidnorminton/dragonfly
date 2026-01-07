@@ -214,6 +214,64 @@ nohup python -m uvicorn web.main:app --host 0.0.0.0 --port 1337 > /tmp/dragonfly
         raise HTTPException(status_code=500, detail="Failed to schedule restart")
 
 
+@app.post("/api/ai/ask-stream")
+async def ai_ask_question_stream(request: Request):
+    """
+    Streaming AI question endpoint - streams text chunks as they're generated.
+    Returns text chunks in real-time.
+    """
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        
+        if not question:
+            return JSONResponse(status_code=400, content={"error": "No question provided"})
+        
+        logger.info(f"[AI ASK STREAM] Question: {question[:100]}...")
+        
+        from services.ai_service import AIService
+        ai = AIService()
+        
+        async def text_stream_generator():
+            try:
+                import time
+                start_time = time.time()
+                first_chunk_time = None
+                full_text = []
+                
+                async for text_chunk in ai.async_stream_execute({"question": question}):
+                    if first_chunk_time is None:
+                        first_chunk_time = time.time() - start_time
+                        logger.info(f"[AI ASK STREAM] First chunk in {first_chunk_time:.2f}s")
+                    full_text.append(text_chunk)
+                    # Send as server-sent events format
+                    yield f"data: {json.dumps({'chunk': text_chunk})}\n\n"
+                
+                total_time = time.time() - start_time
+                logger.info(f"[AI ASK STREAM] Complete in {total_time:.2f}s, length: {len(''.join(full_text))}")
+                
+                # Send final event with complete text
+                yield f"data: {json.dumps({'done': True, 'full_text': ''.join(full_text)})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"[AI ASK STREAM] Error: {e}", exc_info=True)
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        
+        return StreamingResponse(
+            text_stream_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
+            
+    except Exception as e:
+        logger.error(f"[AI ASK STREAM] Failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.post("/api/ai/ask")
 async def ai_ask_question(request: Request):
     """
@@ -259,6 +317,89 @@ async def ai_ask_question(request: Request):
     except Exception as e:
         logger.error(f"[AI ASK] Failed: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
+
+
+@app.post("/api/ai/ask-audio-stream")
+async def ai_ask_question_audio_stream(request: Request):
+    """
+    Streaming AI question with real-time audio - streams text to TTS and audio to client.
+    This provides the lowest latency by streaming at every stage.
+    """
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        
+        if not question:
+            logger.error("[AI STREAM] No question provided")
+            return JSONResponse(status_code=400, content={"error": "No question provided"})
+        
+        logger.info(f"[AI STREAM] Question: {question[:100]}...")
+        
+        # Get TTS config
+        persona_config = load_persona_config()
+        fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+        voice_id = fish_cfg.get("voice_id")
+        voice_engine = fish_cfg.get("voice_engine", "s1")
+        
+        if not voice_id:
+            logger.error("[AI STREAM] No voice ID configured")
+            return JSONResponse(status_code=500, content={"error": "TTS not configured"})
+        
+        logger.info(f"[AI STREAM] Starting streaming pipeline with voice_id={voice_id}, engine={voice_engine}")
+        
+        # Create async generator for the full pipeline
+        async def audio_stream_generator():
+            try:
+                import time
+                start_time = time.time()
+                first_chunk_time = None
+                total_audio_size = 0
+                
+                # Create AI text stream
+                from services.ai_service import AIService
+                ai = AIService()
+                
+                # Stream AI response as text chunks
+                async def text_stream():
+                    """Generator that yields text chunks from AI"""
+                    logger.info("[AI STREAM] Starting AI text generation")
+                    full_text = []
+                    async for text_chunk in ai.async_stream_execute({"question": question}):
+                        full_text.append(text_chunk)
+                        yield text_chunk
+                    logger.info(f"[AI STREAM] AI complete, total text: {len(''.join(full_text))} chars")
+                
+                # Stream TTS audio
+                from services.tts_service import TTSService
+                tts = TTSService()
+                
+                logger.info("[AI STREAM] Starting TTS streaming")
+                async for audio_chunk in tts.generate_audio_stream(text_stream(), voice_id, voice_engine):
+                    if first_chunk_time is None:
+                        first_chunk_time = time.time() - start_time
+                        logger.info(f"[AI STREAM] First audio chunk in {first_chunk_time:.2f}s")
+                    total_audio_size += len(audio_chunk)
+                    yield audio_chunk
+                
+                total_time = time.time() - start_time
+                logger.info(f"[AI STREAM] Complete - First chunk: {first_chunk_time:.2f}s, Total: {total_time:.2f}s, Size: {total_audio_size} bytes")
+                        
+            except Exception as e:
+                logger.error(f"[AI STREAM] Error in stream generator: {e}", exc_info=True)
+        
+        # Return streaming response
+        return StreamingResponse(
+            audio_stream_generator(),
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            }
+        )
+            
+    except Exception as e:
+        logger.error(f"[AI STREAM] Failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.post("/api/ai/ask-audio")
