@@ -298,8 +298,11 @@ async def get_filler_audio(persona: Optional[str] = None):
         # Pick a random filler audio
         selected_path = random.choice(filler_paths)
         
-        # Convert relative path to absolute
-        audio_file = Path(__file__).parent / "config" / selected_path
+        # Convert relative path to absolute (path is relative to config directory)
+        config_dir = Path(__file__).parent.parent / "config"
+        audio_file = (config_dir / selected_path).resolve()
+        
+        logger.info(f"Serving filler audio: {audio_file}")
         
         if not audio_file.exists():
             logger.error(f"Filler audio file not found: {audio_file}")
