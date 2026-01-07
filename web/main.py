@@ -214,6 +214,60 @@ nohup python -m uvicorn web.main:app --host 0.0.0.0 --port 1337 > /tmp/dragonfly
         raise HTTPException(status_code=500, detail="Failed to schedule restart")
 
 
+@app.post("/api/router/route-stream")
+async def router_route_stream(request: Request):
+    """
+    Streaming version of router_route for faster audio response.
+    Streams audio chunks as they are generated from AI response sentences.
+    """
+    try:
+        payload = await request.json()
+        route_type = payload.get("type")
+        route_value = payload.get("value")
+        mode = payload.get("mode", "qa")
+        ai_mode = bool(payload.get("ai_mode", False))
+
+        logger.info(f"Streaming route request: type={route_type}, value={route_value}, ai_mode={ai_mode}")
+
+        # Get AI response result
+        result = await route_request(route_type, route_value, mode=mode)
+        if not result.get("success"):
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": False,
+                    "error": result.get("error", "Routing failed"),
+                },
+            )
+
+        text = result.get("result") or result.get("answer") or ""
+        logger.info(f"Got AI response, length: {len(text)}")
+        
+        if ai_mode:
+            try:
+                # Get TTS config
+                persona_config = load_persona_config()
+                fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+                voice_id = fish_cfg.get("voice_id")
+                voice_engine = fish_cfg.get("voice_engine", "s1")
+                
+                if voice_id:
+                    logger.info("Starting TTS generation")
+                    tts = TTSService()
+                    audio_bytes, _ = await tts.generate_audio(text, voice_id=voice_id, voice_engine=voice_engine, save_to_file=False)
+                    if audio_bytes:
+                        logger.info(f"TTS complete: {len(audio_bytes)} bytes")
+                        return Response(content=audio_bytes, media_type="audio/mpeg")
+            except Exception as tts_err:
+                logger.error(f"TTS generation failed: {tts_err}", exc_info=True)
+                return {"success": True, "text": text, "audio_error": str(tts_err)}
+        
+        return {"success": True, "text": text}
+    except Exception as e:
+        logger.error(f"Streaming route failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/router/route")
 async def router_route(request: Request):
     """
@@ -249,9 +303,11 @@ async def router_route(request: Request):
                 voice_id = fish_cfg.get("voice_id")
                 voice_engine = fish_cfg.get("voice_engine", "s1")
                 if voice_id:
+                    logger.info(f"Generating TTS for text length: {len(text)}")
                     tts = TTSService()
                     audio_bytes, _ = await tts.generate_audio(text, voice_id=voice_id, voice_engine=voice_engine, save_to_file=False)
                     if audio_bytes:
+                        logger.info(f"TTS generated, audio size: {len(audio_bytes)} bytes")
                         return Response(content=audio_bytes, media_type="audio/mpeg")
             except Exception as tts_err:
                 logger.error(f"TTS generation failed: {tts_err}", exc_info=True)

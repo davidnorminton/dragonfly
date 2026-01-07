@@ -5,6 +5,11 @@ export function WaveformMic({ status }) {
   const animationRef = useRef(null);
   const barsRef = useRef([]);
   
+  // Debug logging
+  useEffect(() => {
+    console.log('WaveformMic status:', status);
+  }, [status]);
+  
   // Initialize bars
   useEffect(() => {
     const numBars = 32;
@@ -80,14 +85,15 @@ export function WaveformMic({ status }) {
         ctx.stroke();
       } else {
         // Animated waveform bars
-        time += 0.1;
+        time += 0.15;
         
         barsRef.current.forEach((bar) => {
           // Update bar height with wave motion
           if (isListening) {
             bar.height = 0.4 + Math.sin(time * bar.velocity * 2 + bar.phase) * 0.35 + Math.random() * 0.15;
           } else if (isPlaying) {
-            bar.height = 0.5 + Math.sin(time * bar.velocity * 3 + bar.phase) * 0.4 + Math.random() * 0.1;
+            // More dramatic animation for playing state
+            bar.height = 0.6 + Math.sin(time * bar.velocity * 4 + bar.phase) * 0.5 + Math.random() * 0.2;
           }
           
           // Calculate position

@@ -215,20 +215,30 @@ function App() {
           // Route the parsed decision to backend for actions/tts
           if (data.router_parsed && data.router_parsed.type && data.router_parsed.value) {
             try {
-              const routeResp = await routerAPI.route({
+              // Use streaming endpoint for faster audio response
+              console.log('Requesting audio response...');
+              const routeResp = await routerAPI.routeStream({
                 type: data.router_parsed.type,
                 value: data.router_parsed.value,
                 mode: 'qa',
-                ai_mode: true, // only send audio when AI focus mode is active
+                ai_mode: true,
               });
+              console.log('Received audio response');
               const blob = routeResp?.data;
               if (blob && blob.type && blob.type.startsWith('audio/')) {
+                console.log('Audio blob received, size:', blob.size);
                 const url = URL.createObjectURL(blob);
                 const audio = new Audio(url);
                 setAudioObj(audio);
+                console.log('Setting status to playing');
                 setMicStatus('playing');
                 audio.onended = () => {
-                  setMicStatus('idle'); // require user click to listen again
+                  console.log('Audio ended, resetting to idle');
+                  setMicStatus('idle');
+                };
+                audio.onerror = (err) => {
+                  console.error('Audio playback error:', err);
+                  setMicStatus('idle');
                 };
                 await audio.play().catch((err) => {
                   console.error('Audio play failed', err);

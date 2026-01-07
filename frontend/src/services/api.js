@@ -53,6 +53,7 @@ export const routerAPI = {
   getRouterConfig: () => api.get('/config/router').then(res => res.data),
   saveRouterConfig: (config) => api.put('/config/router', config).then(res => res.data),
   route: (payload) => api.post('/router/route', payload, { responseType: 'blob' }),
+  routeStream: (payload) => api.post('/router/route-stream', payload, { responseType: 'blob' }),
 };
 
 export const musicAPI = {
