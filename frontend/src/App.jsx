@@ -36,6 +36,7 @@ function App() {
   const [routerText, setRouterText] = useState('');
   const [aiResponseText, setAiResponseText] = useState(''); // Display AI response text immediately
   const [audioObj, setAudioObj] = useState(null);
+  const [fillerAudioObj, setFillerAudioObj] = useState(null); // Filler audio for immediate feedback
   const [micRestartKey, setMicRestartKey] = useState(0);
   const [aiFocusMode, setAiFocusMode] = useState('question'); // 'question' or 'task'
   const [activePage, setActivePage] = useState('dashboard');
@@ -93,6 +94,41 @@ function App() {
   };
 
   const toggleAiFocus = () => setAiFocusActive((prev) => !prev);
+
+  // Play filler audio for immediate feedback
+  const playFillerAudio = async () => {
+    try {
+      console.log('[FILLER] Requesting filler audio...');
+      const fillerResp = await aiAPI.getFillerAudio();
+      const blob = fillerResp?.data;
+      
+      if (blob && blob.size > 0) {
+        const url = URL.createObjectURL(blob);
+        const filler = new Audio(url);
+        setFillerAudioObj(filler);
+        
+        filler.onended = () => {
+          console.log('[FILLER] Filler audio ended');
+          setFillerAudioObj(null);
+        };
+        
+        await filler.play();
+        console.log('[FILLER] Playing filler audio');
+      }
+    } catch (err) {
+      console.error('[FILLER] Failed to play filler audio:', err);
+    }
+  };
+
+  // Stop filler audio when real audio is ready
+  const stopFillerAudio = () => {
+    if (fillerAudioObj) {
+      console.log('[FILLER] Stopping filler audio');
+      fillerAudioObj.pause();
+      fillerAudioObj.currentTime = 0;
+      setFillerAudioObj(null);
+    }
+  };
 
   const beginListening = () => {
     // Ensure overlay is open
@@ -207,6 +243,9 @@ function App() {
           const transcript = data.transcript || '';
           console.log('Transcript:', transcript);
           
+          // Play filler audio immediately for instant feedback
+          playFillerAudio();
+          
           // Handle based on AI focus mode
           if (aiFocusMode === 'question') {
             // Direct AI question mode - optimized for speed
@@ -254,6 +293,10 @@ function App() {
               const blob = audioResp?.data;
               if (blob && blob.size > 0) {
                 console.log('Audio blob received, size:', blob.size);
+                
+                // Stop filler audio before playing real audio
+                stopFillerAudio();
+                
                 const url = URL.createObjectURL(blob);
                 const audio = new Audio(url);
                 setAudioObj(audio);
@@ -291,12 +334,14 @@ function App() {
               }
             } catch (err) {
               console.error('Direct AI question failed:', err);
+              stopFillerAudio(); // Stop filler on error
               setMicStatus('idle');
               setAiResponseText('');
             }
           } else {
             // Task mode - use router (to be implemented)
             console.log('[TASK MODE] Using router...');
+            stopFillerAudio(); // Stop filler for task mode
             const routedParsed = data.router_parsed;
             const routedRaw = data.router_answer;
             const routedError = data.router_error;

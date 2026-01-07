@@ -272,6 +272,51 @@ async def ai_ask_question_stream(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.get("/api/ai/filler-audio")
+async def get_filler_audio(persona: Optional[str] = None):
+    """
+    Get a random filler audio file for immediate playback while processing.
+    Provides instant feedback to the user.
+    """
+    try:
+        import random
+        
+        # Load persona config to get filler audio paths
+        if not persona:
+            persona_config = load_persona_config()
+            persona = get_current_persona_name()
+        else:
+            persona_config = load_persona_config(persona)
+        
+        if not persona_config or "filler_audio" not in persona_config:
+            return JSONResponse(status_code=404, content={"error": "No filler audio configured for this persona"})
+        
+        filler_paths = persona_config.get("filler_audio", [])
+        if not filler_paths:
+            return JSONResponse(status_code=404, content={"error": "No filler audio files found"})
+        
+        # Pick a random filler audio
+        selected_path = random.choice(filler_paths)
+        
+        # Convert relative path to absolute
+        audio_file = Path(__file__).parent / "config" / selected_path
+        
+        if not audio_file.exists():
+            logger.error(f"Filler audio file not found: {audio_file}")
+            return JSONResponse(status_code=404, content={"error": "Filler audio file not found"})
+        
+        # Return the audio file
+        return FileResponse(
+            audio_file,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "public, max-age=86400"}  # Cache for 24 hours
+        )
+        
+    except Exception as e:
+        logger.error(f"Error serving filler audio: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.post("/api/ai/ask")
 async def ai_ask_question(request: Request):
     """
