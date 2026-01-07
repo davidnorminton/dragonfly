@@ -1394,13 +1394,21 @@ async def generate_artist_videos(req: VideosRequest):
                 return {"success": True, "videos": artist_row.extra_metadata["videos"]}
 
             # Generate video list using AI
-            prompt = f"""List 8-10 widely-available official YouTube videos for '{artist_name}'. 
+            prompt = f"""List 6-8 official YouTube videos for '{artist_name}' that are DEFINITELY available worldwide.
 
-IMPORTANT: Only include videos that are:
-- Official uploads from the artist's verified channel or major record labels
-- Likely to be available globally (including UK)
-- Their most famous/popular songs that would be widely distributed
-- Not region-restricted, live bootlegs, or unofficial uploads
+CRITICAL REQUIREMENTS - Only include videos that meet ALL of these:
+- From official VEVO channel (e.g., "ArtistVEVO") or verified artist channel
+- Major worldwide releases from international record labels (Universal, Sony, Warner, etc.)
+- Released globally with no regional restrictions
+- The artist's biggest international hits that would be available in UK, US, EU, etc.
+- NOT live performances, NOT unofficial uploads, NOT smaller releases
+
+AVOID:
+- Regional-only releases
+- Live concerts/bootlegs
+- Fan uploads
+- Country-specific content
+- Older videos that may have expired licenses
 
 Return ONLY a JSON object in this EXACT format (no other text):
 {{
@@ -1410,10 +1418,8 @@ Return ONLY a JSON object in this EXACT format (no other text):
   ]
 }}
 
-Rules:
-- videoId should be plausible 11-character YouTube IDs
-- Focus on globally-available content from official channels
-- Return valid JSON only, no markdown, no explanation"""
+Be conservative - better to return fewer videos that definitely work globally than include questionable ones.
+Return valid JSON only, no markdown, no explanation."""
 
             ai = AIService()
             ai.reload_persona_config()

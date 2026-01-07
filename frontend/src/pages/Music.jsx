@@ -1594,7 +1594,10 @@ export function MusicPage({ searchQuery = '' }) {
                       
                       {selectedArtist && (
                         <div className="album-section videos-section">
-                          <div className="album-section-title">Videos</div>
+                          <div className="album-section-title">
+                            Videos
+                            <span className="videos-disclaimer"> (Some videos may be region-restricted)</span>
+                          </div>
                           {videosMap[selectedArtist] ? (
                             <div className="videos-grid">
                               {videosMap[selectedArtist].map((video, idx) => (
