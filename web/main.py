@@ -217,8 +217,8 @@ nohup python -m uvicorn web.main:app --host 0.0.0.0 --port 1337 > /tmp/dragonfly
 @app.post("/api/router/route-stream")
 async def router_route_stream(request: Request):
     """
-    Streaming version of router_route for faster audio response.
-    Streams audio chunks as they are generated from AI response sentences.
+    True streaming version: streams AI response to TTS and streams audio back.
+    This provides the lowest latency by streaming at every stage.
     """
     try:
         payload = await request.json()
@@ -229,40 +229,85 @@ async def router_route_stream(request: Request):
 
         logger.info(f"Streaming route request: type={route_type}, value={route_value}, ai_mode={ai_mode}")
 
-        # Get AI response result
-        result = await route_request(route_type, route_value, mode=mode)
-        if not result.get("success"):
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": False,
-                    "error": result.get("error", "Routing failed"),
-                },
-            )
+        if not ai_mode:
+            # Non-audio mode - just get the result
+            result = await route_request(route_type, route_value, mode=mode)
+            if not result.get("success"):
+                return JSONResponse(status_code=200, content={"success": False, "error": result.get("error", "Routing failed")})
+            return {"success": True, "text": result.get("result") or result.get("answer") or ""}
 
-        text = result.get("result") or result.get("answer") or ""
-        logger.info(f"Got AI response, length: {len(text)}")
-        
-        if ai_mode:
-            try:
-                # Get TTS config
-                persona_config = load_persona_config()
-                fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
-                voice_id = fish_cfg.get("voice_id")
-                voice_engine = fish_cfg.get("voice_engine", "s1")
-                
-                if voice_id:
-                    logger.info("Starting TTS generation")
+        # AI mode with streaming audio
+        try:
+            # Get TTS config
+            persona_config = load_persona_config()
+            fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+            voice_id = fish_cfg.get("voice_id")
+            voice_engine = fish_cfg.get("voice_engine", "s1")
+            
+            if not voice_id:
+                logger.warning("No voice ID configured for streaming TTS")
+                result = await route_request(route_type, route_value, mode=mode)
+                return {"success": True, "text": result.get("result") or result.get("answer") or ""}
+            
+            logger.info("Starting streaming AI -> TTS pipeline")
+            
+            # Define async generator for audio streaming
+            async def audio_stream_generator():
+                try:
+                    # Get AI service and create streaming text generator
+                    from services.ai_service import AIService
+                    ai = AIService()
+                    
+                    # Create text accumulator for TTS
+                    text_buffer = []
+                    sentence_buffer = ""
+                    
+                    # Get the question from routing logic
+                    if route_type == "ai_service":
+                        question = route_value
+                    else:
+                        # For other routes, get the result first then do TTS
+                        result = await route_request(route_type, route_value, mode=mode)
+                        if not result.get("success"):
+                            return
+                        question = result.get("result") or result.get("answer") or ""
+                        text_buffer.append(question)
+                    
+                    # Stream AI response
+                    async def text_stream():
+                        """Generator that yields text chunks for TTS"""
+                        if text_buffer:
+                            # If we already have the full text, yield it
+                            for chunk in text_buffer:
+                                yield chunk
+                        else:
+                            # Stream from AI
+                            async for text_chunk in ai.async_stream_execute({"question": question}):
+                                yield text_chunk
+                    
+                    # Stream TTS audio
                     tts = TTSService()
-                    audio_bytes, _ = await tts.generate_audio(text, voice_id=voice_id, voice_engine=voice_engine, save_to_file=False)
-                    if audio_bytes:
-                        logger.info(f"TTS complete: {len(audio_bytes)} bytes")
-                        return Response(content=audio_bytes, media_type="audio/mpeg")
-            except Exception as tts_err:
-                logger.error(f"TTS generation failed: {tts_err}", exc_info=True)
-                return {"success": True, "text": text, "audio_error": str(tts_err)}
+                    async for audio_chunk in tts.generate_audio_stream(text_stream(), voice_id, voice_engine):
+                        yield audio_chunk
+                        
+                except Exception as e:
+                    logger.error(f"Error in audio stream generator: {e}", exc_info=True)
+            
+            # Return streaming response
+            return StreamingResponse(
+                audio_stream_generator(),
+                media_type="audio/mpeg",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                }
+            )
+            
+        except Exception as tts_err:
+            logger.error(f"Streaming TTS failed: {tts_err}", exc_info=True)
+            result = await route_request(route_type, route_value, mode=mode)
+            return {"success": True, "text": result.get("result") or "", "audio_error": str(tts_err)}
         
-        return {"success": True, "text": text}
     except Exception as e:
         logger.error(f"Streaming route failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

@@ -39,6 +39,40 @@ class TTSService:
         """Get the path to the audio directory."""
         return Path(__file__).parent.parent / "data" / "audio"
     
+    async def generate_audio_stream(self, text_stream, voice_id: str, voice_engine: str = "s1"):
+        """
+        Generate audio from streaming text using Fish Audio API.
+        Yields audio chunks as they are generated.
+        
+        Args:
+            text_stream: Async generator that yields text chunks
+            voice_id: Voice ID from persona config
+            voice_engine: Voice engine/backend (default: "s1")
+        
+        Yields:
+            bytes: Audio chunks as they are generated
+        """
+        if not self.fish_api_key:
+            logger.error("Fish Audio API key not configured")
+            return
+        
+        try:
+            logger.info(f"Starting streaming TTS with Fish Audio (voice_id: {voice_id}, backend: {voice_engine})")
+            
+            async with AsyncWebSocketSession(apikey=self.fish_api_key) as session:
+                request = TTSRequest(
+                    text="",  # Empty - text comes from stream
+                    reference_id=voice_id,
+                    format="mp3"
+                )
+                
+                # Stream audio chunks as they are generated
+                async for audio_chunk in session.tts(request, text_stream, backend=voice_engine):
+                    yield audio_chunk
+                    
+        except Exception as e:
+            logger.error(f"Error in streaming TTS: {e}", exc_info=True)
+    
     async def generate_audio(self, text: str, voice_id: str, voice_engine: str = "s1", save_to_file: bool = True) -> tuple[Optional[bytes], Optional[str]]:
         """
         Generate audio from text using Fish Audio API SDK.

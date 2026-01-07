@@ -216,51 +216,69 @@ function App() {
           if (data.router_parsed && data.router_parsed.type && data.router_parsed.value) {
             try {
               // Use streaming endpoint for faster audio response
-              console.log('Requesting audio response...');
+              console.log('Requesting streaming audio response...');
+              const startTime = Date.now();
+              
               const routeResp = await routerAPI.routeStream({
                 type: data.router_parsed.type,
                 value: data.router_parsed.value,
                 mode: 'qa',
                 ai_mode: true,
               });
-              console.log('Received audio response');
+              
+              const responseTime = Date.now() - startTime;
+              console.log(`Audio response received in ${responseTime}ms`);
+              
               const blob = routeResp?.data;
               if (blob && blob.type && blob.type.startsWith('audio/')) {
                 console.log('Audio blob received, size:', blob.size);
                 const url = URL.createObjectURL(blob);
                 const audio = new Audio(url);
                 setAudioObj(audio);
+                
+                // Set to playing as soon as we have audio
                 console.log('Setting status to playing');
                 setMicStatus('playing');
+                
+                // Handle audio events
+                audio.oncanplaythrough = () => {
+                  console.log('Audio ready to play through');
+                };
+                
                 audio.onended = () => {
                   console.log('Audio ended, resetting to idle');
                   setMicStatus('idle');
                 };
+                
                 audio.onerror = (err) => {
-                  console.error('Audio playback error:', err);
+                  console.error('Audio playback error:', err, audio.error);
                   setMicStatus('idle');
                 };
+                
+                // Start playback
                 try {
                   await audio.play();
-                  console.log('Audio playback started successfully');
+                  const playStartTime = Date.now() - startTime;
+                  console.log(`Audio playback started in ${playStartTime}ms from request`);
                 } catch (err) {
-                  console.error('Audio play failed', err);
+                  console.error('Audio play failed:', err);
                   setMicStatus('idle');
                 }
               } else if (blob) {
                 // Try to parse JSON error/success message
                 try {
                   const textBody = await blob.text();
-                  console.log('Router route JSON/text response', textBody);
+                  console.log('Router route JSON/text response:', textBody);
                 } catch (e) {
-                  console.log('Router route non-audio response', blob);
+                  console.log('Router route non-audio response:', blob);
                 }
                 setMicStatus('idle');
               } else {
+                console.log('No blob in response');
                 setMicStatus('idle');
               }
             } catch (err) {
-              console.error('Router route failed', err);
+              console.error('Router route failed:', err);
               setMicStatus('idle');
             }
           }
