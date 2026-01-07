@@ -1813,6 +1813,31 @@ body {
   min-height: 20px;
 }
 
+.ai-response-text {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  max-width: 600px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: #e0e0e0;
+  font-size: 1rem;
+  line-height: 1.6;
+  text-align: left;
+  animation: fadeInText 0.3s ease-in;
+}
+
+@keyframes fadeInText {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .ai-focus-transcript {
   margin-top: 16px;
   max-width: 720px;

@@ -34,6 +34,7 @@ function App() {
   const [micError, setMicError] = useState('');
   const [transcript, setTranscript] = useState('');
   const [routerText, setRouterText] = useState('');
+  const [aiResponseText, setAiResponseText] = useState(''); // Display AI response text immediately
   const [audioObj, setAudioObj] = useState(null);
   const [micRestartKey, setMicRestartKey] = useState(0);
   const [activePage, setActivePage] = useState('dashboard');
@@ -215,9 +216,28 @@ function App() {
           // Route the parsed decision to backend for actions/tts
           if (data.router_parsed && data.router_parsed.type && data.router_parsed.value) {
             try {
-              // Use streaming endpoint for faster audio response
-              console.log('Requesting streaming audio response...');
-              const startTime = Date.now();
+              // First, get the text response immediately for display
+              console.log('Requesting text response...');
+              const textStartTime = Date.now();
+              
+              const textResp = await routerAPI.route({
+                type: data.router_parsed.type,
+                value: data.router_parsed.value,
+                mode: 'qa',
+              });
+              
+              const textTime = Date.now() - textStartTime;
+              console.log(`Text response received in ${textTime}ms`);
+              
+              if (textResp?.data?.success) {
+                const responseText = textResp.data.result || textResp.data.answer || '';
+                setAiResponseText(responseText);
+                console.log('Displaying text response:', responseText.substring(0, 100) + '...');
+              }
+              
+              // Now stream the audio response
+              console.log('Requesting streaming audio...');
+              const audioStartTime = Date.now();
               
               const routeResp = await routerAPI.routeStream({
                 type: data.router_parsed.type,
@@ -226,8 +246,8 @@ function App() {
                 ai_mode: true,
               });
               
-              const responseTime = Date.now() - startTime;
-              console.log(`Audio response received in ${responseTime}ms`);
+              const audioResponseTime = Date.now() - audioStartTime;
+              console.log(`Audio response received in ${audioResponseTime}ms (total: ${Date.now() - textStartTime}ms)`);
               
               const blob = routeResp?.data;
               if (blob && blob.type && blob.type.startsWith('audio/')) {
@@ -248,18 +268,20 @@ function App() {
                 audio.onended = () => {
                   console.log('Audio ended, resetting to idle');
                   setMicStatus('idle');
+                  setAiResponseText(''); // Clear text when audio finishes
                 };
                 
                 audio.onerror = (err) => {
                   console.error('Audio playback error:', err, audio.error);
                   setMicStatus('idle');
+                  setAiResponseText(''); // Clear text on error
                 };
                 
                 // Start playback
                 try {
                   await audio.play();
-                  const playStartTime = Date.now() - startTime;
-                  console.log(`Audio playback started in ${playStartTime}ms from request`);
+                  const playStartTime = Date.now() - textStartTime;
+                  console.log(`Audio playback started in ${playStartTime}ms from initial request`);
                 } catch (err) {
                   console.error('Audio play failed:', err);
                   setMicStatus('idle');
@@ -280,6 +302,7 @@ function App() {
             } catch (err) {
               console.error('Router route failed:', err);
               setMicStatus('idle');
+              setAiResponseText(''); // Clear text on error
             }
           }
 
@@ -435,6 +458,11 @@ function App() {
             {micStatus === 'playing' && 'Playing response...'}
             {micStatus === 'idle' && 'Tap mic to start'}
           </div>
+          {aiResponseText && (
+            <div className="ai-response-text">
+              {aiResponseText}
+            </div>
+          )}
           <button
             className="ai-focus-revert"
             onClick={toggleAiFocus}
