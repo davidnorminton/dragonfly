@@ -240,6 +240,30 @@ export function Settings({ open, onClose, onNavigate }) {
     }
   };
 
+  const handleClearMusic = async () => {
+    if (!confirm('Are you sure you want to clear all music data? This will delete all artists, albums, songs, and playlists from the database.')) {
+      return;
+    }
+    
+    setMusicLoading(true);
+    setMusicMessage('');
+    try {
+      console.log('Music clear: starting request to /api/music/clear');
+      const res = await musicAPI.clearMusic();
+      console.log('Music clear: response', res);
+      if (res?.success) {
+        setMusicMessage('Music library cleared successfully. You can now scan to rebuild it.');
+      } else {
+        setMusicMessage(res?.error || 'Music clear failed.');
+      }
+    } catch (err) {
+      console.error('Music clear failed:', err);
+      setMusicMessage(err?.message || 'Music clear failed.');
+    } finally {
+      setMusicLoading(false);
+    }
+  };
+
   return (
     <div className={`modal-overlay ${open ? 'active' : ''}`} onClick={onClose}>
       <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
@@ -532,13 +556,23 @@ export function Settings({ open, onClose, onNavigate }) {
             <div className="settings-panel">
               <div className="settings-panel-header">
                 <h3>Music</h3>
-                <button
-                  onClick={handleMusicScan}
-                  disabled={musicLoading}
-                  className="save-button"
-                >
-                  {musicLoading ? 'Scanning…' : 'Scan Library'}
-                </button>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={handleMusicScan}
+                    disabled={musicLoading}
+                    className="save-button"
+                  >
+                    {musicLoading ? 'Scanning…' : 'Scan Library'}
+                  </button>
+                  <button
+                    onClick={handleClearMusic}
+                    disabled={musicLoading}
+                    className="save-button"
+                    style={{ background: '#dc3545' }}
+                  >
+                    Clear Library
+                  </button>
+                </div>
               </div>
               {musicMessage && <div className="settings-message info">{musicMessage}</div>}
               <p className="settings-help">
