@@ -37,7 +37,6 @@ function App() {
   const [micRestartKey, setMicRestartKey] = useState(0);
   const [activePage, setActivePage] = useState('dashboard');
   const [showLeft, setShowLeft] = useState(true);
-  const [showChat, setShowChat] = useState(true);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const { selectPersona } = usePersonas();
   const audioQueue = useAudioQueue();
@@ -304,9 +303,7 @@ function App() {
   // Compute dynamic grid columns based on visibility
   const gridColumns = (() => {
     const minLeft = Math.max(leftWidth, 480);
-    if (showLeft && showChat) return `minmax(480px, ${minLeft}px) 4px 1fr`;
-    if (showLeft && !showChat) return `minmax(480px, ${minLeft}px)`;
-    if (!showLeft && showChat) return `1fr`;
+    if (showLeft) return `minmax(480px, ${minLeft}px) 4px 1fr`;
     return `1fr`;
   })();
 
@@ -353,19 +350,16 @@ function App() {
               </div>
             </div>
           )}
-          {showLeft && showChat && <PanelResizer onResize={handleLeftResize} />}
-          {showChat && (
-            <div className="right-section">
-              <Chat 
-                sessionId={sessionId}
-                onAudioGenerated={setAudioUrl}
-                audioQueue={audioQueue}
-                aiFocusMode={aiFocusMode}
-                onMicClick={toggleAiFocus}
-                onCollapse={() => setShowChat(false)}
-              />
-            </div>
-          )}
+          {showLeft && <PanelResizer onResize={handleLeftResize} />}
+          <div className="right-section">
+            <Chat 
+              sessionId={sessionId}
+              onAudioGenerated={setAudioUrl}
+              audioQueue={audioQueue}
+              aiFocusMode={aiFocusMode}
+              onMicClick={toggleAiFocus}
+            />
+          </div>
         </div>
       )}
       {!showLeft && (
@@ -375,15 +369,6 @@ function App() {
           title="Show news and widgets"
         >
           ▶
-        </div>
-      )}
-      {!showChat && (
-        <div
-          className="collapse-toggle collapse-right"
-          onClick={() => setShowChat(true)}
-          title="Show chat"
-        >
-          ◀
         </div>
       )}
       <PersonaModal 

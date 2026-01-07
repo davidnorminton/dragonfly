@@ -3630,3 +3630,34 @@ body {
 .right-section .chat-input-wrapper {
   flex-shrink: 0;
 }
+
+/* Full height chat */
+.right-section {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-section > * {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chat-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.chat-input-wrapper {
+  flex-shrink: 0;
+}
