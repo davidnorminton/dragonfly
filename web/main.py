@@ -258,50 +258,65 @@ async def ai_ask_question(request: Request):
 async def ai_ask_question_audio(request: Request):
     """
     Direct AI question with audio response - bypasses router for faster response.
+    Can accept either a question (will call AI) or text (will skip AI and go straight to TTS).
     Returns audio blob.
     """
     try:
         payload = await request.json()
         question = payload.get("question", "")
+        text = payload.get("text", "")  # Pre-fetched text to skip AI call
         
-        if not question:
-            return JSONResponse(status_code=400, content={"error": "No question provided"})
-        
-        logger.info(f"[AI ASK AUDIO] Question: {question[:100]}...")
+        if not question and not text:
+            logger.error("[AI ASK AUDIO] No question or text provided")
+            return JSONResponse(status_code=400, content={"error": "No question or text provided"})
         
         import time
         start_time = time.time()
+        ai_time = 0
         
-        # Get AI response
-        from services.ai_service import AIService
-        ai = AIService()
+        # Get text - either from AI or from payload
+        if text:
+            logger.info(f"[AI ASK AUDIO] Using pre-fetched text, length={len(text)}")
+        else:
+            logger.info(f"[AI ASK AUDIO] Question: {question[:100]}...")
+            logger.info("[AI ASK AUDIO] Calling AIService")
+            from services.ai_service import AIService
+            ai = AIService()
+            
+            result = await ai.execute({"question": question})
+            
+            ai_time = time.time() - start_time
+            logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s, success={result.get('success')}")
+            
+            if not result.get("success"):
+                error_msg = result.get("error", "AI request failed")
+                logger.error(f"[AI ASK AUDIO] AI failed: {error_msg}")
+                return JSONResponse(status_code=500, content={"error": error_msg})
+            
+            text = result.get("result", "")
+            if not text:
+                logger.error("[AI ASK AUDIO] Empty AI response")
+                return JSONResponse(status_code=500, content={"error": "Empty AI response"})
         
-        result = await ai.execute({"question": question})
-        
-        ai_time = time.time() - start_time
-        logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s")
-        
-        if not result.get("success"):
-            return JSONResponse(status_code=500, content={"error": result.get("error", "AI request failed")})
-        
-        text = result.get("result", "")
-        if not text:
-            return JSONResponse(status_code=500, content={"error": "Empty AI response"})
+        logger.info(f"[AI ASK AUDIO] Text length={len(text)}")
         
         # Generate audio
+        logger.info("[AI ASK AUDIO] Loading persona config")
         persona_config = load_persona_config()
         fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
         voice_id = fish_cfg.get("voice_id")
         voice_engine = fish_cfg.get("voice_engine", "s1")
         
         if not voice_id:
-            logger.warning("[AI ASK AUDIO] No voice ID configured")
+            logger.error("[AI ASK AUDIO] No voice ID configured")
             return JSONResponse(status_code=500, content={"error": "TTS not configured"})
         
+        logger.info(f"[AI ASK AUDIO] Starting TTS with voice_id={voice_id}, engine={voice_engine}")
         tts_start = time.time()
-        logger.info("[AI ASK AUDIO] Starting TTS...")
         
+        from services.tts_service import TTSService
         tts = TTSService()
+        
         audio_bytes, _ = await tts.generate_audio(
             text,
             voice_id=voice_id,
@@ -329,7 +344,9 @@ async def ai_ask_question_audio(request: Request):
             return JSONResponse(status_code=500, content={"error": "TTS generation failed"})
             
     except Exception as e:
-        logger.error(f"[AI ASK AUDIO] Failed: {e}", exc_info=True)
+        logger.error(f"[AI ASK AUDIO] Exception: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 

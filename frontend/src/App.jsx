@@ -221,17 +221,18 @@ function App() {
               const textTime = Date.now() - startTime;
               console.log(`Text response received in ${textTime}ms`);
               
+              let responseText = '';
               if (textResp?.data?.answer) {
-                const responseText = textResp.data.answer;
+                responseText = textResp.data.answer;
                 setAiResponseText(responseText);
                 console.log('Displaying text response:', responseText.substring(0, 100) + '...');
               }
               
-              // Now get audio using direct AI endpoint
-              console.log('Requesting audio generation...');
+              // Now get audio - send the text we already have to skip AI call
+              console.log('Requesting audio generation with pre-fetched text...');
               const audioStartTime = Date.now();
               
-              const audioResp = await aiAPI.askQuestionAudio({ question: transcript });
+              const audioResp = await aiAPI.askQuestionAudio({ text: responseText });
               
               const audioResponseTime = Date.now() - audioStartTime;
               console.log(`Audio received in ${audioResponseTime}ms (total: ${Date.now() - startTime}ms)`);
