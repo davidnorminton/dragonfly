@@ -9,6 +9,7 @@ import asyncio
 import aiohttp
 import json
 import mimetypes
+import re
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -358,6 +359,45 @@ def _extract_album_art_from_mp3(mp3_path: Path, save_dir: Path) -> Optional[str]
         return None
 
 
+def _clean_song_title(title: str, artist: str = None) -> str:
+    """
+    Clean up song titles that have artist name and track number prefixes.
+    Examples:
+        "Green Day -06- Going to Pasalacqua" -> "Going to Pasalacqua"
+        "Artist Name-05-Song Title" -> "Song Title"
+        "-03- Song Name" -> "Song Name"
+    """
+    if not title:
+        return title
+    
+    # Pattern 1: "Artist Name -XX- Song Title" or "Artist Name-XX-Song Title"
+    if artist:
+        # Escape artist name for regex
+        artist_escaped = re.escape(artist)
+        # Try to match: Artist -XX- Title or Artist-XX-Title
+        pattern = rf'^{artist_escaped}\s*-\s*\d+\s*-\s*(.+)$'
+        match = re.match(pattern, title, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    
+    # Pattern 2: "-XX- Song Title" (no artist prefix)
+    pattern = r'^\s*-\s*\d+\s*-\s*(.+)$'
+    match = re.match(pattern, title)
+    if match:
+        return match.group(1).strip()
+    
+    # Pattern 3: "XX. Song Title" or "XX Song Title"
+    pattern = r'^\s*\d+[\.\s]+(.+)$'
+    match = re.match(pattern, title)
+    if match:
+        # Only apply if it looks like a track number (1-99)
+        potential_title = match.group(1).strip()
+        if title[0:2].strip().isdigit() and int(title[0:2].strip()) <= 99:
+            return potential_title
+    
+    return title
+
+
 def _extract_audio_meta(path: Path) -> Dict[str, Any]:
     """Extract audio metadata using mutagen; supports common formats with duration fallback."""
     meta: Dict[str, Any] = {
@@ -384,8 +424,12 @@ def _extract_audio_meta(path: Path) -> Dict[str, Any]:
             meta["channels"] = audio.info.channels
         try:
             tags = EasyID3(str(path))
-            meta["title"] = tags.get("title", [None])[0]
-            meta["artist"] = tags.get("artist", [None])[0]
+            raw_title = tags.get("title", [None])[0]
+            raw_artist = tags.get("artist", [None])[0]
+            
+            # Clean up the title if it has artist/track prefixes
+            meta["title"] = _clean_song_title(raw_title, raw_artist) if raw_title else None
+            meta["artist"] = raw_artist
             meta["album"] = tags.get("album", [None])[0]
             meta["genre"] = tags.get("genre", [None])[0]
             meta["year"] = tags.get("date", [None])[0] or tags.get("originaldate", [None])[0]
@@ -508,10 +552,24 @@ async def _persist_music(tree_songs: list):
                     )
                     session.add(song)
                 else:
-                    # DO NOT update title, track_number, or duration - preserve manual edits from Music Editor
-                    # Only update technical metadata that users wouldn't manually edit
-                    if song.title != song_title:
+                    # Check if the current DB title looks like it needs cleaning
+                    # (has artist/track prefix like "Green Day -06- Song Title")
+                    needs_cleaning = False
+                    if song.title:
+                        # Check for patterns like "Artist -XX- Title" or "-XX- Title"
+                        if re.search(r'-\s*\d+\s*-\s*', song.title):
+                            needs_cleaning = True
+                    
+                    # Update title only if it needs cleaning OR if it's empty
+                    if needs_cleaning or not song.title:
+                        if song.title != song_title:
+                            logger.info(f"Cleaning song title: '{song.title}' -> '{song_title}'")
+                            song.title = song_title
+                    elif song.title != song_title:
                         logger.debug(f"Song title differs (DB: '{song.title}', File: '{song_title}'). Preserving DB title.")
+                    
+                    # DO NOT update track_number or duration - preserve manual edits
+                    # Only update technical metadata that users wouldn't manually edit
                     song.bitrate = meta.get("bitrate")
                     song.sample_rate = meta.get("sample_rate")
                     song.channels = meta.get("channels")
