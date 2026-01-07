@@ -12,6 +12,8 @@ export function MusicEditor() {
   const [addingVideoTo, setAddingVideoTo] = useState(null);
   const [newVideo, setNewVideo] = useState({ videoId: '', title: '' });
   const [videoStatus, setVideoStatus] = useState('');
+  const [editingVideo, setEditingVideo] = useState(null);
+  const [editVideoForm, setEditVideoForm] = useState({ videoId: '', title: '' });
 
   useEffect(() => {
     loadData();
@@ -127,6 +129,46 @@ export function MusicEditor() {
     } catch (err) {
       setVideoStatus(`Error: ${err.message}`);
     }
+  };
+
+  const handleEditVideo = (artistId, video) => {
+    setEditingVideo({ artistId, originalVideoId: video.videoId });
+    setEditVideoForm({ videoId: video.videoId, title: video.title });
+  };
+
+  const handleSaveVideo = async (artistName) => {
+    if (!editVideoForm.videoId || !editVideoForm.title) {
+      setVideoStatus('Video ID and title are required');
+      return;
+    }
+
+    setVideoStatus('Saving...');
+    try {
+      const res = await musicAPI.updateArtistVideo(
+        artistName,
+        editingVideo.originalVideoId,
+        editVideoForm
+      );
+      if (res.success) {
+        setVideoStatus('✓ Saved');
+        setTimeout(() => {
+          setVideoStatus('');
+          setEditingVideo(null);
+          setEditVideoForm({ videoId: '', title: '' });
+          loadData();
+        }, 1000);
+      } else {
+        setVideoStatus(`Error: ${res.error}`);
+      }
+    } catch (err) {
+      setVideoStatus(`Error: ${err.message}`);
+    }
+  };
+
+  const handleCancelVideoEdit = () => {
+    setEditingVideo(null);
+    setEditVideoForm({ videoId: '', title: '' });
+    setVideoStatus('');
   };
 
   if (loading) {
@@ -359,23 +401,61 @@ export function MusicEditor() {
                     <div className="videos-list">
                       {artist.videos.map((video, idx) => (
                         <div key={idx} className="video-item">
-                          <div className="video-info">
-                            <strong>{video.title}</strong>
-                            <a
-                              href={`https://www.youtube.com/watch?v=${video.videoId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="video-url"
-                            >
-                              https://www.youtube.com/watch?v={video.videoId}
-                            </a>
-                          </div>
-                          <button
-                            className="delete-btn small"
-                            onClick={() => handleDeleteVideo(artist.name, video.videoId)}
-                          >
-                            Delete
-                          </button>
+                          {editingVideo?.artistId === artist.id && editingVideo?.originalVideoId === video.videoId ? (
+                            <div className="editor-form video-edit-form">
+                              <div className="form-row">
+                                <label>Video ID:</label>
+                                <input
+                                  type="text"
+                                  value={editVideoForm.videoId}
+                                  onChange={(e) => setEditVideoForm({ ...editVideoForm, videoId: e.target.value })}
+                                  placeholder="e.g., dQw4w9WgXcQ"
+                                />
+                              </div>
+                              <div className="form-row">
+                                <label>Title:</label>
+                                <input
+                                  type="text"
+                                  value={editVideoForm.title}
+                                  onChange={(e) => setEditVideoForm({ ...editVideoForm, title: e.target.value })}
+                                  placeholder="e.g., Song Name (Official Video)"
+                                />
+                              </div>
+                              <div className="form-actions">
+                                <button className="save-btn small" onClick={() => handleSaveVideo(artist.name)}>Save</button>
+                                <button className="cancel-btn small" onClick={handleCancelVideoEdit}>Cancel</button>
+                                {videoStatus && <span className="save-status small">{videoStatus}</span>}
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="video-info">
+                                <strong>{video.title}</strong>
+                                <a
+                                  href={`https://www.youtube.com/watch?v=${video.videoId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="video-url"
+                                >
+                                  https://www.youtube.com/watch?v={video.videoId}
+                                </a>
+                              </div>
+                              <div className="video-actions">
+                                <button
+                                  className="edit-btn small"
+                                  onClick={() => handleEditVideo(artist.id, video)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="delete-btn small"
+                                  onClick={() => handleDeleteVideo(artist.name, video.videoId)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>

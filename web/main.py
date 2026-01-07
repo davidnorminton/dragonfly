@@ -1876,6 +1876,62 @@ async def add_artist_video(req: VideoAdd):
         )
 
 
+class VideoUpdate(BaseModel):
+    artist: str
+    originalVideoId: str
+    videoId: str
+    title: str
+
+
+@app.put("/api/music/artist/video/update")
+async def update_artist_video(req: VideoUpdate):
+    """Update a video's ID and/or title."""
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await session.scalar(
+                select(MusicArtist).where(func.lower(MusicArtist.name) == req.artist.lower())
+            )
+            if not artist_row:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+            
+            if not artist_row.extra_metadata or not artist_row.extra_metadata.get("videos"):
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "No videos found"}
+                )
+            
+            # Find and update video
+            videos = artist_row.extra_metadata["videos"]
+            video_found = False
+            for video in videos:
+                if video.get("videoId") == req.originalVideoId:
+                    video["videoId"] = req.videoId
+                    video["title"] = req.title
+                    video_found = True
+                    break
+            
+            if not video_found:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Video not found"}
+                )
+            
+            artist_row.extra_metadata["videos"] = videos
+            flag_modified(artist_row, "extra_metadata")
+            await session.commit()
+            
+            return {"success": True, "message": "Video updated"}
+    except Exception as e:
+        logger.error(f"Error updating video: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
 class VideoDelete(BaseModel):
     artist: str
     videoId: str

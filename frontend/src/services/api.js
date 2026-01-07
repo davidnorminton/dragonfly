@@ -77,6 +77,7 @@ export const musicAPI = {
   updateAlbum: (id, data) => api.put('/music/album/update', null, { params: { album_id: id, ...data } }).then(res => res.data),
   updateSong: (id, data) => api.put('/music/song/update', null, { params: { song_id: id, ...data } }).then(res => res.data),
   addArtistVideo: (artist, video) => api.post('/music/artist/video/add', { artist, videoId: video.videoId, title: video.title }).then(res => res.data),
+  updateArtistVideo: (artist, originalVideoId, video) => api.put('/music/artist/video/update', { artist, originalVideoId, videoId: video.videoId, title: video.title }).then(res => res.data),
   deleteArtistVideo: (artist, videoId) => api.delete('/music/artist/video/delete', { data: { artist, videoId } }).then(res => res.data),
 };
 
