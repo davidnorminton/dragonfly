@@ -446,7 +446,7 @@ async def _persist_music(tree_songs: list):
                 album = album_res.scalars().first()
                 
                 # If not found by title, check if we have an existing song from the same album directory
-                # This handles cases where the album title changed in metadata
+                # This allows finding the album even if the user manually changed the title
                 if not album and item.get("album_dir"):
                     album_dir_pattern = f"{artist_name}/{item['album_dir']}/%"
                     existing_song_stmt = (
@@ -459,10 +459,9 @@ async def _persist_music(tree_songs: list):
                     existing_album_res = await session.execute(existing_song_stmt)
                     album = existing_album_res.scalars().first()
                     
-                    # If we found an album by directory but the title changed, update it
+                    # DO NOT update the title - preserve manual edits from Music Editor
                     if album and album.title != album_title:
-                        logger.info(f"Updating album title: '{album.title}' -> '{album_title}'")
-                        album.title = album_title
+                        logger.info(f"Found album by directory but title differs (DB: '{album.title}', File: '{album_title}'). Preserving DB title.")
                 
                 if not album:
                     album = MusicAlbum(
@@ -476,9 +475,12 @@ async def _persist_music(tree_songs: list):
                     session.add(album)
                     await session.flush()
                 else:
-                    album.year = year_val or album.year
+                    # DO NOT overwrite year or genre - preserve manual edits from Music Editor
+                    # Only fill in if not already set
+                    album.year = album.year or year_val
                     album.genre = album.genre or meta.get("genre")
-                    if item.get("album_image"):
+                    # Update cover path only if not set (preserve manual edits)
+                    if not album.cover_path and item.get("album_image"):
                         album.cover_path = item.get("album_image")
                     if meta:
                         album.extra_metadata = meta
@@ -506,16 +508,17 @@ async def _persist_music(tree_songs: list):
                     )
                     session.add(song)
                 else:
-                    song.title = song_title
-                    song.track_number = meta.get("track_number")
-                    song.disc_number = meta.get("disc_number")
-                    song.duration_seconds = meta.get("duration_seconds")
+                    # DO NOT update title, track_number, or duration - preserve manual edits from Music Editor
+                    # Only update technical metadata that users wouldn't manually edit
+                    if song.title != song_title:
+                        logger.debug(f"Song title differs (DB: '{song.title}', File: '{song_title}'). Preserving DB title.")
                     song.bitrate = meta.get("bitrate")
                     song.sample_rate = meta.get("sample_rate")
                     song.channels = meta.get("channels")
                     song.codec = meta.get("codec")
-                    song.genre = meta.get("genre")
-                    song.year = year_val
+                    # Update genre/year only if not already set
+                    song.genre = song.genre or meta.get("genre")
+                    song.year = song.year or year_val
                     song.extra_metadata = meta
             except Exception as e:
                 logger.error(f"Failed to persist song {item.get('path')}: {e}", exc_info=True)
