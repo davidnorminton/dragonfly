@@ -26,7 +26,7 @@ from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
 from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong
-from sqlalchemy import select, desc, func, or_
+from sqlalchemy import select, desc, func, or_, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
@@ -707,6 +707,31 @@ async def get_music_library():
             return {"success": False, "error": str(e)}
 
 
+@app.post("/api/music/clear")
+async def clear_music_library():
+    """
+    Clear all music data from the database (artists, albums, songs, playlists).
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # Delete all music data in correct order (child tables first)
+            await session.execute(delete(MusicPlaylistSong))
+            await session.execute(delete(MusicPlaylist))
+            await session.execute(delete(MusicSong))
+            await session.execute(delete(MusicAlbum))
+            await session.execute(delete(MusicArtist))
+            await session.commit()
+            
+            logger.info("Cleared all music data from database")
+            return {"success": True, "message": "All music data cleared"}
+    except Exception as e:
+        logger.error(f"Failed to clear music data: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
 @app.get("/api/music/scan")
 async def scan_music_library():
     """
@@ -749,6 +774,9 @@ async def scan_music_library():
     except Exception as e:
         logger.warning(f"Failed to load existing data: {e}")
 
+    # First pass: Group songs by directory structure and extract metadata
+    album_metadata = {}  # (artist_dir, album_dir) -> {"artist": "", "album": "", "first_song_meta": {}}
+    
     for root, _, files in os.walk(base_path):
         for f in files:
             suffix = Path(f).suffix.lower()
@@ -759,16 +787,16 @@ async def scan_music_library():
                     rel_img = full_image_path.relative_to(base_path)
                     parts_img = rel_img.parts
                     if len(parts_img) == 1 and full_image_path.suffix.lower() in image_exts:
-                        artist_name = parts_img[0]
+                        artist_dir = parts_img[0]
                         # Prioritize cover.jpg for artist images
                         if f.lower() == "cover.jpg":
-                            artist_images[artist_name] = str(rel_img)
-                        elif artist_name not in artist_images:
-                            # Only set if not already set (cover.jpg takes priority)
-                            artist_images[artist_name] = str(rel_img)
+                            artist_images[artist_dir] = str(rel_img)
+                        elif artist_dir not in artist_images:
+                            artist_images[artist_dir] = str(rel_img)
                 except Exception:
                     pass
                 continue
+                
             full_path = Path(root) / f
             try:
                 rel = full_path.relative_to(base_path)
@@ -776,27 +804,44 @@ async def scan_music_library():
                 if len(parts) < 3:
                     # Not in Artist/Album/Song; skip
                     continue
-                artist, album_dir = parts[0], parts[1]
-                artist_names_seen.add(artist)
-                song = Path(parts[-1]).stem
+                    
+                artist_dir, album_dir = parts[0], parts[1]
+                song_filename = Path(parts[-1]).stem
                 rel_path = str(full_path.relative_to(base_path))
                 
-                # Skip existing songs entirely - do NOT extract metadata or add to collected_songs
-                # This preserves any manual edits made in the Music Editor
+                # Skip existing songs
                 if rel_path in existing_song_paths:
                     logger.debug(f"Skipping existing song (already in database): {rel_path}")
                     continue
                 
-                # Only process NEW songs
+                # Extract metadata from the song
                 meta = _extract_audio_meta(full_path)
-                title_from_meta = meta.get("title") or song
-                album_title_from_meta = meta.get("album") or album_dir
+                title_from_meta = meta.get("title") or song_filename
                 
-                # Store the metadata album title (use first song's metadata album name)
-                if not tree[artist][album_dir]["title"]:
-                    tree[artist][album_dir]["title"] = album_title_from_meta
+                # On FIRST song in this album directory, capture artist and album names from metadata
+                album_key = (artist_dir, album_dir)
+                if album_key not in album_metadata:
+                    artist_from_meta = meta.get("artist") or artist_dir
+                    album_from_meta = meta.get("album") or album_dir
+                    logger.info(f"First song in album: Artist='{artist_from_meta}', Album='{album_from_meta}' (from {rel_path})")
+                    album_metadata[album_key] = {
+                        "artist": artist_from_meta,
+                        "album": album_from_meta,
+                        "year": meta.get("year"),
+                        "date": meta.get("date"),
+                        "genre": meta.get("genre")
+                    }
                 
-                tree[artist][album_dir]["songs"].append(
+                # Use the artist/album names from the first song's metadata
+                artist_name = album_metadata[album_key]["artist"]
+                album_name = album_metadata[album_key]["album"]
+                artist_names_seen.add(artist_name)
+                
+                # Add song to tree
+                if not tree[artist_name][album_name]["title"]:
+                    tree[artist_name][album_name]["title"] = album_name
+                    
+                tree[artist_name][album_name]["songs"].append(
                     {
                         "name": title_from_meta,
                         "path": rel_path,
@@ -804,20 +849,21 @@ async def scan_music_library():
                         "track_number": meta.get("track_number"),
                     }
                 )
-                # Capture year/date for album ordering
-                if meta.get("year") and not tree[artist][album_dir]["year"]:
-                    try:
-                        tree[artist][album_dir]["year"] = int(str(meta.get("year")).split("-")[0])
-                    except Exception:
-                        tree[artist][album_dir]["year"] = None
-                if meta.get("date") and not tree[artist][album_dir]["date"]:
-                    tree[artist][album_dir]["date"] = meta.get("date")
                 
-                # Only add new songs to collected_songs for database insertion
+                # Capture year/date for album (from first song)
+                if album_metadata[album_key]["year"] and not tree[artist_name][album_name]["year"]:
+                    try:
+                        tree[artist_name][album_name]["year"] = int(str(album_metadata[album_key]["year"]).split("-")[0])
+                    except Exception:
+                        pass
+                if album_metadata[album_key]["date"] and not tree[artist_name][album_name]["date"]:
+                    tree[artist_name][album_name]["date"] = album_metadata[album_key]["date"]
+                
+                # Add to collected songs for persistence
                 collected_songs.append(
                     {
-                        "artist": artist,
-                        "album": album_title_from_meta,
+                        "artist": artist_name,
+                        "album": album_name,
                         "album_dir": album_dir,
                         "title": title_from_meta,
                         "path": rel_path,
@@ -825,50 +871,66 @@ async def scan_music_library():
                         "meta": meta,
                     }
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Error processing {full_path}: {e}")
                 continue
 
         # Try to find an album cover in this directory if not already set
-        album_dir = Path(root)
+        current_dir = Path(root)
         rel_album = None
         try:
-          rel_album = album_dir.relative_to(base_path)
+          rel_album = current_dir.relative_to(base_path)
         except Exception:
           rel_album = None
         if rel_album and len(rel_album.parts) >= 2:
-            artist, album_dir_name = rel_album.parts[0], rel_album.parts[1]
-            if tree[artist][album_dir_name]["image"] is None:
-                for img in album_dir.iterdir():
-                    if img.is_file() and img.suffix.lower() in image_exts:
-                        rel_img = str(img.relative_to(base_path))
-                        tree[artist][album_dir_name]["image"] = rel_img
-                        # update collected_songs album_image for this album directory
-                        for cs in collected_songs:
-                            if cs["artist"] == artist and cs["album_dir"] == album_dir_name:
-                                cs["album_image"] = rel_img
-                        break
+            artist_dir, album_dir_name = rel_album.parts[0], rel_album.parts[1]
+            # Look up the actual artist/album names from metadata
+            album_key = (artist_dir, album_dir_name)
+            if album_key in album_metadata:
+                artist_name = album_metadata[album_key]["artist"]
+                album_name = album_metadata[album_key]["album"]
+                if tree[artist_name][album_name]["image"] is None:
+                    for img in current_dir.iterdir():
+                        if img.is_file() and img.suffix.lower() in image_exts:
+                            rel_img = str(img.relative_to(base_path))
+                            tree[artist_name][album_name]["image"] = rel_img
+                            # update collected_songs album_image for this album
+                            for cs in collected_songs:
+                                if cs["artist"] == artist_name and cs["album"] == album_name:
+                                    cs["album_image"] = rel_img
+                            break
 
     # Extract album covers from MP3 metadata or download from MusicBrainz
     logger.info("Checking for missing album covers...")
-    for artist, albums in tree.items():
-        for album_dir, album_data in albums.items():
+    for artist_name, albums in tree.items():
+        for album_name, album_data in albums.items():
             if album_data["image"] is None:
-                album_title = album_data.get("title") or album_dir
-                
                 # Skip cover extraction/download if album already has cover in database
-                if (artist, album_title) in existing_albums_with_covers:
-                    logger.debug(f"Skipping cover extraction for {artist} - {album_title} (already has cover in DB)")
+                if (artist_name, album_name) in existing_albums_with_covers:
+                    logger.debug(f"Skipping cover extraction for {artist_name} - {album_name} (already has cover in DB)")
                     continue
                 
-                album_path = base_path / artist / album_dir
+                # Find the directory path for this album from collected_songs
+                album_dir_path = None
+                for cs in collected_songs:
+                    if cs["artist"] == artist_name and cs["album"] == album_name:
+                        # Extract directory from path (e.g., "Artist Dir/Album Dir/song.mp3" -> "Artist Dir/Album Dir")
+                        song_path_parts = Path(cs["path"]).parts
+                        if len(song_path_parts) >= 2:
+                            album_dir_path = base_path / song_path_parts[0] / song_path_parts[1]
+                            break
+                
+                if not album_dir_path:
+                    logger.warning(f"Could not determine directory path for {artist_name} - {album_name}")
+                    continue
                 
                 # Try to extract from first MP3 in the album
-                logger.info(f"No cover image file for {artist} - {album_dir}, trying to extract from MP3...")
+                logger.info(f"No cover image file for {artist_name} - {album_name}, trying to extract from MP3...")
                 extracted_cover = None
                 for song in album_data["songs"]:
                     song_path = base_path / song["path"]
                     if song_path.exists():
-                        extracted_cover = _extract_album_art_from_mp3(song_path, album_path)
+                        extracted_cover = _extract_album_art_from_mp3(song_path, album_dir_path)
                         if extracted_cover:
                             logger.info(f"Successfully extracted cover art from {song_path.name}")
                             break
@@ -877,33 +939,46 @@ async def scan_music_library():
                     album_data["image"] = extracted_cover
                     # Update collected_songs with the new cover
                     for cs in collected_songs:
-                        if cs["artist"] == artist and cs["album_dir"] == album_dir:
+                        if cs["artist"] == artist_name and cs["album"] == album_name:
                             cs["album_image"] = extracted_cover
-                elif album_data["title"]:
+                elif album_name:
                     # If still no cover, try MusicBrainz as last resort
-                    logger.info(f"No embedded cover art, trying MusicBrainz for {artist} - {album_data['title']}...")
-                    downloaded_cover = await _download_album_cover(artist, album_data["title"], album_path)
+                    logger.info(f"No embedded cover art, trying MusicBrainz for {artist_name} - {album_name}...")
+                    downloaded_cover = await _download_album_cover(artist_name, album_name, album_dir_path)
                     if downloaded_cover:
                         album_data["image"] = downloaded_cover
                         # Update collected_songs with the new cover
                         for cs in collected_songs:
-                            if cs["artist"] == artist and cs["album_dir"] == album_dir:
+                            if cs["artist"] == artist_name and cs["album"] == album_name:
                                 cs["album_image"] = downloaded_cover
 
     artists_out = []
-    for artist, albums in tree.items():
+    for artist_name, albums in tree.items():
+        # Find the artist directory name from collected_songs to get the artist image
+        artist_dir = None
+        for cs in collected_songs:
+            if cs["artist"] == artist_name:
+                # Extract artist dir from path (e.g., "Artist Dir/Album Dir/song.mp3" -> "Artist Dir")
+                song_path_parts = Path(cs["path"]).parts
+                if len(song_path_parts) >= 1:
+                    artist_dir = song_path_parts[0]
+                    break
+        
         albums_out = []
-        for album_dir, album_data in albums.items():
+        for album_name, album_data in albums.items():
             albums_out.append(
                 {
-                    "name": album_data.get("title") or album_dir,  # Use metadata album title, fallback to directory name
+                    "name": album_name,  # Use metadata album name
                     "songs": album_data["songs"],
                     "image": album_data.get("image"),
                     "year": album_data.get("year"),
                     "date": album_data.get("date"),
                 }
             )
-        artists_out.append({"name": artist, "image": artist_images.get(artist), "albums": albums_out})
+        
+        # Use artist image from directory, fallback to None
+        artist_img = artist_images.get(artist_dir) if artist_dir else None
+        artists_out.append({"name": artist_name, "image": artist_img, "albums": albums_out})
 
     # Persist to DB
     try:
