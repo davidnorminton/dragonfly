@@ -76,6 +76,8 @@ export const musicAPI = {
   updateArtist: (id, data) => api.put('/music/artist/update', null, { params: { artist_id: id, ...data } }).then(res => res.data),
   updateAlbum: (id, data) => api.put('/music/album/update', null, { params: { album_id: id, ...data } }).then(res => res.data),
   updateSong: (id, data) => api.put('/music/song/update', null, { params: { song_id: id, ...data } }).then(res => res.data),
+  addArtistVideo: (artist, video) => api.post('/music/artist/video/add', { artist, videoId: video.videoId, title: video.title }).then(res => res.data),
+  deleteArtistVideo: (artist, videoId) => api.delete('/music/artist/video/delete', { data: { artist, videoId } }).then(res => res.data),
 };
 
 export const weatherAPI = {

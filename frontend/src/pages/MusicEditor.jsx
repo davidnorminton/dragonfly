@@ -9,6 +9,9 @@ export function MusicEditor() {
   const [editingItem, setEditingItem] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saveStatus, setSaveStatus] = useState('');
+  const [addingVideoTo, setAddingVideoTo] = useState(null);
+  const [newVideo, setNewVideo] = useState({ videoId: '', title: '' });
+  const [videoStatus, setVideoStatus] = useState('');
 
   useEffect(() => {
     loadData();
@@ -79,6 +82,51 @@ export function MusicEditor() {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
+  };
+
+  const handleDeleteVideo = async (artistName, videoId) => {
+    if (!confirm('Delete this video?')) return;
+    
+    setVideoStatus('Deleting...');
+    try {
+      const res = await musicAPI.deleteArtistVideo(artistName, videoId);
+      if (res.success) {
+        setVideoStatus('✓ Deleted');
+        setTimeout(() => {
+          setVideoStatus('');
+          loadData();
+        }, 1000);
+      } else {
+        setVideoStatus(`Error: ${res.error}`);
+      }
+    } catch (err) {
+      setVideoStatus(`Error: ${err.message}`);
+    }
+  };
+
+  const handleAddVideo = async (artistName) => {
+    if (!newVideo.videoId || !newVideo.title) {
+      setVideoStatus('Video ID and title are required');
+      return;
+    }
+
+    setVideoStatus('Adding...');
+    try {
+      const res = await musicAPI.addArtistVideo(artistName, newVideo);
+      if (res.success) {
+        setVideoStatus('✓ Added');
+        setTimeout(() => {
+          setVideoStatus('');
+          setAddingVideoTo(null);
+          setNewVideo({ videoId: '', title: '' });
+          loadData();
+        }, 1000);
+      } else {
+        setVideoStatus(`Error: ${res.error}`);
+      }
+    } catch (err) {
+      setVideoStatus(`Error: ${err.message}`);
+    }
   };
 
   if (loading) {
@@ -263,6 +311,78 @@ export function MusicEditor() {
                     )}
                   </div>
                 ))}
+                
+                <div className="editor-videos">
+                  <div className="videos-header">
+                    <strong>Videos</strong>
+                    <button
+                      className="add-video-btn"
+                      onClick={() => setAddingVideoTo(addingVideoTo === artist.id ? null : artist.id)}
+                    >
+                      {addingVideoTo === artist.id ? '− Cancel' : '+ Add Video'}
+                    </button>
+                  </div>
+
+                  {addingVideoTo === artist.id && (
+                    <div className="editor-form add-video-form">
+                      <div className="form-row">
+                        <label>Video ID:</label>
+                        <input
+                          type="text"
+                          value={newVideo.videoId}
+                          onChange={(e) => setNewVideo({ ...newVideo, videoId: e.target.value })}
+                          placeholder="e.g., dQw4w9WgXcQ (11 characters)"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Title:</label>
+                        <input
+                          type="text"
+                          value={newVideo.title}
+                          onChange={(e) => setNewVideo({ ...newVideo, title: e.target.value })}
+                          placeholder="e.g., Song Name (Official Video)"
+                        />
+                      </div>
+                      <div className="form-actions">
+                        <button className="save-btn" onClick={() => handleAddVideo(artist.name)}>Add Video</button>
+                        <button className="cancel-btn" onClick={() => {
+                          setAddingVideoTo(null);
+                          setNewVideo({ videoId: '', title: '' });
+                          setVideoStatus('');
+                        }}>Cancel</button>
+                        {videoStatus && <span className="save-status">{videoStatus}</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {artist.videos && artist.videos.length > 0 ? (
+                    <div className="videos-list">
+                      {artist.videos.map((video, idx) => (
+                        <div key={idx} className="video-item">
+                          <div className="video-info">
+                            <strong>{video.title}</strong>
+                            <a
+                              href={`https://www.youtube.com/watch?v=${video.videoId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="video-url"
+                            >
+                              https://www.youtube.com/watch?v={video.videoId}
+                            </a>
+                          </div>
+                          <button
+                            className="delete-btn small"
+                            onClick={() => handleDeleteVideo(artist.name, video.videoId)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="no-videos">No videos added. Click "Add Video" to add one.</div>
+                  )}
+                </div>
               </div>
             )}
           </div>

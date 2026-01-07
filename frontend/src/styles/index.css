@@ -3380,3 +3380,115 @@ body {
 .music-volume-slider:hover .music-volume-handle {
   opacity: 1;
 }
+
+/* Music Editor - Videos Section */
+.editor-videos {
+  margin-top: 24px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+}
+
+.videos-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.videos-header strong {
+  color: #fff;
+  font-size: 16px;
+}
+
+.add-video-btn {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+  border: 1px solid #3b82f6;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.add-video-btn:hover {
+  background: rgba(59, 130, 246, 0.3);
+}
+
+.add-video-form {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 16px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.videos-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.video-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.video-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.video-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.video-info strong {
+  color: #fff;
+  font-size: 14px;
+}
+
+.video-url {
+  color: #3b82f6;
+  font-size: 12px;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.video-url:hover {
+  text-decoration: underline;
+}
+
+.no-videos {
+  color: #9da7b8;
+  font-size: 14px;
+  padding: 16px;
+  text-align: center;
+}
+
+.delete-btn {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+.delete-btn.small {
+  padding: 4px 8px;
+  font-size: 12px;
+}

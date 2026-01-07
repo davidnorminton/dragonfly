@@ -1811,10 +1811,16 @@ async def get_music_editor_data():
                         "songs": songs_data,
                     })
                 
+                # Get videos from extra_metadata
+                videos = []
+                if artist.extra_metadata and artist.extra_metadata.get("videos"):
+                    videos = artist.extra_metadata["videos"]
+                
                 data.append({
                     "id": artist.id,
                     "name": artist.name,
                     "image_path": artist.image_path,
+                    "videos": videos,
                     "albums": albums_data,
                 })
             
@@ -1822,6 +1828,93 @@ async def get_music_editor_data():
         except Exception as e:
             logger.error(f"Failed to load editor data: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+
+
+class VideoAdd(BaseModel):
+    artist: str
+    videoId: str
+    title: str
+
+
+@app.post("/api/music/artist/video/add")
+async def add_artist_video(req: VideoAdd):
+    """Add a video to an artist manually."""
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await session.scalar(
+                select(MusicArtist).where(func.lower(MusicArtist.name) == req.artist.lower())
+            )
+            if not artist_row:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+            
+            # Initialize extra_metadata if needed
+            artist_row.extra_metadata = artist_row.extra_metadata or {}
+            videos = artist_row.extra_metadata.get("videos", [])
+            
+            # Check if video already exists
+            if any(v.get("videoId") == req.videoId for v in videos):
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Video already exists"}
+                )
+            
+            # Add new video
+            videos.append({"videoId": req.videoId, "title": req.title})
+            artist_row.extra_metadata["videos"] = videos
+            flag_modified(artist_row, "extra_metadata")
+            await session.commit()
+            
+            return {"success": True, "message": "Video added"}
+    except Exception as e:
+        logger.error(f"Error adding video: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
+class VideoDelete(BaseModel):
+    artist: str
+    videoId: str
+
+
+@app.delete("/api/music/artist/video/delete")
+async def delete_artist_video(req: VideoDelete):
+    """Delete a video from an artist."""
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await session.scalar(
+                select(MusicArtist).where(func.lower(MusicArtist.name) == req.artist.lower())
+            )
+            if not artist_row:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+            
+            if not artist_row.extra_metadata or not artist_row.extra_metadata.get("videos"):
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "No videos found"}
+                )
+            
+            # Remove video
+            videos = artist_row.extra_metadata["videos"]
+            videos = [v for v in videos if v.get("videoId") != req.videoId]
+            artist_row.extra_metadata["videos"] = videos
+            flag_modified(artist_row, "extra_metadata")
+            await session.commit()
+            
+            return {"success": True, "message": "Video deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting video: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
 
 
 def get_system_uptime() -> float:
