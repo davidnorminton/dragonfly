@@ -368,9 +368,12 @@ def _clean_song_title(title: str, artist: str = None) -> str:
         "-03- Song Name" -> "Song Name"
         "08. Lay Me Down" -> "Lay Me Down"
         "3. Hey Brother" -> "Hey Brother"
+        "08. - Song Title" -> "Song Title"
     """
     if not title:
         return title
+    
+    cleaned = title
     
     # Pattern 1: "Artist Name -XX- Song Title" or "Artist Name-XX-Song Title"
     if artist:
@@ -378,28 +381,33 @@ def _clean_song_title(title: str, artist: str = None) -> str:
         artist_escaped = re.escape(artist)
         # Try to match: Artist -XX- Title or Artist-XX-Title
         pattern = rf'^{artist_escaped}\s*-\s*\d+\s*-\s*(.+)$'
-        match = re.match(pattern, title, re.IGNORECASE)
+        match = re.match(pattern, cleaned, re.IGNORECASE)
         if match:
-            return match.group(1).strip()
+            cleaned = match.group(1).strip()
     
     # Pattern 2: "-XX- Song Title" (no artist prefix)
     pattern = r'^\s*-\s*\d+\s*-\s*(.+)$'
-    match = re.match(pattern, title)
+    match = re.match(pattern, cleaned)
     if match:
-        return match.group(1).strip()
+        cleaned = match.group(1).strip()
     
     # Pattern 3: "XX. Song Title" or "XX Song Title" (track number prefix)
     # Match 1-3 digit numbers followed by dot/space at the start
     pattern = r'^\s*(\d{1,3})[\.\s]+(.+)$'
-    match = re.match(pattern, title)
+    match = re.match(pattern, cleaned)
     if match:
         track_num = int(match.group(1))
         potential_title = match.group(2).strip()
         # Only clean if track number is reasonable (1-999)
         if 1 <= track_num <= 999 and len(potential_title) > 0:
-            return potential_title
+            cleaned = potential_title
     
-    return title
+    # Final cleanup: Remove any remaining leading/trailing dashes, spaces, dots
+    cleaned = re.sub(r'^[\s\-\.]+', '', cleaned)  # Remove leading spaces, dashes, dots
+    cleaned = re.sub(r'[\s\-\.]+$', '', cleaned)  # Remove trailing spaces, dashes, dots
+    cleaned = cleaned.strip()
+    
+    return cleaned if cleaned else title  # Return original if cleaning resulted in empty string
 
 
 def _extract_audio_meta(path: Path) -> Dict[str, Any]:
