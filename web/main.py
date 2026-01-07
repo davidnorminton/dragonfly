@@ -1103,25 +1103,33 @@ async def generate_music_popular(req: PopularRequest):
                 songs_data.append(item)
                 albums_map[album.title].append(item)
 
-            lines = [
-                f"You are selecting the most popular songs for artist '{artist_name}'.",
-                "Only choose songs that appear in the provided list. If you are unsure, skip it.",
-                'Return STRICT JSON: {"songs": [{"title": "song title", "album": "album title"}]} with at most 20 items.',
-                "Do not include songs not listed here.",
-                "Albums and songs we have:",
-            ]
+            # Build album/song list for AI
+            album_lines = []
             for album_title, tracks in albums_map.items():
                 sorted_tracks = sorted(tracks, key=lambda t: t.get("track_number") or 9999)
-                lines.append(f"- Album: {album_title}")
+                album_lines.append(f"- Album: {album_title}")
                 for t in sorted_tracks:
                     tn = t.get("track_number")
                     tn_str = f"{tn}. " if tn else ""
-                    lines.append(f"  - {tn_str}{t['title']}")
-            prompt = "\n".join(lines)
+                    album_lines.append(f"  - {tn_str}{t['title']}")
+            
+            system_prompt = """You are a music database API that returns ONLY valid JSON responses.
+Never include explanations, commentary, or additional text.
+Your response must be pure JSON that can be parsed directly."""
+
+            user_prompt = f"""Select the most popular songs for artist '{artist_name}'.
+
+Only choose songs that appear in the provided list. If you are unsure, skip it.
+
+Return JSON in this format: {{"songs": [{{"title": "song title", "album": "album title"}}]}}
+
+Select at most 20 of the most popular/well-known songs.
+
+Albums and songs available:
+""" + "\n".join(album_lines)
 
             ai = AIService()
-            ai.reload_persona_config()
-            ai_resp = await ai.execute({"question": prompt})
+            ai_resp = await ai.execute_with_system_prompt(user_prompt, system_prompt, max_tokens=2048)
             raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
             parsed = _extract_json_object(raw_answer) or {}
             popular_items = parsed.get("songs") if isinstance(parsed, dict) else None
@@ -1307,22 +1315,21 @@ async def generate_artist_discography(req: DiscographyRequest):
                 logger.info("Returning cached discography")
                 return {"success": True, "discography": artist_row.extra_metadata["discography"]}
 
-            # Generate discography using AI
-            prompt = f"""You are a music database API. Return ONLY valid JSON, no explanations, no commentary, no additional text.
+            # Generate discography using AI with default config (bypass persona)
+            system_prompt = """You are a music database API that returns ONLY valid JSON responses.
+Never include explanations, commentary, greetings, or additional text.
+Your response must be pure JSON that can be parsed directly."""
 
-Task: List all official studio albums by '{artist_name}' in chronological order.
+            user_prompt = f"""List all official studio albums by '{artist_name}' in chronological order.
 
-Rules:
-- Include ONLY official studio albums (no live albums, compilations, EPs, singles, or bootlegs)
-- Return valid JSON in this EXACT format (nothing else):
-{{"albums": [{{"year": 1977, "title": "Album Title"}}, {{"year": 1979, "title": "Another Album"}}]}}
+Include ONLY official studio albums (no live albums, compilations, EPs, singles, or bootlegs).
 
-CRITICAL: Your response must be ONLY the JSON object above. Do not include any explanation, greeting, or commentary. Just the JSON."""
+Return valid JSON in this EXACT format:
+{{"albums": [{{"year": 1977, "title": "Album Title"}}, {{"year": 1979, "title": "Another Album"}}]}}"""
 
-            logger.info(f"Sending prompt to AI:\n{prompt[:200]}...")
+            logger.info(f"Sending prompt to AI (bypassing persona):\n{user_prompt[:200]}...")
             ai = AIService()
-            ai.reload_persona_config()
-            ai_resp = await ai.execute({"question": prompt})
+            ai_resp = await ai.execute_with_system_prompt(user_prompt, system_prompt, max_tokens=2048)
             raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
             
             logger.info(f"AI Response (raw): {raw_answer[:500]}...")
@@ -1473,8 +1480,12 @@ async def generate_artist_videos(req: VideosRequest):
             if artist_row.extra_metadata and artist_row.extra_metadata.get("videos"):
                 return {"success": True, "videos": artist_row.extra_metadata["videos"]}
 
-            # Generate video list using AI
-            prompt = f"""List 6-8 official YouTube videos for '{artist_name}' that are DEFINITELY available worldwide.
+            # Generate video list using AI with default config (bypass persona)
+            system_prompt = """You are a music database API that returns ONLY valid JSON responses.
+Never include explanations, commentary, or additional text.
+Your response must be pure JSON that can be parsed directly."""
+
+            user_prompt = f"""List 6-8 official YouTube videos for '{artist_name}' that are DEFINITELY available worldwide.
 
 CRITICAL REQUIREMENTS - Only include videos that meet ALL of these:
 - From official VEVO channel (e.g., "ArtistVEVO") or verified artist channel
@@ -1490,7 +1501,7 @@ AVOID:
 - Country-specific content
 - Older videos that may have expired licenses
 
-Return ONLY a JSON object in this EXACT format (no other text):
+Return JSON in this EXACT format:
 {{
   "videos": [
     {{"videoId": "abc12345678", "title": "Song Name (Official Music Video)"}},
@@ -1498,12 +1509,10 @@ Return ONLY a JSON object in this EXACT format (no other text):
   ]
 }}
 
-Be conservative - better to return fewer videos that definitely work globally than include questionable ones.
-Return valid JSON only, no markdown, no explanation."""
+Be conservative - better to return fewer videos that definitely work globally than include questionable ones."""
 
             ai = AIService()
-            ai.reload_persona_config()
-            ai_resp = await ai.execute({"question": prompt})
+            ai_resp = await ai.execute_with_system_prompt(user_prompt, system_prompt, max_tokens=2048)
             raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
 
             # Try to extract JSON from response

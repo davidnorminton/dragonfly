@@ -63,6 +63,65 @@ class AIService(BaseService):
         """Reload the persona configuration (useful when persona is changed)."""
         self._load_persona_config()
     
+    async def execute_with_system_prompt(self, question: str, system_prompt: str, max_tokens: int = 1024) -> Dict[str, Any]:
+        """
+        Execute AI query with a custom system prompt, bypassing persona configuration.
+        Useful for API-style tasks that need specific formatting (like JSON responses).
+        
+        Args:
+            question: The user's question/prompt
+            system_prompt: Custom system prompt to use
+            max_tokens: Maximum tokens for response (default 1024)
+        
+        Returns:
+            Dict with 'answer' and other metadata
+        """
+        if not self.async_client:
+            return {
+                "answer": "AI service is not configured. Please add your Anthropic API key to config/api_keys.json",
+                "question": question,
+                "service": "ai_service",
+                "error": "no_api_key"
+            }
+        
+        try:
+            self.logger.info(f"Processing AI question with custom system prompt: {question[:100]}...")
+            
+            message = await self.async_client.messages.create(
+                model=settings.ai_model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[{
+                    "role": "user",
+                    "content": question
+                }]
+            )
+            
+            # Extract the response text
+            answer = ""
+            if message.content:
+                for content_block in message.content:
+                    if content_block.type == "text":
+                        answer += content_block.text
+            
+            self.logger.info(f"AI response generated (length: {len(answer)})")
+            
+            return {
+                "answer": answer,
+                "question": question,
+                "service": "ai_service",
+                "model": settings.ai_model
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calling Anthropic API: {e}", exc_info=True)
+            return {
+                "answer": f"Error: {str(e)}",
+                "question": question,
+                "service": "ai_service",
+                "error": str(e)
+            }
+    
     async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute AI service.
