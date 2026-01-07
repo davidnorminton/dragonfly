@@ -3549,3 +3549,84 @@ body {
 .edit-btn.small:hover {
   background: rgba(59, 130, 246, 0.3);
 }
+
+/* Dashboard Layout - Left Section with News and Widgets */
+.left-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.news-section {
+  flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.news-resizer {
+  height: 4px;
+  background: #2a2a3a;
+  cursor: row-resize;
+  position: relative;
+  user-select: none;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.news-resizer:hover,
+.news-resizer.resizing {
+  background: #3a3a4a;
+}
+
+.news-resizer::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 12px;
+}
+
+.widgets-section {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 200px;
+}
+
+.right-section {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Update main container for new layout */
+.main-container {
+  display: grid;
+  grid-template-columns: minmax(480px, 640px) 4px 1fr;
+  gap: 0;
+  padding: 0;
+  padding-bottom: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  height: calc(100vh - 48px);
+}
+
+/* Chat in right panel */
+.right-section .chat-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-section .chat-messages {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.right-section .chat-input-wrapper {
+  flex-shrink: 0;
+}

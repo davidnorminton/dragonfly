@@ -23,6 +23,8 @@ function App() {
   });
   const [audioUrl, setAudioUrl] = useState(null);
   const [leftWidth, setLeftWidth] = useState(600);
+  const [newsHeight, setNewsHeight] = useState(400);
+  const [newsResizing, setNewsResizing] = useState(false);
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiFocusMode, setAiFocusMode] = useState(false);
@@ -34,10 +36,7 @@ function App() {
   const [audioObj, setAudioObj] = useState(null);
   const [micRestartKey, setMicRestartKey] = useState(0);
   const [activePage, setActivePage] = useState('dashboard');
-  const [chatHeight, setChatHeight] = useState(340);
-  const [chatResizing, setChatResizing] = useState(false);
   const [showLeft, setShowLeft] = useState(true);
-  const [showCenter, setShowCenter] = useState(true);
   const [showChat, setShowChat] = useState(true);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const { selectPersona } = usePersonas();
@@ -60,19 +59,19 @@ function App() {
   }, [audioObj]);
 
   const handleLeftResize = (clientX) => {
-    const newWidth = Math.max(200, Math.min(600, clientX - 20));
+    const newWidth = Math.max(400, Math.min(800, clientX - 20));
     setLeftWidth(newWidth);
   };
 
-  // Chat resize handlers
+  // News resize handlers (vertical separator between news and widgets)
   useEffect(() => {
     const onMouseMove = (e) => {
-      if (!chatResizing) return;
-      const newHeight = Math.max(200, Math.min(600, window.innerHeight - e.clientY - 20));
-      setChatHeight(newHeight);
+      if (!newsResizing) return;
+      const newHeight = Math.max(200, Math.min(window.innerHeight - 300, e.clientY - 60));
+      setNewsHeight(newHeight);
     };
     const onMouseUp = () => {
-      if (chatResizing) setChatResizing(false);
+      if (newsResizing) setNewsResizing(false);
     };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
@@ -80,7 +79,7 @@ function App() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [chatResizing]);
+  }, [newsResizing]);
 
   const handleSwitchAI = () => {
     setPersonaModalOpen(true);
@@ -305,9 +304,9 @@ function App() {
   // Compute dynamic grid columns based on visibility
   const gridColumns = (() => {
     const minLeft = Math.max(leftWidth, 480);
-    if (showLeft && showCenter) return `minmax(480px, ${minLeft}px) 4px 1fr`;
-    if (showLeft && !showCenter) return `minmax(480px, ${minLeft}px)`;
-    if (!showLeft && showCenter) return `1fr`;
+    if (showLeft && showChat) return `minmax(480px, ${minLeft}px) 4px 1fr`;
+    if (showLeft && !showChat) return `minmax(480px, ${minLeft}px)`;
+    if (!showLeft && showChat) return `1fr`;
     return `1fr`;
   })();
 
@@ -336,58 +335,55 @@ function App() {
             gridTemplateColumns: gridColumns
           }}
         >
-          {showLeft && <LeftPanel />}
-          {showLeft && showCenter && <PanelResizer onResize={handleLeftResize} />}
-          {showCenter && (
-            <CenterPanel 
-              audioUrl={audioUrl} 
-              onAudioUrlChange={setAudioUrl}
-            />
+          {showLeft && (
+            <div className="left-section">
+              <div className="news-section" style={{ height: `${newsHeight}px` }}>
+                <CenterPanel 
+                  audioUrl={audioUrl} 
+                  onAudioUrlChange={setAudioUrl}
+                />
+              </div>
+              <div
+                className={`news-resizer ${newsResizing ? 'resizing' : ''}`}
+                onMouseDown={() => setNewsResizing(true)}
+                title="Drag to resize news"
+              />
+              <div className="widgets-section">
+                <LeftPanel />
+              </div>
+            </div>
           )}
-        </div>
-      )}
-      <div
-        className={`chat-resizer ${chatResizing ? 'resizing' : ''}`}
-        onMouseDown={() => setChatResizing(true)}
-        title="Drag to resize chat"
-      />
-      {showChat && (
-        <div className="chat-footer" style={{ height: `${chatHeight}px` }}>
-          <Chat 
-            sessionId={sessionId}
-            onAudioGenerated={setAudioUrl}
-            audioQueue={audioQueue}
-            aiFocusMode={aiFocusMode}
-            onMicClick={toggleAiFocus}
-            onCollapse={() => setShowChat(false)}
-          />
+          {showLeft && showChat && <PanelResizer onResize={handleLeftResize} />}
+          {showChat && (
+            <div className="right-section">
+              <Chat 
+                sessionId={sessionId}
+                onAudioGenerated={setAudioUrl}
+                audioQueue={audioQueue}
+                aiFocusMode={aiFocusMode}
+                onMicClick={toggleAiFocus}
+                onCollapse={() => setShowChat(false)}
+              />
+            </div>
+          )}
         </div>
       )}
       {!showLeft && (
         <div
           className="collapse-toggle collapse-left"
           onClick={() => setShowLeft(true)}
-          title="Show system widgets"
+          title="Show news and widgets"
         >
           ▶
         </div>
       )}
-      {!showCenter && (
-        <div
-          className="collapse-toggle collapse-right"
-          onClick={() => setShowCenter(true)}
-          title="Show news"
-        >
-          ◀
-        </div>
-      )}
       {!showChat && (
         <div
-          className="collapse-toggle collapse-bottom"
+          className="collapse-toggle collapse-right"
           onClick={() => setShowChat(true)}
           title="Show chat"
         >
-          ▲
+          ◀
         </div>
       )}
       <PersonaModal 
