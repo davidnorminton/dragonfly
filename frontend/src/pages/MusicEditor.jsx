@@ -55,13 +55,23 @@ export function MusicEditor() {
     
     setSaveStatus('Saving...');
     try {
+      // Clean the form data - remove empty strings to avoid validation errors
+      const cleanedData = {};
+      Object.keys(editForm).forEach(key => {
+        const value = editForm[key];
+        // Only include non-empty values, or explicitly include null/undefined
+        if (value !== '' && value !== null && value !== undefined) {
+          cleanedData[key] = value;
+        }
+      });
+      
       let res;
       if (editingItem.type === 'artist') {
-        res = await musicAPI.updateArtist(editingItem.id, editForm);
+        res = await musicAPI.updateArtist(editingItem.id, cleanedData);
       } else if (editingItem.type === 'album') {
-        res = await musicAPI.updateAlbum(editingItem.id, editForm);
+        res = await musicAPI.updateAlbum(editingItem.id, cleanedData);
       } else if (editingItem.type === 'song') {
-        res = await musicAPI.updateSong(editingItem.id, editForm);
+        res = await musicAPI.updateSong(editingItem.id, cleanedData);
       }
       
       if (res.success) {
