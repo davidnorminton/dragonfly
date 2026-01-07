@@ -818,22 +818,22 @@ async def scan_music_library():
                 meta = _extract_audio_meta(full_path)
                 title_from_meta = meta.get("title") or song_filename
                 
-                # On FIRST song in this album directory, capture artist and album names from metadata
+                # On FIRST song in this album directory, capture album name from metadata
+                # Artist name comes from directory
                 album_key = (artist_dir, album_dir)
                 if album_key not in album_metadata:
-                    artist_from_meta = meta.get("artist") or artist_dir
                     album_from_meta = meta.get("album") or album_dir
-                    logger.info(f"First song in album: Artist='{artist_from_meta}', Album='{album_from_meta}' (from {rel_path})")
+                    logger.info(f"First song in album: Artist='{artist_dir}' (directory), Album='{album_from_meta}' (metadata) (from {rel_path})")
                     album_metadata[album_key] = {
-                        "artist": artist_from_meta,
+                        "artist": artist_dir,  # Use directory name for artist
                         "album": album_from_meta,
                         "year": meta.get("year"),
                         "date": meta.get("date"),
                         "genre": meta.get("genre")
                     }
                 
-                # Use the artist/album names from the first song's metadata
-                artist_name = album_metadata[album_key]["artist"]
+                # Use artist from directory, album from metadata
+                artist_name = artist_dir
                 album_name = album_metadata[album_key]["album"]
                 artist_names_seen.add(artist_name)
                 
@@ -954,16 +954,7 @@ async def scan_music_library():
 
     artists_out = []
     for artist_name, albums in tree.items():
-        # Find the artist directory name from collected_songs to get the artist image
-        artist_dir = None
-        for cs in collected_songs:
-            if cs["artist"] == artist_name:
-                # Extract artist dir from path (e.g., "Artist Dir/Album Dir/song.mp3" -> "Artist Dir")
-                song_path_parts = Path(cs["path"]).parts
-                if len(song_path_parts) >= 1:
-                    artist_dir = song_path_parts[0]
-                    break
-        
+        # artist_name is the directory name, so we can look it up directly
         albums_out = []
         for album_name, album_data in albums.items():
             albums_out.append(
@@ -976,8 +967,8 @@ async def scan_music_library():
                 }
             )
         
-        # Use artist image from directory, fallback to None
-        artist_img = artist_images.get(artist_dir) if artist_dir else None
+        # Use artist image from directory (artist_name is the directory name)
+        artist_img = artist_images.get(artist_name)
         artists_out.append({"name": artist_name, "image": artist_img, "albums": albums_out})
 
     # Persist to DB
