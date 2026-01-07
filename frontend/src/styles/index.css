@@ -1782,28 +1782,28 @@ body {
 }
 
 .ai-focus-mic {
-  font-size: 96px;
   width: 160px;
   height: 160px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #7f5af0 0%, #9a4dff 50%, #ff4d4d 100%);
-  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(127, 90, 240, 0.7);
-  color: #fff;
-  animation: pulseMic 2.4s ease-in-out infinite;
+  background: transparent;
   cursor: pointer;
+  position: relative;
 }
 
 .ai-focus-mic.off {
-  background: radial-gradient(circle at 30% 30%, #3a3a45, #1c1c22);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55), 0 0 8px rgba(80, 80, 90, 0.6);
-  animation: none;
+  filter: none;
 }
 
 .ai-focus-mic.active {
-  animation: pulseMic 2.4s ease-in-out infinite;
+  animation: subtlePulse 2.4s ease-in-out infinite;
+}
+
+@keyframes subtlePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
 }
 
 .ai-focus-status {
@@ -1826,11 +1826,6 @@ body {
   text-align: center;
 }
 
-@keyframes pulseMic {
-  0% { transform: scale(1); box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(127, 90, 240, 0.7); }
-  50% { transform: scale(1.05); box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 50px rgba(127, 90, 240, 0.9); }
-  100% { transform: scale(1); box-shadow: 0 15px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(127, 90, 240, 0.7); }
-}
 
 @keyframes fadeInOverlay {
   from { opacity: 0; }

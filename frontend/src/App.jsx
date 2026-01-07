@@ -11,6 +11,7 @@ import { useAudioQueue } from './hooks/useAudioQueue';
 import { routerAPI } from './services/api';
 import { MusicPage } from './pages/Music';
 import { MusicEditor } from './pages/MusicEditor';
+import { WaveformMic } from './components/WaveformMic';
 import './styles/index.css';
 
 function App() {
@@ -393,15 +394,7 @@ function App() {
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
             title="Start microphone"
           >
-            <span className="mic-icon-svg mic-icon-large" aria-hidden="true">
-              <svg viewBox="0 0 64 64" role="presentation">
-                <circle cx="32" cy="32" r="30" fill="#0a0a0f" stroke="#16c782" strokeWidth="4" />
-                <rect x="26" y="18" width="12" height="22" rx="6" fill="#ffffff" />
-                <rect x="24" y="38" width="16" height="4" rx="2" fill="#16c782" />
-                <line x1="32" y1="42" x2="32" y2="50" stroke="#16c782" strokeWidth="4" strokeLinecap="round" />
-                <line x1="22" y1="50" x2="42" y2="50" stroke="#16c782" strokeWidth="4" strokeLinecap="round" />
-              </svg>
-            </span>
+            <WaveformMic status={micStatus} />
           </div>
           <div className="ai-focus-status">
             {micStatus === 'listening' && 'Listening...'}
