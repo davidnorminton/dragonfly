@@ -1296,6 +1296,131 @@ Include only official studio albums, not live albums, compilations, or EPs. Be a
         )
 
 
+@app.get("/api/music/artist/videos")
+async def get_artist_videos(artist: str):
+    """
+    Retrieve cached YouTube videos for an artist.
+    """
+    artist_name = artist.strip()
+    if not artist_name:
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": "artist is required"}
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await session.scalar(
+                select(MusicArtist).where(func.lower(MusicArtist.name) == artist_name.lower())
+            )
+            if not artist_row:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+
+            # Return cached videos if they exist
+            if artist_row.extra_metadata and artist_row.extra_metadata.get("videos"):
+                return {"success": True, "videos": artist_row.extra_metadata["videos"]}
+            else:
+                return {"success": True, "videos": None}
+    except Exception as e:
+        logger.error(f"Error fetching videos for '{artist_name}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
+class VideosRequest(BaseModel):
+    artist: str
+
+
+@app.post("/api/music/artist/videos")
+async def generate_artist_videos(req: VideosRequest):
+    """
+    Use AI to generate a list of official YouTube videos for the artist.
+    Stores the list in artist.extra_metadata.videos and returns it.
+    """
+    artist_name = req.artist.strip()
+    if not artist_name:
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": "artist is required"}
+        )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            artist_row = await _ensure_artist_in_db(session, artist_name)
+            if not artist_row:
+                logger.warning(f"Artist '{artist_name}' not found in database")
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Artist not found"}
+                )
+
+            # Check if we already have videos cached
+            if artist_row.extra_metadata and artist_row.extra_metadata.get("videos"):
+                return {"success": True, "videos": artist_row.extra_metadata["videos"]}
+
+            # Generate video list using AI
+            prompt = f"""List 8-10 official YouTube videos for the band/artist '{artist_name}'. Include their most popular music videos, live performances, or official content.
+
+For each video, provide the YouTube video ID (the part after "watch?v=" in the URL) and a short title.
+
+Return ONLY a JSON array with this exact format:
+{{"videos": [{{"videoId": "dQw4w9WgXcQ", "title": "Song Name (Official Video)"}}, {{"videoId": "abcdefghijk", "title": "Another Song (Live)"}}]}}
+
+IMPORTANT: Provide REAL YouTube video IDs for actual videos by this artist. The video IDs should be 11 characters long."""
+
+            ai = AIService()
+            ai.reload_persona_config()
+            ai_resp = await ai.execute({"question": prompt})
+            raw_answer = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
+
+            # Try to extract JSON from response
+            parsed = _extract_json_object(raw_answer) or {}
+            videos_list = parsed.get("videos") if isinstance(parsed, dict) else None
+
+            if not videos_list or not isinstance(videos_list, list):
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "Failed to generate videos list"}
+                )
+
+            # Validate video IDs (should be 11 characters)
+            validated_videos = []
+            for video in videos_list:
+                if isinstance(video, dict) and "videoId" in video and "title" in video:
+                    video_id = str(video["videoId"]).strip()
+                    # YouTube video IDs are typically 11 characters
+                    if len(video_id) >= 8:  # Allow some flexibility
+                        validated_videos.append({
+                            "videoId": video_id,
+                            "title": video["title"]
+                        })
+
+            if not validated_videos:
+                return JSONResponse(
+                    status_code=200,
+                    content={"success": False, "error": "No valid videos found"}
+                )
+
+            # Store in database
+            artist_row.extra_metadata = artist_row.extra_metadata or {}
+            artist_row.extra_metadata["videos"] = validated_videos
+            flag_modified(artist_row, "extra_metadata")
+            await session.commit()
+
+            return {"success": True, "videos": validated_videos}
+    except Exception as e:
+        logger.error(f"Error generating videos for '{artist_name}': {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
 async def _ensure_playlist_tables():
     # Ensure playlist tables exist (lightweight guard)
     async with engine.begin() as conn:

@@ -26,6 +26,10 @@ export function MusicPage({ searchQuery = '' }) {
   const [discographyMap, setDiscographyMap] = useState({});
   const [discographyLoading, setDiscographyLoading] = useState(false);
   const [discographyError, setDiscographyError] = useState('');
+  const [videosMap, setVideosMap] = useState({});
+  const [videosLoading, setVideosLoading] = useState(false);
+  const [videosError, setVideosError] = useState('');
+  const [selectedVideo, setSelectedVideo] = useState(null);
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [playlistModalName, setPlaylistModalName] = useState('');
   const [playlistModalExisting, setPlaylistModalExisting] = useState('');
@@ -737,6 +741,44 @@ export function MusicPage({ searchQuery = '' }) {
     }
   };
 
+  const fetchVideos = async (artistName) => {
+    if (!artistName) return;
+    setVideosError('');
+    setVideosLoading(true);
+    try {
+      const res = await musicAPI.getVideos(artistName);
+      if (res.success) {
+        if (res.videos) {
+          setVideosMap((prev) => ({ ...prev, [artistName]: res.videos }));
+        }
+      } else {
+        setVideosError(res.error || 'Failed to load videos');
+      }
+    } catch (e) {
+      setVideosError(e?.message || 'Failed to load videos');
+    } finally {
+      setVideosLoading(false);
+    }
+  };
+
+  const handleGenerateVideos = async () => {
+    if (!selectedArtist) return;
+    setVideosError('');
+    setVideosLoading(true);
+    try {
+      const res = await musicAPI.generateVideos(selectedArtist);
+      if (res.success) {
+        setVideosMap((prev) => ({ ...prev, [selectedArtist]: res.videos || [] }));
+      } else {
+        setVideosError(res.error || 'Failed to generate videos');
+      }
+    } catch (e) {
+      setVideosError(e?.message || 'Failed to generate videos');
+    } finally {
+      setVideosLoading(false);
+    }
+  };
+
   const guessArtistDirectoryFromSongs = (artist) => {
     const firstSongPath = artist?.albums?.[0]?.songs?.[0]?.path;
     if (!firstSongPath) return null;
@@ -951,6 +993,7 @@ export function MusicPage({ searchQuery = '' }) {
     fetchPopular(selectedArtist);
     fetchAbout(selectedArtist);
     fetchDiscography(selectedArtist);
+    fetchVideos(selectedArtist);
   }, [selectedArtist, viewMode]);
 
   const handleAlbumSelect = (artistName, albumName) => {
@@ -1548,6 +1591,42 @@ export function MusicPage({ searchQuery = '' }) {
                           {discographyError && <div className="music-error-inline">{discographyError}</div>}
                         </div>
                       )}
+                      
+                      {selectedArtist && (
+                        <div className="album-section videos-section">
+                          <div className="album-section-title">Videos</div>
+                          {videosMap[selectedArtist] ? (
+                            <div className="videos-grid">
+                              {videosMap[selectedArtist].map((video, idx) => (
+                                <div key={idx} className="video-card" onClick={() => setSelectedVideo(video)}>
+                                  <div className="video-thumbnail">
+                                    <img 
+                                      src={`https://img.youtube.com/vi/${video.videoId}/mqdefault.jpg`} 
+                                      alt={video.title}
+                                    />
+                                    <div className="video-play-overlay">
+                                      <svg width="48" height="48" viewBox="0 0 24 24" fill="white">
+                                        <path d="M8 5v14l11-7z"/>
+                                      </svg>
+                                    </div>
+                                  </div>
+                                  <div className="video-title">{video.title}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <button 
+                              className="about-generate-btn" 
+                              onClick={handleGenerateVideos}
+                              disabled={videosLoading}
+                            >
+                              {videosLoading ? 'Generating...' : 'Generate Video List'}
+                            </button>
+                          )}
+                          {videosError && <div className="music-error-inline">{videosError}</div>}
+                        </div>
+                      )}
+                      
                       {!sortedAlbums.length && <div className="music-empty">Select an artist to view albums</div>}
                     </>
                   )}
@@ -1559,6 +1638,23 @@ export function MusicPage({ searchQuery = '' }) {
       </div>
 
       <div className="music-bottom-spacer" />
+      
+      {selectedVideo && (
+        <div className="video-modal-overlay" onClick={() => setSelectedVideo(null)}>
+          <div className="video-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="video-close" onClick={() => setSelectedVideo(null)}>✕</button>
+            <iframe
+              width="100%"
+              height="100%"
+              src={`https://www.youtube.com/embed/${selectedVideo.videoId}?autoplay=1`}
+              title={selectedVideo.title}
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      )}
       <div className="music-player-footer">
         <div className="music-player-left">
           <div className="music-controls-row">
