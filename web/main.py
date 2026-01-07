@@ -238,20 +238,25 @@ async def ai_ask_question_stream(request: Request):
                 start_time = time.time()
                 first_chunk_time = None
                 full_text = []
+                chunk_count = 0
+                
+                logger.info(f"[AI ASK STREAM] 🚀 Starting text stream...")
                 
                 async for text_chunk in ai.async_stream_execute({"question": question}):
+                    chunk_count += 1
                     if first_chunk_time is None:
                         first_chunk_time = time.time() - start_time
-                        logger.info(f"[AI ASK STREAM] First chunk in {first_chunk_time:.2f}s")
+                        logger.info(f"[AI ASK STREAM] ⚡ First chunk in {first_chunk_time:.2f}s")
                     full_text.append(text_chunk)
                     # Send as server-sent events format
                     yield f"data: {json.dumps({'chunk': text_chunk})}\n\n"
                 
                 total_time = time.time() - start_time
-                logger.info(f"[AI ASK STREAM] Complete in {total_time:.2f}s, length: {len(''.join(full_text))}")
+                final_text = ''.join(full_text)
+                logger.info(f"[AI ASK STREAM] ✅ Complete - Time: {total_time:.2f}s, Chunks: {chunk_count}, Length: {len(final_text)}")
                 
                 # Send final event with complete text
-                yield f"data: {json.dumps({'done': True, 'full_text': ''.join(full_text)})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'full_text': final_text})}\n\n"
                 
             except Exception as e:
                 logger.error(f"[AI ASK STREAM] Error: {e}", exc_info=True)
@@ -467,33 +472,46 @@ async def ai_ask_question_audio_fast(request: Request):
         
         import time
         start_time = time.time()
-        logger.info(f"[AI FAST] Starting fast pipeline for: {(question or text)[:50]}...")
+        logger.info(f"[AI FAST] ⏱️  START - Question: {(question or text)[:50]}...")
         
         # Get text - either from AI or from payload
+        ai_time = 0
         if not text:
+            ai_start = time.time()
+            logger.info(f"[AI FAST] 🤖 Calling AI service...")
+            
             from services.ai_service import AIService
             ai = AIService()
             result = await ai.execute({"question": question})
             
+            ai_time = time.time() - ai_start
+            
             if result.get("error"):
+                logger.error(f"[AI FAST] ❌ AI error after {ai_time:.2f}s: {result.get('error')}")
                 return JSONResponse(status_code=500, content={"error": result.get("error")})
             
             text = result.get("answer", "")
             if not text:
+                logger.error(f"[AI FAST] ❌ Empty AI response after {ai_time:.2f}s")
                 return JSONResponse(status_code=500, content={"error": "Empty AI response"})
             
-            ai_time = time.time() - start_time
-            logger.info(f"[AI FAST] AI done in {ai_time:.2f}s")
+            logger.info(f"[AI FAST] ✅ AI complete in {ai_time:.2f}s, text length: {len(text)}")
+        else:
+            logger.info(f"[AI FAST] 📝 Using pre-fetched text, length: {len(text)}")
         
         # Generate audio with fastest engine
+        logger.info(f"[AI FAST] 🎙️  Loading TTS config...")
         persona_config = load_persona_config()
         fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
         voice_id = fish_cfg.get("voice_id")
         
         if not voice_id:
+            logger.error(f"[AI FAST] ❌ No voice ID configured")
             return JSONResponse(status_code=500, content={"error": "TTS not configured"})
         
         tts_start = time.time()
+        logger.info(f"[AI FAST] 🔊 Starting TTS (engine: s1-mini)...")
+        
         from services.tts_service import TTSService
         tts = TTSService()
         
@@ -504,10 +522,12 @@ async def ai_ask_question_audio_fast(request: Request):
             voice_engine="s1-mini"  # Fastest engine
         )
         
+        tts_time = time.time() - tts_start
+        
         if audio_bytes:
             total_time = time.time() - start_time
-            tts_time = time.time() - tts_start
-            logger.info(f"[AI FAST] Complete - TTS: {tts_time:.2f}s, Total: {total_time:.2f}s, Size: {len(audio_bytes)}")
+            logger.info(f"[AI FAST] ✅ TTS complete in {tts_time:.2f}s, audio size: {len(audio_bytes):,} bytes")
+            logger.info(f"[AI FAST] 🏁 TOTAL TIME: {total_time:.2f}s (AI: {ai_time if not text else 0:.2f}s + TTS: {tts_time:.2f}s)")
             return Response(
                 content=audio_bytes,
                 media_type="audio/mpeg",
