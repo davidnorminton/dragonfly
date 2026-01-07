@@ -235,7 +235,7 @@ async def ai_ask_question(request: Request):
         import time
         start_time = time.time()
         
-        result = await ai.async_execute({"question": question})
+        result = await ai.execute({"question": question})
         
         elapsed = time.time() - start_time
         logger.info(f"[AI ASK] Response in {elapsed:.2f}s")
@@ -276,7 +276,7 @@ async def ai_ask_question_audio(request: Request):
         from services.ai_service import AIService
         ai = AIService()
         
-        result = await ai.async_execute({"question": question})
+        result = await ai.execute({"question": question})
         
         ai_time = time.time() - start_time
         logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s")
