@@ -1208,13 +1208,12 @@ async def generate_music_popular(req: PopularRequest):
                             content={"success": False, "error": "Artist not found", "artists": artist_names},
                         )
 
-            # Clear existing popular songs cache to force fresh generation
+            # Check if we already have popular songs cached - return them if so
             if artist_row.extra_metadata and artist_row.extra_metadata.get("popular_songs"):
-                logger.info(f"Clearing existing popular songs cache for '{artist_name}'")
-                artist_row.extra_metadata.pop("popular_songs", None)
-                flag_modified(artist_row, "extra_metadata")
-                await session.commit()
+                logger.info(f"Returning existing popular songs cache for '{artist_name}'")
+                return {"success": True, "popular": artist_row.extra_metadata["popular_songs"]}
 
+            # Generate new popular songs if not cached
             result = await session.execute(
                 select(MusicSong, MusicAlbum)
                 .join(MusicAlbum, MusicSong.album_id == MusicAlbum.id)
@@ -1349,12 +1348,10 @@ async def generate_artist_about(req: AboutRequest):
                     content={"success": False, "error": "Artist not found"}
                 )
 
-            # Clear existing about info cache to force fresh generation
+            # Check if we already have about info cached - return it if so
             if artist_row.extra_metadata and artist_row.extra_metadata.get("about"):
-                logger.info(f"Clearing existing about info cache for '{artist_name}'")
-                artist_row.extra_metadata.pop("about", None)
-                flag_modified(artist_row, "extra_metadata")
-                await session.commit()
+                logger.info(f"Returning existing about info cache for '{artist_name}'")
+                return {"success": True, "about": artist_row.extra_metadata["about"]}
 
             # Generate about info using AI
             prompt = f"Write a concise summary about the band/artist '{artist_name}' in 250 words or less. Include their musical style, notable achievements, and influence. Be factual and informative."
@@ -1450,12 +1447,10 @@ async def generate_artist_discography(req: DiscographyRequest):
             
             logger.info(f"Artist found: {artist_row.name} (id={artist_row.id})")
 
-            # Clear existing discography cache to force fresh generation
+            # Check if we already have discography cached - return it if so
             if artist_row.extra_metadata and artist_row.extra_metadata.get("discography"):
-                logger.info(f"Clearing existing discography cache for '{artist_name}'")
-                artist_row.extra_metadata.pop("discography", None)
-                flag_modified(artist_row, "extra_metadata")
-                await session.commit()
+                logger.info(f"Returning existing discography cache for '{artist_name}'")
+                return {"success": True, "discography": artist_row.extra_metadata["discography"]}
 
             # Generate discography using AI with default config (bypass persona)
             system_prompt = """You are a music database API that returns ONLY valid JSON responses.
@@ -1682,12 +1677,10 @@ async def generate_artist_videos(req: VideosRequest):
                     content={"success": False, "error": "Artist not found"}
                 )
 
-            # Clear existing videos cache to force fresh generation
+            # Check if we already have videos cached - return them if so
             if artist_row.extra_metadata and artist_row.extra_metadata.get("videos"):
-                logger.info(f"Clearing existing videos cache for '{artist_name}'")
-                artist_row.extra_metadata.pop("videos", None)
-                flag_modified(artist_row, "extra_metadata")
-                await session.commit()
+                logger.info(f"Returning existing videos cache for '{artist_name}'")
+                return {"success": True, "videos": artist_row.extra_metadata["videos"]}
 
             # Generate video list using AI with default config (bypass persona)
             system_prompt = """You are a music database API that returns ONLY valid JSON responses.
