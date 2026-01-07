@@ -368,14 +368,26 @@ def _clean_song_title(title: str, artist: str = None) -> str:
         "-03- Song Name" -> "Song Name"
         "08. Lay Me Down" -> "Lay Me Down"
         "3. Hey Brother" -> "Hey Brother"
-        "08. - Song Title" -> "Song Title"
+        "03-metallica-devils_dance" -> "Devils Dance"
+        "10-artist_name-song_title" -> "Song Title"
     """
     if not title:
         return title
     
     cleaned = title
     
-    # Pattern 1: "Artist Name -XX- Song Title" or "Artist Name-XX-Song Title"
+    # Pattern 1: "XX-artistname-song_title" or "XX-artist_name-song_title" (lowercase, underscores)
+    # Example: "03-metallica-devils_dance" -> "devils_dance"
+    pattern = r'^\s*\d{1,3}-[^-]+-(.+)$'
+    match = re.match(pattern, cleaned)
+    if match:
+        cleaned = match.group(1).strip()
+        # Replace underscores with spaces
+        cleaned = cleaned.replace('_', ' ')
+        # Capitalize each word
+        cleaned = ' '.join(word.capitalize() for word in cleaned.split())
+    
+    # Pattern 2: "Artist Name -XX- Song Title" or "Artist Name-XX-Song Title"
     if artist:
         # Escape artist name for regex
         artist_escaped = re.escape(artist)
@@ -385,13 +397,13 @@ def _clean_song_title(title: str, artist: str = None) -> str:
         if match:
             cleaned = match.group(1).strip()
     
-    # Pattern 2: "-XX- Song Title" (no artist prefix)
+    # Pattern 3: "-XX- Song Title" (no artist prefix)
     pattern = r'^\s*-\s*\d+\s*-\s*(.+)$'
     match = re.match(pattern, cleaned)
     if match:
         cleaned = match.group(1).strip()
     
-    # Pattern 3: "XX. Song Title" or "XX Song Title" (track number prefix)
+    # Pattern 4: "XX. Song Title" or "XX Song Title" (track number prefix)
     # Match 1-3 digit numbers followed by dot/space at the start
     pattern = r'^\s*(\d{1,3})[\.\s]+(.+)$'
     match = re.match(pattern, cleaned)
@@ -565,11 +577,13 @@ async def _persist_music(tree_songs: list):
                     session.add(song)
                 else:
                     # Check if the current DB title looks like it needs cleaning
-                    # (has artist/track prefix like "Green Day -06- Song Title" or "08. Song Title")
+                    # (has artist/track prefix like "Green Day -06- Song Title", "08. Song Title", or "03-metallica-song_title")
                     needs_cleaning = False
                     if song.title:
-                        # Check for patterns like "Artist -XX- Title", "-XX- Title", or "XX. Title"
-                        if re.search(r'-\s*\d+\s*-\s*', song.title) or re.match(r'^\s*\d{1,3}[\.\s]+', song.title):
+                        # Check for various bad patterns
+                        if (re.search(r'-\s*\d+\s*-\s*', song.title) or 
+                            re.match(r'^\s*\d{1,3}[\.\s]+', song.title) or
+                            re.match(r'^\s*\d{1,3}-[^-]+-', song.title)):
                             needs_cleaning = True
                     
                     # Update title only if it needs cleaning OR if it's empty
@@ -1552,8 +1566,16 @@ async def cleanup_song_titles():
             
             cleaned_count = 0
             for song in songs:
-                # Check if title needs cleaning (has -XX- pattern or XX. pattern)
-                if song.title and (re.search(r'-\s*\d+\s*-\s*', song.title) or re.match(r'^\s*\d{1,3}[\.\s]+', song.title)):
+                # Check if title needs cleaning (has various bad patterns)
+                needs_cleaning = False
+                if song.title:
+                    # Pattern: "-XX-" or "XX." or "XX-artistname-title"
+                    if (re.search(r'-\s*\d+\s*-\s*', song.title) or 
+                        re.match(r'^\s*\d{1,3}[\.\s]+', song.title) or
+                        re.match(r'^\s*\d{1,3}-[^-]+-', song.title)):
+                        needs_cleaning = True
+                
+                if needs_cleaning:
                     # Get the artist name for cleaning
                     artist_result = await session.execute(
                         select(MusicArtist).where(MusicArtist.id == song.artist_id)
