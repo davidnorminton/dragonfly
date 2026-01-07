@@ -238,16 +238,23 @@ async def ai_ask_question(request: Request):
         result = await ai.execute({"question": question})
         
         elapsed = time.time() - start_time
-        logger.info(f"[AI ASK] Response in {elapsed:.2f}s")
+        logger.info(f"[AI ASK] Response in {elapsed:.2f}s, has_answer={bool(result.get('answer'))}")
         
-        if result.get("success"):
+        # AIService returns {"answer": "...", "question": "...", "service": "..."} or {"error": "..."}
+        if result.get("error"):
+            logger.error(f"[AI ASK] Error from AI service: {result.get('error')}")
+            return {"success": False, "error": result.get("error", "AI request failed")}
+        
+        answer = result.get("answer", "")
+        if answer:
             return {
                 "success": True,
-                "answer": result.get("result", ""),
+                "answer": answer,
                 "time": elapsed
             }
         else:
-            return {"success": False, "error": result.get("error", "AI request failed")}
+            logger.error("[AI ASK] No answer in AI response")
+            return {"success": False, "error": "No answer returned from AI"}
             
     except Exception as e:
         logger.error(f"[AI ASK] Failed: {e}", exc_info=True)
@@ -286,14 +293,15 @@ async def ai_ask_question_audio(request: Request):
             result = await ai.execute({"question": question})
             
             ai_time = time.time() - start_time
-            logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s, success={result.get('success')}")
+            logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s, has_answer={bool(result.get('answer'))}")
             
-            if not result.get("success"):
+            # AIService returns {"answer": "...", "question": "...", "service": "..."} or {"error": "..."}
+            if result.get("error"):
                 error_msg = result.get("error", "AI request failed")
                 logger.error(f"[AI ASK AUDIO] AI failed: {error_msg}")
                 return JSONResponse(status_code=500, content={"error": error_msg})
             
-            text = result.get("result", "")
+            text = result.get("answer", "")
             if not text:
                 logger.error("[AI ASK AUDIO] Empty AI response")
                 return JSONResponse(status_code=500, content={"error": "Empty AI response"})
