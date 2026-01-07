@@ -8,7 +8,7 @@ import { PersonaModal } from './components/PersonaModal';
 import { Settings } from './components/Settings';
 import { usePersonas } from './hooks/usePersonas';
 import { useAudioQueue } from './hooks/useAudioQueue';
-import { routerAPI } from './services/api';
+import { routerAPI, aiAPI } from './services/api';
 import { MusicPage } from './pages/Music';
 import { MusicEditor } from './pages/MusicEditor';
 import { WaveformMic } from './components/WaveformMic';
@@ -28,7 +28,7 @@ function App() {
   const [newsResizing, setNewsResizing] = useState(false);
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [aiFocusMode, setAiFocusMode] = useState(false);
+  const [aiFocusActive, setAiFocusActive] = useState(false);
   const [micStream, setMicStream] = useState(null);
   const [micStatus, setMicStatus] = useState('idle'); // idle | listening | processing | playing | error
   const [micError, setMicError] = useState('');
@@ -37,6 +37,7 @@ function App() {
   const [aiResponseText, setAiResponseText] = useState(''); // Display AI response text immediately
   const [audioObj, setAudioObj] = useState(null);
   const [micRestartKey, setMicRestartKey] = useState(0);
+  const [aiFocusMode, setAiFocusMode] = useState('question'); // 'question' or 'task'
   const [activePage, setActivePage] = useState('dashboard');
   const [showLeft, setShowLeft] = useState(true);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
@@ -91,12 +92,12 @@ function App() {
     setPersonaModalOpen(false);
   };
 
-  const toggleAiFocus = () => setAiFocusMode((prev) => !prev);
+  const toggleAiFocus = () => setAiFocusActive((prev) => !prev);
 
   const beginListening = () => {
     // Ensure overlay is open
-    if (!aiFocusMode) {
-      setAiFocusMode(true);
+    if (!aiFocusActive) {
+      setAiFocusActive(true);
     }
     // Only start if not already capturing/playing
     if (!['listening', 'processing', 'playing'].includes(micStatus)) {
@@ -203,64 +204,48 @@ function App() {
           });
         }
         if (data.success) {
-          const routedParsed = data.router_parsed;
-          const routedRaw = data.router_answer;
-          const routedError = data.router_error;
-          const fallback = data.transcript || '';
-          const routerDisplay =
-            (routedParsed && (routedParsed.value || routedParsed.type || JSON.stringify(routedParsed))) ||
-            (routedRaw && routedRaw.trim()) ||
-            (routedError && `Router error: ${routedError}`) ||
-            '(no router output)';
-          console.log('Router display:', routerDisplay, 'Transcript:', fallback);
-          // Route the parsed decision to backend for actions/tts
-          if (data.router_parsed && data.router_parsed.type && data.router_parsed.value) {
+          const transcript = data.transcript || '';
+          console.log('Transcript:', transcript);
+          
+          // Handle based on AI focus mode
+          if (aiFocusMode === 'question') {
+            // Direct AI question mode - bypass router entirely
             try {
+              console.log('[QUESTION MODE] Sending directly to AI...');
+              const startTime = Date.now();
+              
               // First, get the text response immediately for display
               console.log('Requesting text response...');
-              const textStartTime = Date.now();
+              const textResp = await aiAPI.askQuestion({ question: transcript });
               
-              const textResp = await routerAPI.route({
-                type: data.router_parsed.type,
-                value: data.router_parsed.value,
-                mode: 'qa',
-              });
-              
-              const textTime = Date.now() - textStartTime;
+              const textTime = Date.now() - startTime;
               console.log(`Text response received in ${textTime}ms`);
               
-              if (textResp?.data?.success) {
-                const responseText = textResp.data.result || textResp.data.answer || '';
+              if (textResp?.data?.answer) {
+                const responseText = textResp.data.answer;
                 setAiResponseText(responseText);
                 console.log('Displaying text response:', responseText.substring(0, 100) + '...');
               }
               
-              // Now stream the audio response
-              console.log('Requesting streaming audio...');
+              // Now get audio using direct AI endpoint
+              console.log('Requesting audio generation...');
               const audioStartTime = Date.now();
               
-              const routeResp = await routerAPI.routeStream({
-                type: data.router_parsed.type,
-                value: data.router_parsed.value,
-                mode: 'qa',
-                ai_mode: true,
-              });
+              const audioResp = await aiAPI.askQuestionAudio({ question: transcript });
               
               const audioResponseTime = Date.now() - audioStartTime;
-              console.log(`Audio response received in ${audioResponseTime}ms (total: ${Date.now() - textStartTime}ms)`);
+              console.log(`Audio received in ${audioResponseTime}ms (total: ${Date.now() - startTime}ms)`);
               
-              const blob = routeResp?.data;
-              if (blob && blob.type && blob.type.startsWith('audio/')) {
+              const blob = audioResp?.data;
+              if (blob && blob.size > 0) {
                 console.log('Audio blob received, size:', blob.size);
                 const url = URL.createObjectURL(blob);
                 const audio = new Audio(url);
                 setAudioObj(audio);
                 
-                // Set to playing as soon as we have audio
                 console.log('Setting status to playing');
                 setMicStatus('playing');
                 
-                // Handle audio events
                 audio.oncanplaythrough = () => {
                   console.log('Audio ready to play through');
                 };
@@ -268,51 +253,54 @@ function App() {
                 audio.onended = () => {
                   console.log('Audio ended, resetting to idle');
                   setMicStatus('idle');
-                  setAiResponseText(''); // Clear text when audio finishes
+                  setAiResponseText('');
                 };
                 
                 audio.onerror = (err) => {
                   console.error('Audio playback error:', err, audio.error);
                   setMicStatus('idle');
-                  setAiResponseText(''); // Clear text on error
+                  setAiResponseText('');
                 };
                 
-                // Start playback
                 try {
                   await audio.play();
-                  const playStartTime = Date.now() - textStartTime;
+                  const playStartTime = Date.now() - startTime;
                   console.log(`Audio playback started in ${playStartTime}ms from initial request`);
                 } catch (err) {
                   console.error('Audio play failed:', err);
                   setMicStatus('idle');
                 }
-              } else if (blob) {
-                // Try to parse JSON error/success message
-                try {
-                  const textBody = await blob.text();
-                  console.log('Router route JSON/text response:', textBody);
-                } catch (e) {
-                  console.log('Router route non-audio response:', blob);
-                }
-                setMicStatus('idle');
               } else {
-                console.log('No blob in response');
+                console.log('No audio in response');
                 setMicStatus('idle');
               }
             } catch (err) {
-              console.error('Router route failed:', err);
+              console.error('Direct AI question failed:', err);
               setMicStatus('idle');
-              setAiResponseText(''); // Clear text on error
+              setAiResponseText('');
             }
+          } else {
+            // Task mode - use router (to be implemented)
+            console.log('[TASK MODE] Using router...');
+            const routedParsed = data.router_parsed;
+            const routedRaw = data.router_answer;
+            const routedError = data.router_error;
+            const fallback = transcript;
+            const routerDisplay =
+              (routedParsed && (routedParsed.value || routedParsed.type || JSON.stringify(routedParsed))) ||
+              (routedRaw && routedRaw.trim()) ||
+              (routedError && `Router error: ${routedError}`) ||
+              '(no router output)';
+            console.log('Router display:', routerDisplay);
+            
+            // For now, just show a message that task mode isn't implemented yet
+            setAiResponseText('Task mode is not yet implemented. Please use Question mode.');
+            setMicStatus('idle');
           }
 
           // Keep transcript/router info only in console (no UI)
           setTranscript('');
           setRouterText('');
-          // Don't reset to idle here - let audio.onended handle it
-          // if (micStatus !== 'playing') {
-          //   setMicStatus('idle');
-          // }
         } else {
           // Stay in listening mode on no transcript/error
           console.warn('Transcription failed or empty; continuing to listen', data.error);
@@ -326,7 +314,7 @@ function App() {
         setMicError(err?.message || 'Transcription failed');
       }
     };
-    if (aiFocusMode && micStatus === 'listening') {
+    if (aiFocusActive && micStatus === 'listening') {
       startMic();
     } else {
       // stop mic
@@ -354,7 +342,7 @@ function App() {
       }
     };
     // Depend on micRestartKey to allow restarting listening after retries
-  }, [aiFocusMode, micRestartKey, micStatus]);
+  }, [aiFocusActive, micRestartKey, micStatus]);
 
   // Compute dynamic grid columns based on visibility
   const gridColumns = (() => {
@@ -364,7 +352,7 @@ function App() {
   })();
 
   return (
-    <div className={`app-shell ${aiFocusMode ? 'ai-focus' : ''}`}>
+    <div className={`app-shell ${aiFocusActive ? 'ai-focus' : ''}`}>
       <TopBar 
         onSwitchAI={handleSwitchAI}
         onSettingsClick={() => setSettingsOpen(true)}
@@ -412,7 +400,7 @@ function App() {
               sessionId={sessionId}
               onAudioGenerated={setAudioUrl}
               audioQueue={audioQueue}
-              aiFocusMode={aiFocusMode}
+              aiFocusMode={aiFocusActive}
               onMicClick={toggleAiFocus}
             />
           </div>
@@ -437,7 +425,7 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         onNavigate={(page) => setActivePage(page)}
       />
-      {aiFocusMode && (
+      {aiFocusActive && (
         <div className="ai-focus-overlay">
           <div
             className={`ai-focus-mic ${
@@ -457,6 +445,22 @@ function App() {
             {micStatus === 'processing' && 'Transcribing...'}
             {micStatus === 'playing' && 'Playing response...'}
             {micStatus === 'idle' && 'Tap mic to start'}
+          </div>
+          <div className="ai-focus-mode-toggle">
+            <button
+              className={aiFocusMode === 'question' ? 'active' : ''}
+              onClick={() => setAiFocusMode('question')}
+              disabled={micStatus !== 'idle'}
+            >
+              Question
+            </button>
+            <button
+              className={aiFocusMode === 'task' ? 'active' : ''}
+              onClick={() => setAiFocusMode('task')}
+              disabled={micStatus !== 'idle'}
+            >
+              Task
+            </button>
           </div>
           {aiResponseText && (
             <div className="ai-response-text">

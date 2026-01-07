@@ -1813,6 +1813,41 @@ body {
   min-height: 20px;
 }
 
+.ai-focus-mode-toggle {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  justify-content: center;
+}
+
+.ai-focus-mode-toggle button {
+  padding: 8px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ai-focus-mode-toggle button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.ai-focus-mode-toggle button.active {
+  background: rgba(22, 199, 130, 0.2);
+  border-color: rgba(22, 199, 130, 0.5);
+  color: #16c782;
+  font-weight: 600;
+}
+
+.ai-focus-mode-toggle button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ai-response-text {
   margin-top: 2rem;
   padding: 1.5rem;

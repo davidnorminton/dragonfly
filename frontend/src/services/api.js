@@ -56,6 +56,11 @@ export const routerAPI = {
   routeStream: (payload) => api.post('/router/route-stream', payload, { responseType: 'blob' }),
 };
 
+export const aiAPI = {
+  askQuestion: (payload) => api.post('/ai/ask', payload).then(res => res.data),
+  askQuestionAudio: (payload) => api.post('/ai/ask-audio', payload, { responseType: 'blob' }),
+};
+
 export const musicAPI = {
   getLibrary: () => api.get('/music/library').then(res => res.data),
   scanMusic: () => api.get('/music/scan').then(res => res.data),

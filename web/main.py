@@ -214,6 +214,125 @@ nohup python -m uvicorn web.main:app --host 0.0.0.0 --port 1337 > /tmp/dragonfly
         raise HTTPException(status_code=500, detail="Failed to schedule restart")
 
 
+@app.post("/api/ai/ask")
+async def ai_ask_question(request: Request):
+    """
+    Direct AI question endpoint - bypasses router for faster response.
+    Returns text-only response.
+    """
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        
+        if not question:
+            return {"success": False, "error": "No question provided"}
+        
+        logger.info(f"[AI ASK] Question: {question[:100]}...")
+        
+        from services.ai_service import AIService
+        ai = AIService()
+        
+        import time
+        start_time = time.time()
+        
+        result = await ai.async_execute({"question": question})
+        
+        elapsed = time.time() - start_time
+        logger.info(f"[AI ASK] Response in {elapsed:.2f}s")
+        
+        if result.get("success"):
+            return {
+                "success": True,
+                "answer": result.get("result", ""),
+                "time": elapsed
+            }
+        else:
+            return {"success": False, "error": result.get("error", "AI request failed")}
+            
+    except Exception as e:
+        logger.error(f"[AI ASK] Failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/ai/ask-audio")
+async def ai_ask_question_audio(request: Request):
+    """
+    Direct AI question with audio response - bypasses router for faster response.
+    Returns audio blob.
+    """
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        
+        if not question:
+            return JSONResponse(status_code=400, content={"error": "No question provided"})
+        
+        logger.info(f"[AI ASK AUDIO] Question: {question[:100]}...")
+        
+        import time
+        start_time = time.time()
+        
+        # Get AI response
+        from services.ai_service import AIService
+        ai = AIService()
+        
+        result = await ai.async_execute({"question": question})
+        
+        ai_time = time.time() - start_time
+        logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s")
+        
+        if not result.get("success"):
+            return JSONResponse(status_code=500, content={"error": result.get("error", "AI request failed")})
+        
+        text = result.get("result", "")
+        if not text:
+            return JSONResponse(status_code=500, content={"error": "Empty AI response"})
+        
+        # Generate audio
+        persona_config = load_persona_config()
+        fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+        voice_id = fish_cfg.get("voice_id")
+        voice_engine = fish_cfg.get("voice_engine", "s1")
+        
+        if not voice_id:
+            logger.warning("[AI ASK AUDIO] No voice ID configured")
+            return JSONResponse(status_code=500, content={"error": "TTS not configured"})
+        
+        tts_start = time.time()
+        logger.info("[AI ASK AUDIO] Starting TTS...")
+        
+        tts = TTSService()
+        audio_bytes, _ = await tts.generate_audio(
+            text,
+            voice_id=voice_id,
+            voice_engine=voice_engine,
+            save_to_file=False
+        )
+        
+        tts_time = time.time() - tts_start
+        total_time = time.time() - start_time
+        
+        if audio_bytes:
+            logger.info(f"[AI ASK AUDIO] Complete - AI: {ai_time:.2f}s, TTS: {tts_time:.2f}s, Total: {total_time:.2f}s, Size: {len(audio_bytes)} bytes")
+            return Response(
+                content=audio_bytes,
+                media_type="audio/mpeg",
+                headers={
+                    "X-AI-Time": f"{ai_time:.2f}",
+                    "X-TTS-Time": f"{tts_time:.2f}",
+                    "X-Total-Time": f"{total_time:.2f}",
+                    "Cache-Control": "no-cache",
+                }
+            )
+        else:
+            logger.error("[AI ASK AUDIO] TTS returned no audio")
+            return JSONResponse(status_code=500, content={"error": "TTS generation failed"})
+            
+    except Exception as e:
+        logger.error(f"[AI ASK AUDIO] Failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.post("/api/router/route-stream")
 async def router_route_stream(request: Request):
     """
