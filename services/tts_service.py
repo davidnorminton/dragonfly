@@ -92,6 +92,7 @@ class TTSService:
     async def generate_audio_stream(self, text_stream, voice_id: str, voice_engine: str = "s1"):
         """
         Generate audio from streaming text using Fish Audio API.
+        Collects text by sentences and generates audio chunks.
         Yields audio chunks as they are generated.
         
         Args:
@@ -109,16 +110,42 @@ class TTSService:
         try:
             logger.info(f"Starting streaming TTS with Fish Audio (voice_id: {voice_id}, backend: {voice_engine})")
             
-            async with AsyncWebSocketSession(apikey=self.fish_api_key) as session:
-                request = TTSRequest(
-                    text="",  # Empty - text comes from stream
-                    reference_id=voice_id,
-                    format="mp3"
-                )
+            accumulated_text = ""
+            sentence_endings = ('.', '!', '?', '\n')
+            min_chunk_size = 100  # Minimum characters before sending to TTS
+            
+            async for text_chunk in text_stream:
+                accumulated_text += text_chunk
                 
-                # Stream audio chunks as they are generated
-                async for audio_chunk in session.tts(request, text_stream, backend=voice_engine):
-                    yield audio_chunk
+                # Check if we have a complete sentence or enough text
+                should_generate = False
+                last_sentence_end = -1
+                
+                for i, char in enumerate(accumulated_text):
+                    if char in sentence_endings:
+                        last_sentence_end = i
+                
+                # Generate audio if we have a complete sentence and enough text
+                if last_sentence_end > 0 and last_sentence_end >= min_chunk_size:
+                    # Extract the complete sentence(s)
+                    text_to_generate = accumulated_text[:last_sentence_end + 1].strip()
+                    accumulated_text = accumulated_text[last_sentence_end + 1:].strip()
+                    
+                    if text_to_generate:
+                        logger.info(f"[TTS STREAM] Generating audio for {len(text_to_generate)} chars")
+                        # Generate audio using simple HTTP method (more reliable)
+                        audio_bytes = await self.generate_audio_simple(text_to_generate, voice_id, voice_engine)
+                        if audio_bytes:
+                            logger.info(f"[TTS STREAM] Generated {len(audio_bytes)} bytes")
+                            yield audio_bytes
+            
+            # Generate audio for any remaining text
+            if accumulated_text.strip():
+                logger.info(f"[TTS STREAM] Generating audio for final {len(accumulated_text)} chars")
+                audio_bytes = await self.generate_audio_simple(accumulated_text.strip(), voice_id, voice_engine)
+                if audio_bytes:
+                    logger.info(f"[TTS STREAM] Generated final {len(audio_bytes)} bytes")
+                    yield audio_bytes
                     
         except Exception as e:
             logger.error(f"Error in streaming TTS: {e}", exc_info=True)

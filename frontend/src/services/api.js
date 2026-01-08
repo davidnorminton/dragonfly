@@ -105,7 +105,13 @@ export const aiAPI = {
   },
   askQuestionAudioStream: (payload) => api.post('/ai/ask-audio-stream', payload, { responseType: 'blob' }),
   askQuestionAudioFast: (payload) => api.post('/ai/ask-audio-fast', payload, { responseType: 'blob' }),
-  getFillerAudio: (persona) => api.get('/ai/filler-audio', { params: persona ? { persona } : {}, responseType: 'blob' }),
+  getFillerAudio: (persona) => api.get('/ai/filler-audio', { 
+    params: { 
+      ...(persona ? { persona } : {}),
+      _t: Date.now() // Cache buster
+    }, 
+    responseType: 'blob' 
+  }),
 };
 
 export const musicAPI = {

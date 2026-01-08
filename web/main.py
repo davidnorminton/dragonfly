@@ -288,36 +288,48 @@ async def get_filler_audio(persona: Optional[str] = None):
         
         # Load persona config to get filler audio paths
         if not persona:
-            persona_config = load_persona_config()
             persona = get_current_persona_name()
+            persona_config = load_persona_config(persona)
+            logger.info(f"[FILLER] 🎭 Using current persona: {persona}")
         else:
             persona_config = load_persona_config(persona)
+            logger.info(f"[FILLER] 🎭 Using specified persona: {persona}")
         
         if not persona_config or "filler_audio" not in persona_config:
+            logger.error(f"[FILLER] ❌ No filler audio configured for persona: {persona}")
             return JSONResponse(status_code=404, content={"error": "No filler audio configured for this persona"})
         
         filler_paths = persona_config.get("filler_audio", [])
         if not filler_paths:
+            logger.error(f"[FILLER] ❌ No filler audio paths found for persona: {persona}")
             return JSONResponse(status_code=404, content={"error": "No filler audio files found"})
+        
+        logger.info(f"[FILLER] 📋 Available filler paths: {filler_paths}")
         
         # Pick a random filler audio
         selected_path = random.choice(filler_paths)
+        logger.info(f"[FILLER] 🎲 Randomly selected: {selected_path}")
         
         # Convert relative path to absolute (path is relative to config directory)
         config_dir = Path(__file__).parent.parent / "config"
         audio_file = (config_dir / selected_path).resolve()
         
-        logger.info(f"Serving filler audio: {audio_file}")
+        logger.info(f"[FILLER] 📂 Resolved path: {audio_file}")
+        logger.info(f"[FILLER] ✅ File exists: {audio_file.exists()}")
         
         if not audio_file.exists():
-            logger.error(f"Filler audio file not found: {audio_file}")
+            logger.error(f"[FILLER] ❌ Filler audio file not found: {audio_file}")
             return JSONResponse(status_code=404, content={"error": "Filler audio file not found"})
         
-        # Return the audio file
+        # Return the audio file with no caching to ensure fresh persona-specific audio
         return FileResponse(
             audio_file,
             media_type="audio/mpeg",
-            headers={"Cache-Control": "public, max-age=86400"}  # Cache for 24 hours
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
         )
         
     except Exception as e:
@@ -436,7 +448,8 @@ async def ai_ask_question_audio_stream(request: Request):
                     yield audio_chunk
                 
                 total_time = time.time() - start_time
-                logger.info(f"[AI STREAM] Complete - First chunk: {first_chunk_time:.2f}s, Total: {total_time:.2f}s, Size: {total_audio_size} bytes")
+                first_chunk_str = f"{first_chunk_time:.2f}s" if first_chunk_time is not None else "N/A"
+                logger.info(f"[AI STREAM] Complete - First chunk: {first_chunk_str}, Total: {total_time:.2f}s, Size: {total_audio_size} bytes")
                         
             except Exception as e:
                 logger.error(f"[AI STREAM] Error in stream generator: {e}", exc_info=True)
@@ -453,6 +466,88 @@ async def ai_ask_question_audio_stream(request: Request):
             
     except Exception as e:
         logger.error(f"[AI STREAM] Failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/ai/text-to-audio-stream")
+async def text_to_audio_stream(request: Request):
+    """
+    Convert text to streaming audio using TTS.
+    Takes pre-generated text and streams audio chunks back.
+    """
+    try:
+        payload = await request.json()
+        text = payload.get("text", "")
+        
+        if not text:
+            return JSONResponse(status_code=400, content={"error": "No text provided"})
+        
+        logger.info(f"[TEXT-TO-AUDIO] Converting {len(text)} chars to audio")
+        
+        # Get TTS config
+        persona_config = load_persona_config()
+        fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+        voice_id = fish_cfg.get("voice_id")
+        voice_engine = "s1"  # Use standard engine for quality
+        
+        if not voice_id:
+            logger.error("[TEXT-TO-AUDIO] No voice ID configured")
+            return JSONResponse(status_code=500, content={"error": "TTS not configured"})
+        
+        # Create async generator for text chunks
+        async def text_chunk_generator():
+            """Yield text chunks for streaming TTS"""
+            # Split text into sentences for streaming
+            sentences = []
+            current = ""
+            for char in text:
+                current += char
+                if char in ('.', '!', '?', '\n'):
+                    if current.strip():
+                        sentences.append(current.strip())
+                    current = ""
+            if current.strip():
+                sentences.append(current.strip())
+            
+            for sentence in sentences:
+                yield sentence + " "
+        
+        # Stream TTS audio
+        async def audio_stream_generator():
+            try:
+                import time
+                start_time = time.time()
+                first_chunk_time = None
+                total_audio_size = 0
+                
+                from services.tts_service import TTSService
+                tts = TTSService()
+                
+                logger.info("[TEXT-TO-AUDIO] Starting TTS streaming")
+                async for audio_chunk in tts.generate_audio_stream(text_chunk_generator(), voice_id, voice_engine):
+                    if first_chunk_time is None:
+                        first_chunk_time = time.time() - start_time
+                        logger.info(f"[TEXT-TO-AUDIO] First audio chunk in {first_chunk_time:.2f}s")
+                    total_audio_size += len(audio_chunk)
+                    yield audio_chunk
+                
+                total_time = time.time() - start_time
+                logger.info(f"[TEXT-TO-AUDIO] Complete - Total: {total_time:.2f}s, Size: {total_audio_size} bytes")
+                        
+            except Exception as e:
+                logger.error(f"[TEXT-TO-AUDIO] Error: {e}", exc_info=True)
+        
+        return StreamingResponse(
+            audio_stream_generator(),
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            }
+        )
+            
+    except Exception as e:
+        logger.error(f"[TEXT-TO-AUDIO] Failed: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
