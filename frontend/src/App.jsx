@@ -3,7 +3,6 @@ import { TopBar } from './components/TopBar';
 import { LeftPanel } from './components/LeftPanel';
 import { OctopusEnergy } from './components/OctopusEnergy';
 import { PersonaModal } from './components/PersonaModal';
-import { Settings } from './components/Settings';
 import { usePersonas } from './hooks/usePersonas';
 import { useAudioQueue } from './hooks/useAudioQueue';
 import { routerAPI, aiAPI } from './services/api';
@@ -12,6 +11,7 @@ import { MusicEditor } from './pages/MusicEditor';
 import { AnalyticsPage } from './pages/Analytics';
 import { ChatPage } from './pages/Chat';
 import { NewsPage } from './pages/News';
+import { SettingsPage } from './pages/Settings';
 import { WaveformMic } from './components/WaveformMic';
 import './styles/index.css';
 
@@ -24,7 +24,6 @@ function App() {
     return newId;
   });
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiFocusActive, setAiFocusActive] = useState(false);
   const [micStream, setMicStream] = useState(null);
   const [micStatus, setMicStatus] = useState('idle'); // idle | listening | processing | playing | error
@@ -446,7 +445,7 @@ function App() {
     <div className={`app-shell ${aiFocusActive ? 'ai-focus' : ''}`}>
       <TopBar 
         onSwitchAI={handleSwitchAI}
-        onSettingsClick={() => setSettingsOpen(true)}
+        onSettingsClick={() => setActivePage('settings')}
         activePage={activePage}
         onNavigate={(page) => setActivePage(page)}
         onMusicSearch={(query) => setMusicSearchQuery(query)}
@@ -471,6 +470,8 @@ function App() {
         />
       ) : activePage === 'news' ? (
         <NewsPage />
+      ) : activePage === 'settings' ? (
+        <SettingsPage onNavigate={(page) => setActivePage(page)} />
       ) : (
         <div className="main-container">
           {showLeft && (
@@ -496,11 +497,6 @@ function App() {
         open={personaModalOpen}
         onClose={() => setPersonaModalOpen(false)}
         onSelect={handlePersonaSelect}
-      />
-      <Settings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onNavigate={(page) => setActivePage(page)}
       />
       {aiFocusActive && (
         <div className="ai-focus-overlay">
