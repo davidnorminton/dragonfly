@@ -86,8 +86,18 @@ async def _fetch_octopus_consumption_task():
     if not api_key:
         logger.error("[OCTOPUS TASK] API key not available, skipping consumption fetch")
         return
-    meter_point = "2343383923410"
-    meter_serial = "22L4381884"
+    
+    account_number = await _get_octopus_account_number()
+    meter_point = "2343383923410"  # Default fallback
+    meter_serial = "22L4381884"  # Default fallback
+    
+    # Get meter info from account endpoint if account number is available
+    if account_number:
+        meter_info = await _get_meter_info_from_account(account_number, api_key)
+        if meter_info:
+            meter_point = meter_info.get("meter_point", meter_point)
+            meter_serial = meter_info.get("meter_serial", meter_serial)
+            logger.info(f"[OCTOPUS TASK] Using meter point {meter_point}, serial {meter_serial} from account {account_number}")
     
     # Fetch immediately on startup
     first_run = True
@@ -250,28 +260,68 @@ async def _fetch_historical_tariff_rates(meter_point: str, tariff_code: str, pro
         return 0
 
 
+async def _get_octopus_account_number() -> Optional[str]:
+    """Get Octopus Energy account number from system config."""
+    try:
+        from database.models import SystemConfig
+        async with AsyncSessionLocal() as session:
+            system_config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "system")
+            )
+            system_config = system_config_result.scalar_one_or_none()
+            if system_config and system_config.config_value:
+                octopus_config = system_config.config_value.get("octopus", {})
+                account_number = octopus_config.get("account_number")
+                if account_number:
+                    return account_number
+        return None
+    except Exception as e:
+        logger.error(f"Error loading Octopus account number: {e}")
+        return None
+
+async def _get_meter_info_from_account(account_number: str, api_key: str) -> Optional[Dict[str, Any]]:
+    """Get meter point and serial number from account endpoint."""
+    try:
+        account_data = await _fetch_account_info(account_number, api_key)
+        if not account_data:
+            return None
+        
+        # Extract first electricity meter point info
+        for property_data in account_data.get("properties", []):
+            for mp_data in property_data.get("electricity_meter_points", []):
+                mpan = mp_data.get("mpan")
+                # Get first meter serial number
+                meters = mp_data.get("meters", [])
+                if meters:
+                    meter_serial = meters[0].get("serial_number")
+                    return {
+                        "meter_point": mpan,
+                        "meter_serial": meter_serial
+                    }
+        return None
+    except Exception as e:
+        logger.error(f"Error getting meter info from account: {e}")
+        return None
+
 async def _fetch_octopus_tariff_task():
     """Background task to fetch tariff data daily."""
     api_key = await _get_octopus_api_key()
     if not api_key:
         logger.error("[OCTOPUS TASK] API key not available, skipping tariff fetch")
         return
-    meter_point = "2343383923410"
-    account_number = None
     
-    # Get account number from system config if available
-    try:
-        async with AsyncSessionLocal() as session:
-            system_config_result = await session.execute(
-                select(SystemConfig).where(SystemConfig.key == "system")
-            )
-            system_config = system_config_result.scalar_one_or_none()
-            if system_config and system_config.value:
-                octopus_config = system_config.value.get("octopus", {})
-                account_number = octopus_config.get("account_number")
-                meter_point = octopus_config.get("meter_point") or meter_point
-    except Exception:
-        pass
+    account_number = await _get_octopus_account_number()
+    if not account_number:
+        logger.warning("[OCTOPUS TASK] Account number not configured, using default meter point")
+        account_number = None
+    
+    meter_point = "2343383923410"  # Default fallback
+    
+    # Get meter point from account if account number is available
+    if account_number:
+        meter_info = await _get_meter_info_from_account(account_number, api_key)
+        if meter_info:
+            meter_point = meter_info.get("meter_point", meter_point)
     
     # Fetch immediately on startup
     first_run = True
@@ -4796,17 +4846,25 @@ async def get_octopus_tariff():
                 "success": False,
                 "error": "Octopus Energy API key not configured"
             }
-        meter_point = "2343383923410"
+        
+        account_number = await _get_octopus_account_number()
+        meter_point = "2343383923410"  # Default fallback
+        
+        # Get meter point from account if account number is available
+        if account_number:
+            meter_info = await _get_meter_info_from_account(account_number, api_key)
+            if meter_info:
+                meter_point = meter_info.get("meter_point", meter_point)
         
         # Check for manual override in system config
         try:
             async with AsyncSessionLocal() as session:
                 system_config_result = await session.execute(
-                    select(SystemConfig).where(SystemConfig.key == "system")
+                    select(SystemConfig).where(SystemConfig.config_key == "system")
                 )
                 system_config = system_config_result.scalar_one_or_none()
-                if system_config and system_config.value:
-                    octopus_config = system_config.value.get("octopus", {})
+                if system_config and system_config.config_value:
+                    octopus_config = system_config.config_value.get("octopus", {})
                     if octopus_config.get("unit_rate_override"):
                         # Use manual override
                         return {
@@ -4895,8 +4953,17 @@ async def get_octopus_consumption():
                 "success": False,
                 "error": "Octopus Energy API key not configured"
             }
-        meter_point = "2343383923410"
-        meter_serial = "22L4381884"
+        
+        account_number = await _get_octopus_account_number()
+        meter_point = "2343383923410"  # Default fallback
+        meter_serial = "22L4381884"  # Default fallback
+        
+        # Get meter info from account if account number is available
+        if account_number:
+            meter_info = await _get_meter_info_from_account(account_number, api_key)
+            if meter_info:
+                meter_point = meter_info.get("meter_point", meter_point)
+                meter_serial = meter_info.get("meter_serial", meter_serial)
         
         # Build the API URL
         url = f"https://api.octopus.energy/v1/electricity-meter-points/{meter_point}/meters/{meter_serial}/consumption/"
@@ -5171,7 +5238,16 @@ async def get_octopus_history(days: int = 7):
 async def get_octopus_tariff_history(days: int = 7):
     """Get historical Octopus Energy tariff rates from database for graphing."""
     try:
-        meter_point = "2343383923410"
+        account_number = await _get_octopus_account_number()
+        meter_point = "2343383923410"  # Default fallback
+        
+        # Get meter point from account if account number is available
+        if account_number:
+            api_key = await _get_octopus_api_key()
+            if api_key:
+                meter_info = await _get_meter_info_from_account(account_number, api_key)
+                if meter_info:
+                    meter_point = meter_info.get("meter_point", meter_point)
         
         # Calculate date range
         end_date = datetime.now(timezone.utc)

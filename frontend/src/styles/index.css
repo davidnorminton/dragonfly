@@ -119,10 +119,9 @@ body {
 
 .main-container {
   display: grid;
-  grid-template-columns: minmax(480px, 640px) 4px 1fr;
+  grid-template-columns: 50% 50%;
   gap: 0;
-  padding: 0;
-  padding-bottom: 12px;
+  padding: 12px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -3812,15 +3811,15 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  padding-left: 6px;
 }
 
 /* Update main container for new layout */
 .main-container {
   display: grid;
-  grid-template-columns: minmax(480px, 640px) 4px 1fr;
+  grid-template-columns: 50% 50%;
   gap: 0;
-  padding: 0;
-  padding-bottom: 12px;
+  padding: 12px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -3849,6 +3848,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  padding-left: 6px;
 }
 
 .right-section > * {

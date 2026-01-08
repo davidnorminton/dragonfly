@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { TopBar } from './components/TopBar';
 import { LeftPanel } from './components/LeftPanel';
 import { OctopusEnergy } from './components/OctopusEnergy';
-import { PanelResizer } from './components/PanelResizer';
 import { PersonaModal } from './components/PersonaModal';
 import { Settings } from './components/Settings';
 import { usePersonas } from './hooks/usePersonas';
@@ -24,7 +23,6 @@ function App() {
     localStorage.setItem('chatSessionId', newId);
     return newId;
   });
-  const [leftWidth, setLeftWidth] = useState(600);
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiFocusActive, setAiFocusActive] = useState(false);
@@ -61,10 +59,6 @@ function App() {
     };
   }, [audioObj]);
 
-  const handleLeftResize = (clientX) => {
-    const newWidth = Math.max(400, Math.min(800, clientX - 20));
-    setLeftWidth(newWidth);
-  };
 
 
   const handleSwitchAI = () => {
@@ -447,12 +441,6 @@ function App() {
     // Depend on micRestartKey to allow restarting listening after retries
   }, [aiFocusActive, micRestartKey, micStatus]);
 
-  // Compute dynamic grid columns based on visibility
-  const gridColumns = (() => {
-    const minLeft = Math.max(leftWidth, 480);
-    if (showLeft) return `minmax(480px, ${minLeft}px) 4px 1fr`;
-    return `1fr`;
-  })();
 
   return (
     <div className={`app-shell ${aiFocusActive ? 'ai-focus' : ''}`}>
@@ -484,18 +472,12 @@ function App() {
       ) : activePage === 'news' ? (
         <NewsPage />
       ) : (
-        <div 
-          className="main-container"
-          style={{
-            gridTemplateColumns: gridColumns
-          }}
-        >
+        <div className="main-container">
           {showLeft && (
             <div className="left-section">
               <LeftPanel />
             </div>
           )}
-          {showLeft && <PanelResizer onResize={handleLeftResize} />}
           <div className="right-section">
             <OctopusEnergy />
           </div>
