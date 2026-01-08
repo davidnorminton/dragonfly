@@ -159,7 +159,7 @@ export const trafficAPI = {
 export const newsAPI = {
   getNews: (feedType = 'top_stories', limit = 20) => 
     api.get('/news', { params: { feed_type: feedType, limit } }).then(res => res.data),
-  summarizeArticle: (url) => api.post('/news/summarize', { url }).then(res => res.data),
+  summarizeArticle: (url, title) => api.post('/news/summarize', { url, title }).then(res => res.data),
 };
 
 export const ttsAPI = {

@@ -377,3 +377,18 @@ class OctopusEnergyTariffRate(Base):
     def __repr__(self):
         return f"<OctopusEnergyTariffRate {self.valid_from} - {self.unit_rate}p/kWh>"
 
+
+class ArticleSummary(Base):
+    """Model for storing article summaries."""
+    __tablename__ = "article_summaries"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    article_url = Column(String, nullable=False, index=True, unique=True)
+    article_title = Column(String, nullable=False)
+    summary = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<ArticleSummary {self.article_url[:50]}...>"
+

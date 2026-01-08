@@ -25,7 +25,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary
 from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -5510,6 +5510,24 @@ async def get_news(feed_type: str = "top_stories", limit: int = 50):
                     stored_feed_type = data_dict.get("data", {}).get("feed_type")
                     if age_seconds < 900 and stored_feed_type == feed_type:  # 15 minutes cache
                         news_data = data_dict.get("data", {})
+                        
+                        # Load summaries from ArticleSummary table and attach to articles
+                        try:
+                            async with AsyncSessionLocal() as session:
+                                articles = news_data.get("articles", [])
+                                for article in articles:
+                                    article_url = article.get("link")
+                                    if article_url:
+                                        summary_result = await session.execute(
+                                            select(ArticleSummary).where(ArticleSummary.article_url == article_url)
+                                        )
+                                        summary_record = summary_result.scalar_one_or_none()
+                                        if summary_record:
+                                            article["summary"] = summary_record.summary
+                                            article["summary_title"] = summary_record.article_title
+                        except Exception as summary_error:
+                            logger.warning(f"Could not load article summaries: {summary_error}")
+                        
                         return {
                             "success": True,
                             "data": news_data,
@@ -5530,6 +5548,24 @@ async def get_news(feed_type: str = "top_stories", limit: int = 50):
         
         # Store in database (with timeout handling for SQLite locks)
         news_data = result.get("data", {})
+        
+        # Load summaries from ArticleSummary table and attach to articles
+        try:
+            async with AsyncSessionLocal() as session:
+                articles = news_data.get("articles", [])
+                for article in articles:
+                    article_url = article.get("link")
+                    if article_url:
+                        summary_result = await session.execute(
+                            select(ArticleSummary).where(ArticleSummary.article_url == article_url)
+                        )
+                        summary_record = summary_result.scalar_one_or_none()
+                        if summary_record:
+                            article["summary"] = summary_record.summary
+                            article["summary_title"] = summary_record.article_title
+        except Exception as summary_error:
+            logger.warning(f"Could not load article summaries: {summary_error}")
+        
         try:
             async with AsyncSessionLocal() as session:
                 collected_data = CollectedData(
@@ -5567,9 +5603,25 @@ async def summarize_article(request: Request):
     try:
         data = await request.json()
         url = data.get("url")
+        title = data.get("title", "")  # Optional title from frontend
         
         if not url:
             raise HTTPException(status_code=400, detail="URL is required")
+        
+        # Check if summary already exists in database
+        async with AsyncSessionLocal() as session:
+            existing_summary = await session.execute(
+                select(ArticleSummary).where(ArticleSummary.article_url == url)
+            )
+            existing = existing_summary.scalar_one_or_none()
+            
+            if existing:
+                logger.info(f"Returning cached summary for article: {url}")
+                return {
+                    "success": True,
+                    "summary": existing.summary,
+                    "title": existing.article_title
+                }
         
         summarizer = ArticleSummarizer()
         result = await summarizer.summarize_article_from_url(url)
@@ -5577,41 +5629,39 @@ async def summarize_article(request: Request):
         if result.get("success"):
             summary = result.get("summary")
             
-            # Store the summary in the database with the article data
+            # Store the summary in the ArticleSummary table
             try:
                 async with AsyncSessionLocal() as session:
-                    # Find the latest news data
-                    news_result = await session.execute(
-                        select(CollectedData)
-                        .where(CollectedData.source == "news")
-                        .where(CollectedData.data_type == "news_feed")
-                        .order_by(desc(CollectedData.collected_at))
-                        .limit(1)
+                    # Check again in case it was added concurrently
+                    existing_summary = await session.execute(
+                        select(ArticleSummary).where(ArticleSummary.article_url == url)
                     )
-                    latest_news_data = news_result.scalar_one_or_none()
+                    existing = existing_summary.scalar_one_or_none()
                     
-                    if latest_news_data and latest_news_data.data:
-                        # Deep copy to ensure SQLAlchemy detects JSON change
-                        import copy
-                        data_copy = copy.deepcopy(latest_news_data.data)
-                        articles = data_copy.get("data", {}).get("articles", [])
-                        for article in articles:
-                            if article.get("link") == url:
-                                article["summary"] = summary
-                                break
-                        
-                        data_copy.setdefault("data", {})["articles"] = articles
-                        latest_news_data.data = data_copy
-                        flag_modified(latest_news_data, "data")
+                    if not existing:
+                        article_summary = ArticleSummary(
+                            article_url=url,
+                            article_title=title or url,  # Use title if provided, otherwise URL
+                            summary=summary
+                        )
+                        session.add(article_summary)
                         await session.commit()
                         logger.info(f"Stored summary for article: {url}")
+                    else:
+                        # Update existing summary
+                        existing.summary = summary
+                        if title:
+                            existing.article_title = title
+                        await session.commit()
+                        logger.info(f"Updated summary for article: {url}")
             except Exception as db_error:
                 # Log but don't fail if database is locked - we still have the summary
                 logger.warning(f"Could not store article summary in database (may be locked): {db_error}")
             
             return {
                 "success": True,
-                "summary": summary
+                "summary": summary,
+                "title": title or url
             }
         else:
             return {
