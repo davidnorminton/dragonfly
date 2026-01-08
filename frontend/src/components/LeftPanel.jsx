@@ -3,7 +3,6 @@ import { Weather } from './Weather';
 import { Traffic } from './Traffic';
 import { Uptime } from './Uptime';
 import { IPAddress } from './IPAddress';
-import { QuickStats } from './QuickStats';
 
 export function LeftPanel() {
   return (
@@ -12,7 +11,6 @@ export function LeftPanel() {
       <Weather />
       <Traffic />
       <IPAddress />
-      <QuickStats />
       <Uptime />
     </div>
   );

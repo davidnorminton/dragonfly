@@ -17,25 +17,42 @@ class TrafficCollector(BaseCollector):
     
     def __init__(self):
         super().__init__("traffic")
-        self.location_config = load_location_config()
-        self.api_key = self._get_rapidapi_key()
+        self.location_config = None  # Will be loaded asynchronously
+        self.api_key = None  # Will be loaded asynchronously
     
-    def _get_rapidapi_key(self) -> Optional[str]:
-        """Get RapidAPI key from config if available."""
+    async def _get_rapidapi_key(self) -> Optional[str]:
+        """Get RapidAPI key from database or config file."""
         try:
+            # Try database first
+            from config.api_key_loader import load_api_keys
+            api_keys = await load_api_keys()
+            rapidapi_config = api_keys.get("rapidapi", {})
+            api_key = rapidapi_config.get("api_key")
+            
+            if api_key:
+                logger.info("Loaded RapidAPI key from database")
+                return api_key
+            
+            # Fallback to file
             api_keys_path = Path(__file__).parent.parent / "config" / "api_keys.json"
             if api_keys_path.exists():
                 with open(api_keys_path, 'r') as f:
-                    api_keys = json.load(f)
+                    api_keys_file = json.load(f)
                     # Try waze or rapidapi key
-                    return (
-                        api_keys.get("waze", {}).get("api_key") or
-                        api_keys.get("rapidapi", {}).get("api_key") or
-                        api_keys.get("waze", {}).get("rapidapi_key")
+                    api_key = (
+                        api_keys_file.get("waze", {}).get("api_key") or
+                        api_keys_file.get("rapidapi", {}).get("api_key") or
+                        api_keys_file.get("waze", {}).get("rapidapi_key")
                     )
+                    if api_key:
+                        logger.info("Loaded RapidAPI key from config file")
+                        return api_key
+            
+            logger.warning("RapidAPI key not found")
+            return None
         except Exception as e:
-            logger.warning(f"Could not load RapidAPI key: {e}")
-        return None
+            logger.error(f"Error loading RapidAPI key: {e}")
+            return None
     
     def get_data_type(self) -> str:
         """Return the data type identifier."""
@@ -196,6 +213,14 @@ class TrafficCollector(BaseCollector):
             Dictionary containing traffic condition data
         """
         try:
+            # Load API key if not already loaded
+            if self.api_key is None:
+                self.api_key = await self._get_rapidapi_key()
+            
+            # Load location config if not already loaded
+            if self.location_config is None:
+                self.location_config = await load_location_config() or {}
+            
             location_name = self.location_config.get("display_name", "Unknown")
             
             traffic_data = {
@@ -236,15 +261,16 @@ class TrafficCollector(BaseCollector):
                     waze_data = await self._get_waze_traffic(lat, lon, radius_miles)
                     if waze_data:
                         # Log raw Waze API response for debugging
-                        logger.info("=== Raw Waze API Response ===")
-                        logger.info(f"Full response: {json.dumps(waze_data, indent=2, default=str)}")
-                        logger.info(f"Alerts count: {len(waze_data.get('alerts', []))}")
-                        logger.info(f"Jams count: {len(waze_data.get('jams', []))}")
-                        if waze_data.get('alerts'):
-                            logger.info(f"Sample alert: {json.dumps(waze_data['alerts'][0] if waze_data['alerts'] else {}, indent=2, default=str)}")
-                        if waze_data.get('jams'):
-                            logger.info(f"Sample jam: {json.dumps(waze_data['jams'][0] if waze_data['jams'] else {}, indent=2, default=str)}")
-                        logger.info("=============================")
+                        logger.info("=" * 80)
+                        logger.info("WAZE TRAFFIC API - FULL RESPONSE DATA:")
+                        logger.info("=" * 80)
+                        logger.info(json.dumps(waze_data, indent=2, default=str))
+                        logger.info("=" * 80)
+                        print("=" * 80)
+                        print("WAZE TRAFFIC API - FULL RESPONSE DATA:")
+                        print("=" * 80)
+                        print(json.dumps(waze_data, indent=2, default=str))
+                        print("=" * 80)
                         
                         parsed_data = self._parse_waze_data(waze_data)
                         if parsed_data:
@@ -274,6 +300,10 @@ class TrafficCollector(BaseCollector):
                                     "speed": jam.get("speed"),
                                     "level": jam.get("level")
                                 })
+                    else:
+                        # API call failed (quota exceeded, network error, etc.)
+                        traffic_data["api_status"] = "api_error"
+                        traffic_data["summary"]["current_status"] = "API unavailable"
             
             logger.info(f"Collected traffic data for location: {location_name}")
             

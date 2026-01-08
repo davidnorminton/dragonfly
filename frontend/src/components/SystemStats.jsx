@@ -45,22 +45,6 @@ export function SystemStats() {
           style={{ width: `${stats.disk_percent}%` }}
         ></div>
       </div>
-      <div className="stat-boxes">
-        <div className="stat-box">
-          <div className="stat-box-label">CPU</div>
-          <div className="stat-box-value">{stats.cpu_percent.toFixed(0)}%</div>
-        </div>
-        <div className="stat-box">
-          <div className="stat-box-label">Memory</div>
-          <div className="stat-box-value">{stats.memory_percent.toFixed(0)}%</div>
-        </div>
-        <div className="stat-box">
-          <div className="stat-box-label">Disk</div>
-          <div className="stat-box-value">
-            {stats.disk_percent.toFixed(0)}%
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

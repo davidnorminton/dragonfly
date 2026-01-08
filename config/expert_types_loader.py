@@ -2,15 +2,62 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 EXPERT_TYPES_CONFIG_PATH = Path(__file__).parent / "expert_types.json"
 
 
-def load_expert_types() -> Dict[str, Dict[str, Any]]:
-    """Load all expert type configurations."""
+async def load_expert_types(session: Optional[AsyncSession] = None) -> Dict[str, Dict[str, Any]]:
+    """Load all expert type configurations from database.
+    
+    Args:
+        session: Optional database session. If None, creates a new one.
+    
+    Returns:
+        Dictionary mapping expert type IDs to their configurations.
+    """
+    from database.base import AsyncSessionLocal
+    from database.models import ExpertTypesConfig
+    
+    try:
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
+        
+        try:
+            result = await db_session.execute(select(ExpertTypesConfig))
+            expert_types_list = result.scalars().all()
+            
+            expert_types = {}
+            for expert in expert_types_list:
+                expert_types[expert.expert_type] = {
+                    "name": expert.name,
+                    "description": expert.description or "",
+                    "system_prompt": expert.system_prompt,
+                    "icon": expert.icon or "💬"
+                }
+                if expert.extra_data:
+                    expert_types[expert.expert_type].update(expert.extra_data)
+            
+            logger.debug(f"Loaded {len(expert_types)} expert types from database")
+            return expert_types
+        finally:
+            if should_close:
+                await db_session.close()
+    except Exception as e:
+        logger.error(f"Error loading expert types from database: {e}", exc_info=True)
+        return _load_expert_types_from_file()
+
+
+def _load_expert_types_from_file() -> Dict[str, Dict[str, Any]]:
+    """Fallback: Load expert types from file."""
     try:
         if not EXPERT_TYPES_CONFIG_PATH.exists():
             logger.warning(f"Expert types config file not found at {EXPERT_TYPES_CONFIG_PATH}")
@@ -18,22 +65,37 @@ def load_expert_types() -> Dict[str, Dict[str, Any]]:
         
         with open(EXPERT_TYPES_CONFIG_PATH, 'r', encoding='utf-8') as f:
             config = json.load(f)
-            logger.debug("Loaded expert types config")
+            logger.debug("Loaded expert types config from file")
             return config
     except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"Error loading expert types config: {e}", exc_info=True)
+        logger.error(f"Error loading expert types config from file: {e}", exc_info=True)
         return {}
 
 
-def get_expert_type(expert_type_id: str) -> Optional[Dict[str, Any]]:
-    """Get a specific expert type configuration."""
-    expert_types = load_expert_types()
+async def get_expert_type(expert_type_id: str, session: Optional[AsyncSession] = None) -> Optional[Dict[str, Any]]:
+    """Get a specific expert type configuration from database.
+    
+    Args:
+        expert_type_id: The ID of the expert type to retrieve.
+        session: Optional database session. If None, creates a new one.
+    
+    Returns:
+        Dictionary with expert type configuration or None if not found.
+    """
+    expert_types = await load_expert_types(session)
     return expert_types.get(expert_type_id)
 
 
-def list_expert_types() -> list:
-    """List all available expert types."""
-    expert_types = load_expert_types()
+async def list_expert_types(session: Optional[AsyncSession] = None) -> List[Dict[str, Any]]:
+    """List all available expert types from database.
+    
+    Args:
+        session: Optional database session. If None, creates a new one.
+    
+    Returns:
+        List of dictionaries with expert type information.
+    """
+    expert_types = await load_expert_types(session)
     return [
         {
             "id": expert_id,
@@ -43,5 +105,3 @@ def list_expert_types() -> list:
         }
         for expert_id, config in expert_types.items()
     ]
-
-

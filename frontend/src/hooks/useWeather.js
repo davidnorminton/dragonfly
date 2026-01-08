@@ -11,11 +11,11 @@ export function useWeather(interval = 600000) {
         const data = await weatherAPI.getWeather();
         if (data.success && data.data) {
           setWeather(data.data);
-          console.log('=== BBC Weather API Data ===');
+          console.log('=== RapidAPI Open Weather API Data ===');
           Object.entries(data.data).forEach(([key, value]) => {
             console.log(`${key}:`, value);
           });
-          console.log('========================');
+          console.log('======================================');
         }
         setLoading(false);
       } catch (error) {

@@ -55,18 +55,6 @@ export function Traffic() {
           </div>
         </div>
         
-        <div className="stat-box">
-          <div className="stat-item" style={statItemStyle}>
-            <div className="stat-label">Status</div>
-            <div 
-              className="stat-value" 
-              style={{ color: getStatusColor(summary.current_status) }}
-            >
-              {summary.current_status || 'No data'}
-            </div>
-          </div>
-        </div>
-        
         {summary.average_speed !== undefined && summary.average_speed !== null && (
           <div className="stat-box">
             <div className="stat-item" style={statItemStyle}>
@@ -116,12 +104,6 @@ export function Traffic() {
               )}
             </div>
           )
-        )}
-
-        {location.radius_miles && (
-          <div style={{ fontSize: '0.8em', color: '#808080', marginTop: '0.5em' }}>
-            Monitoring {location.radius_miles} miles radius
-          </div>
         )}
 
         {traffic.api_status === 'not_configured' && (

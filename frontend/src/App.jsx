@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { TopBar } from './components/TopBar';
 import { LeftPanel } from './components/LeftPanel';
-import { CenterPanel } from './components/CenterPanel';
-import { Chat } from './components/Chat';
+import { OctopusEnergy } from './components/OctopusEnergy';
 import { PanelResizer } from './components/PanelResizer';
 import { PersonaModal } from './components/PersonaModal';
 import { Settings } from './components/Settings';
@@ -11,6 +10,9 @@ import { useAudioQueue } from './hooks/useAudioQueue';
 import { routerAPI, aiAPI } from './services/api';
 import { MusicPage } from './pages/Music';
 import { MusicEditor } from './pages/MusicEditor';
+import { AnalyticsPage } from './pages/Analytics';
+import { ChatPage } from './pages/Chat';
+import { NewsPage } from './pages/News';
 import { WaveformMic } from './components/WaveformMic';
 import './styles/index.css';
 
@@ -22,10 +24,7 @@ function App() {
     localStorage.setItem('chatSessionId', newId);
     return newId;
   });
-  const [audioUrl, setAudioUrl] = useState(null);
   const [leftWidth, setLeftWidth] = useState(600);
-  const [newsHeight, setNewsHeight] = useState(400);
-  const [newsResizing, setNewsResizing] = useState(false);
   const [personaModalOpen, setPersonaModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiFocusActive, setAiFocusActive] = useState(false);
@@ -42,6 +41,7 @@ function App() {
   const [activePage, setActivePage] = useState('dashboard');
   const [showLeft, setShowLeft] = useState(true);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
   const { selectPersona, currentTitle } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -66,23 +66,6 @@ function App() {
     setLeftWidth(newWidth);
   };
 
-  // News resize handlers (vertical separator between news and widgets)
-  useEffect(() => {
-    const onMouseMove = (e) => {
-      if (!newsResizing) return;
-      const newHeight = Math.max(200, Math.min(window.innerHeight - 300, e.clientY - 60));
-      setNewsHeight(newHeight);
-    };
-    const onMouseUp = () => {
-      if (newsResizing) setNewsResizing(false);
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [newsResizing]);
 
   const handleSwitchAI = () => {
     setPersonaModalOpen(true);
@@ -479,6 +462,7 @@ function App() {
         activePage={activePage}
         onNavigate={(page) => setActivePage(page)}
         onMusicSearch={(query) => setMusicSearchQuery(query)}
+        onChatSearch={(query) => setChatSearchQuery(query)}
       />
       {activePage === 'music' ? (
         <MusicPage 
@@ -489,6 +473,16 @@ function App() {
         />
       ) : activePage === 'music-editor' ? (
         <MusicEditor />
+      ) : activePage === 'analytics' ? (
+        <AnalyticsPage />
+      ) : activePage === 'chat' ? (
+        <ChatPage 
+          sessionId={sessionId}
+          onMicClick={toggleAiFocus}
+          searchQuery={chatSearchQuery}
+        />
+      ) : activePage === 'news' ? (
+        <NewsPage />
       ) : (
         <div 
           className="main-container"
@@ -498,31 +492,12 @@ function App() {
         >
           {showLeft && (
             <div className="left-section">
-              <div className="news-section" style={{ height: `${newsHeight}px` }}>
-                <CenterPanel 
-                  audioUrl={audioUrl} 
-                  onAudioUrlChange={setAudioUrl}
-                />
-              </div>
-              <div
-                className={`news-resizer ${newsResizing ? 'resizing' : ''}`}
-                onMouseDown={() => setNewsResizing(true)}
-                title="Drag to resize news"
-              />
-              <div className="widgets-section">
-                <LeftPanel />
-              </div>
+              <LeftPanel />
             </div>
           )}
           {showLeft && <PanelResizer onResize={handleLeftResize} />}
           <div className="right-section">
-            <Chat 
-              sessionId={sessionId}
-              onAudioGenerated={setAudioUrl}
-              audioQueue={audioQueue}
-              aiFocusMode={aiFocusActive}
-              onMicClick={toggleAiFocus}
-            />
+            <OctopusEnergy />
           </div>
         </div>
       )}

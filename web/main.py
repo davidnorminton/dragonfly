@@ -25,8 +25,8 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong
-from sqlalchemy import select, desc, func, or_, delete
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession
+from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
@@ -39,7 +39,6 @@ from config.router_loader import load_router_config, save_router_config
 from services.rag_service import RAGService
 from services.tts_service import TTSService
 from services.ai_service import AIService
-from services.router_service import route_request
 from data_collectors.weather_collector import WeatherCollector
 from data_collectors.news_collector import NewsCollector
 from data_collectors.traffic_collector import TrafficCollector
@@ -58,11 +57,268 @@ import sys
 import threading
 from anthropic import AsyncAnthropic
 import signal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dragonfly Home Assistant")
+
+# Background tasks for Octopus Energy
+_octopus_tasks_running = False
+
+async def _get_octopus_api_key() -> Optional[str]:
+    """Get Octopus Energy API key from database."""
+    try:
+        api_keys = await load_api_keys()
+        octopus_config = api_keys.get("octopus_energy", {})
+        api_key = octopus_config.get("api_key")
+        if api_key:
+            return api_key
+        logger.warning("Octopus Energy API key not found in database")
+        return None
+    except Exception as e:
+        logger.error(f"Error loading Octopus Energy API key: {e}")
+        return None
+
+async def _fetch_octopus_consumption_task():
+    """Background task to fetch consumption data hourly."""
+    api_key = await _get_octopus_api_key()
+    if not api_key:
+        logger.error("[OCTOPUS TASK] API key not available, skipping consumption fetch")
+        return
+    meter_point = "2343383923410"
+    meter_serial = "22L4381884"
+    
+    # Fetch immediately on startup
+    first_run = True
+    
+    while True:
+        try:
+            if not first_run:
+                await asyncio.sleep(3600)  # Wait 1 hour
+            first_run = False
+            logger.info("[OCTOPUS TASK] Fetching consumption data...")
+            
+            # Calculate period: last 48 hours to catch any missed readings
+            now = datetime.now(timezone.utc)
+            period_to = now
+            period_from = now - timedelta(hours=48)
+            
+            url = f"https://api.octopus.energy/v1/electricity-meter-points/{meter_point}/meters/{meter_serial}/consumption/"
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    url,
+                    auth=(api_key, ""),
+                    params={
+                        "page_size": 100,
+                        "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "order_by": "period"
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                results = data.get("results", [])
+                # Results are ordered by period, oldest first
+                
+                # Store new readings
+                stored_count = 0
+                async with AsyncSessionLocal() as session:
+                    for reading in results:
+                        interval_start_str = reading.get("interval_start")
+                        consumption = reading.get("consumption")
+                        
+                        if not interval_start_str or consumption is None:
+                            continue
+                        
+                        try:
+                            interval_start = datetime.fromisoformat(interval_start_str.replace('Z', '+00:00'))
+                        except Exception:
+                            continue
+                        
+                        # Check if exists
+                        existing = await session.execute(
+                            select(OctopusEnergyConsumption).where(
+                                OctopusEnergyConsumption.interval_start == interval_start,
+                                OctopusEnergyConsumption.meter_point == meter_point,
+                                OctopusEnergyConsumption.meter_serial == meter_serial
+                            )
+                        )
+                        if existing.scalar_one_or_none():
+                            continue
+                        
+                        interval_end_str = reading.get("interval_end")
+                        interval_end = datetime.fromisoformat(interval_end_str.replace('Z', '+00:00')) if interval_end_str else None
+                        
+                        consumption_record = OctopusEnergyConsumption(
+                            interval_start=interval_start,
+                            interval_end=interval_end,
+                            consumption=consumption,
+                            meter_point=meter_point,
+                            meter_serial=meter_serial
+                        )
+                        session.add(consumption_record)
+                        stored_count += 1
+                    
+                    if stored_count > 0:
+                        await session.commit()
+                        logger.info(f"[OCTOPUS TASK] Stored {stored_count} new consumption readings")
+                    else:
+                        logger.info("[OCTOPUS TASK] No new consumption readings to store")
+        except Exception as e:
+            logger.error(f"[OCTOPUS TASK] Error fetching consumption: {e}", exc_info=True)
+
+
+async def _fetch_historical_tariff_rates(meter_point: str, tariff_code: str, product_code: str, api_key: str, days: int = 7) -> int:
+    """Fetch and store historical tariff rates for the specified period. Returns count of rates stored."""
+    try:
+        now = datetime.now(timezone.utc)
+        period_to = now
+        period_from = now - timedelta(days=days)
+        
+        # Construct the unit rates URL
+        unit_rates_url = f"https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{tariff_code}/standard-unit-rates/"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                unit_rates_url,
+                params={
+                    "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "page_size": 1000
+                }
+            )
+            
+            if response.status_code != 200:
+                logger.warning(f"Could not fetch historical tariff rates: {response.status_code}")
+                return 0
+            
+            data = response.json()
+            rates = data.get("results", [])
+            
+            if not rates:
+                return 0
+            
+            # Store rates in database
+            stored_count = 0
+            async with AsyncSessionLocal() as session:
+                for rate in rates:
+                    valid_from_str = rate.get("valid_from")
+                    valid_to_str = rate.get("valid_to")
+                    unit_rate = rate.get("value_inc_vat")
+                    
+                    if not valid_from_str or unit_rate is None:
+                        continue
+                    
+                    try:
+                        valid_from = datetime.fromisoformat(valid_from_str.replace('Z', '+00:00'))
+                        valid_to = datetime.fromisoformat(valid_to_str.replace('Z', '+00:00')) if valid_to_str else None
+                    except Exception:
+                        continue
+                    
+                    # Check if this rate already exists
+                    existing = await session.execute(
+                        select(OctopusEnergyTariffRate).where(
+                            OctopusEnergyTariffRate.meter_point == meter_point,
+                            OctopusEnergyTariffRate.tariff_code == tariff_code,
+                            OctopusEnergyTariffRate.valid_from == valid_from
+                        )
+                    )
+                    if existing.scalar_one_or_none():
+                        continue
+                    
+                    # Create new rate record
+                    rate_record = OctopusEnergyTariffRate(
+                        meter_point=meter_point,
+                        tariff_code=tariff_code,
+                        valid_from=valid_from,
+                        valid_to=valid_to or valid_from + timedelta(minutes=30),
+                        unit_rate=unit_rate
+                    )
+                    session.add(rate_record)
+                    stored_count += 1
+                
+                if stored_count > 0:
+                    await session.commit()
+                    logger.info(f"Stored {stored_count} historical tariff rates")
+            
+            return stored_count
+    except Exception as e:
+        logger.error(f"Error fetching historical tariff rates: {e}", exc_info=True)
+        return 0
+
+
+async def _fetch_octopus_tariff_task():
+    """Background task to fetch tariff data daily."""
+    api_key = await _get_octopus_api_key()
+    if not api_key:
+        logger.error("[OCTOPUS TASK] API key not available, skipping tariff fetch")
+        return
+    meter_point = "2343383923410"
+    account_number = None
+    
+    # Get account number from system config if available
+    try:
+        async with AsyncSessionLocal() as session:
+            system_config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.key == "system")
+            )
+            system_config = system_config_result.scalar_one_or_none()
+            if system_config and system_config.value:
+                octopus_config = system_config.value.get("octopus", {})
+                account_number = octopus_config.get("account_number")
+                meter_point = octopus_config.get("meter_point") or meter_point
+    except Exception:
+        pass
+    
+    # Fetch immediately on startup
+    first_run = True
+    
+    while True:
+        try:
+            if not first_run:
+                await asyncio.sleep(86400)  # Wait 24 hours
+            first_run = False
+            logger.info("[OCTOPUS TASK] Fetching tariff data...")
+            
+            tariff_info = await _fetch_and_store_tariff(meter_point, api_key, account_number)
+            if tariff_info:
+                logger.info(f"[OCTOPUS TASK] Updated tariff: {tariff_info.get('unit_rate')}p/kWh")
+                
+                # Also fetch historical rates if we have tariff code
+                tariff_code = tariff_info.get("tariff_code")
+                if tariff_code:
+                    # Extract product code
+                    product_code = tariff_code.split("-")[0] if "-" in tariff_code else None
+                    if not product_code:
+                        parts = tariff_code.split("-")
+                        if len(parts) >= 2:
+                            product_code = "-".join(parts[:-1])
+                    
+                    if product_code:
+                        # Fetch last 7 days of historical rates
+                        stored = await _fetch_historical_tariff_rates(meter_point, tariff_code, product_code, api_key, days=7)
+                        if stored > 0:
+                            logger.info(f"[OCTOPUS TASK] Stored {stored} historical tariff rates")
+            else:
+                logger.warning("[OCTOPUS TASK] Could not fetch tariff data")
+        except Exception as e:
+            logger.error(f"[OCTOPUS TASK] Error fetching tariff: {e}", exc_info=True)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on server startup."""
+    global _octopus_tasks_running
+    if not _octopus_tasks_running:
+        _octopus_tasks_running = True
+        # Start consumption task (hourly)
+        asyncio.create_task(_fetch_octopus_consumption_task())
+        # Start tariff task (daily)
+        asyncio.create_task(_fetch_octopus_tariff_task())
+        logger.info("Started Octopus Energy background tasks (hourly consumption, daily tariff)")
 
 # Vosk model path (warn if missing)
 VOSK_MODEL_PREFERRED = Path(__file__).parent / ".." / "models" / "vosk" / "vosk-model-en-us-0.22"
@@ -86,26 +342,15 @@ processor: Optional[Processor] = None
 server_start_time: float = time.time()
 
 
-def _load_router_config() -> Optional[Dict[str, Any]]:
-    """Load router.config if present."""
-    cfg_path = Path(__file__).parent / ".." / "config" / "router.config"
-    try:
-        with open(cfg_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logger.warning("router.config not found at %s", cfg_path)
-    except Exception as e:
-        logger.warning("Failed to load router.config: %s", e)
-    return None
 
 
-def _get_anthropic_api_key() -> Optional[str]:
+async def _get_anthropic_api_key() -> Optional[str]:
     """Fetch Anthropic API key from settings, api_keys.json, or env."""
     api_key = settings.ai_api_key or os.getenv("ANTHROPIC_API_KEY")
     if api_key:
         return api_key
     try:
-        api_keys = load_api_keys()
+        api_keys = await load_api_keys()
         return api_keys.get("anthropic", {}).get("api_key")
     except Exception as e:
         logger.warning("Failed to load Anthropic API key from config: %s", e)
@@ -114,9 +359,9 @@ def _get_anthropic_api_key() -> Optional[str]:
 
 async def _run_router_inference(user_text: str) -> Optional[str]:
     """Run Anthropic router model on the given text."""
-    cfg = _load_router_config() or {}
+    cfg = await load_router_config() or {}
     anth_cfg = cfg.get("anthropic", {}) if isinstance(cfg, dict) else {}
-    api_key = _get_anthropic_api_key()
+    api_key = await _get_anthropic_api_key()
     if not api_key:
         raise RuntimeError("Anthropic API key not configured")
     client = AsyncAnthropic(api_key=api_key)
@@ -168,6 +413,94 @@ def _parse_router_answer(answer: Optional[str]) -> Optional[Dict[str, Any]]:
             except Exception:
                 return None
         return None
+
+
+async def route_request(route_type: str, route_value: str, mode: str = "qa") -> Dict[str, Any]:
+    """
+    Route a request to the appropriate service based on route_type.
+    
+    Args:
+        route_type: Type of route ("question", "task", etc.)
+        route_value: The actual query/value to process
+        mode: Mode for processing ("qa" or "conversational")
+    
+    Returns:
+        Dict with "success", "result"/"answer" fields
+    """
+    try:
+        logger.info(f"[ROUTE] Routing request: type={route_type}, value={route_value[:100]}, mode={mode}")
+        
+        if route_type == "question":
+            # Route to RAG service for conversational mode, AI service for qa mode
+            if mode == "conversational":
+                rag_service = RAGService()
+                # Use a default session_id if not provided
+                result = await rag_service.execute({
+                    "question": route_value,
+                    "session_id": "default"
+                })
+                return {
+                    "success": True,
+                    "result": result.get("answer", ""),
+                    "answer": result.get("answer", "")
+                }
+            else:
+                # QA mode - use AI service
+                ai_service = AIService()
+                result = await ai_service.execute({
+                    "question": route_value
+                })
+                return {
+                    "success": True,
+                    "result": result.get("answer", ""),
+                    "answer": result.get("answer", "")
+                }
+        
+        elif route_type == "task":
+            # Handle specific tasks
+            task_name = route_value.lower().strip()
+            
+            if task_name == "get_time":
+                from datetime import datetime
+                current_time = datetime.now().strftime("%I:%M %p")
+                return {
+                    "success": True,
+                    "result": f"The current time is {current_time}",
+                    "answer": f"The current time is {current_time}"
+                }
+            else:
+                # Unknown task - try to handle with AI service
+                ai_service = AIService()
+                result = await ai_service.execute({
+                    "question": f"Please handle this task: {route_value}"
+                })
+                return {
+                    "success": True,
+                    "result": result.get("answer", ""),
+                    "answer": result.get("answer", "")
+                }
+        
+        else:
+            # Unknown route type - default to AI service
+            logger.warning(f"[ROUTE] Unknown route_type: {route_type}, defaulting to AI service")
+            ai_service = AIService()
+            result = await ai_service.execute({
+                "question": route_value
+            })
+            return {
+                "success": True,
+                "result": result.get("answer", ""),
+                "answer": result.get("answer", "")
+            }
+    
+    except Exception as e:
+        logger.error(f"[ROUTE] Error routing request: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "result": "",
+            "answer": ""
+        }
 
 
 @app.post("/api/system/restart")
@@ -288,11 +621,11 @@ async def get_filler_audio(persona: Optional[str] = None):
         
         # Load persona config to get filler audio paths
         if not persona:
-            persona = get_current_persona_name()
-            persona_config = load_persona_config(persona)
+            persona = await get_current_persona_name()
+            persona_config = await load_persona_config(persona)
             logger.info(f"[FILLER] 🎭 Using current persona: {persona}")
         else:
-            persona_config = load_persona_config(persona)
+            persona_config = await load_persona_config(persona)
             logger.info(f"[FILLER] 🎭 Using specified persona: {persona}")
         
         if not persona_config or "filler_audio" not in persona_config:
@@ -401,7 +734,7 @@ async def ai_ask_question_audio_stream(request: Request):
         logger.info(f"[AI STREAM] Question: {question[:100]}...")
         
         # Get TTS config - use fastest engine for streaming
-        persona_config = load_persona_config()
+        persona_config = await load_persona_config()
         fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
         voice_id = fish_cfg.get("voice_id")
         # Override to use fastest engine for AI focus mode (s1-mini is fastest)
@@ -485,7 +818,7 @@ async def text_to_audio_stream(request: Request):
         logger.info(f"[TEXT-TO-AUDIO] Converting {len(text)} chars to audio")
         
         # Get TTS config
-        persona_config = load_persona_config()
+        persona_config = await load_persona_config()
         fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
         voice_id = fish_cfg.get("voice_id")
         voice_engine = "s1"  # Use standard engine for quality
@@ -596,7 +929,7 @@ async def ai_ask_question_audio_fast(request: Request):
         
         # Generate audio with fastest engine
         logger.info(f"[AI FAST] 🎙️  Loading TTS config...")
-        persona_config = load_persona_config()
+        persona_config = await load_persona_config()
         fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
         voice_id = fish_cfg.get("voice_id")
         
@@ -1978,7 +2311,7 @@ async def generate_artist_about(req: AboutRequest):
             prompt = f"Write a concise summary about the band/artist '{artist_name}' in 250 words or less. Include their musical style, notable achievements, and influence. Be factual and informative."
 
             ai = AIService()
-            ai.reload_persona_config()
+            await ai.reload_persona_config()
             ai_resp = await ai.execute({"question": prompt})
             about_text = ai_resp.get("answer", "") if isinstance(ai_resp, dict) else ""
 
@@ -2920,6 +3253,147 @@ def get_system_uptime() -> float:
         # Final fallback: return server uptime
         return time.time() - server_start_time
 
+
+# === Music Analytics Endpoints ===
+
+@app.post("/api/music/track-play")
+async def track_music_play(request: Request):
+    """Track a song play for analytics."""
+    try:
+        from database.models import MusicSong, MusicPlay
+        
+        payload = await request.json()
+        file_path = payload.get("path")
+        duration = payload.get("duration")  # How long they listened
+        
+        if not file_path:
+            return JSONResponse(status_code=400, content={"error": "No path provided"})
+        
+        async with AsyncSessionLocal() as session:
+            # Find the song
+            song = await session.scalar(
+                select(MusicSong).where(MusicSong.file_path == file_path)
+            )
+            
+            if not song:
+                logger.warning(f"Song not found for tracking: {file_path}")
+                return {"success": False, "error": "Song not found"}
+            
+            # Increment play count
+            song.play_count = (song.play_count or 0) + 1
+            
+            # Create play record
+            play = MusicPlay(
+                song_id=song.id,
+                play_duration_seconds=duration,
+                completed="true" if duration and song.duration_seconds and duration >= song.duration_seconds * 0.8 else "false"
+            )
+            session.add(play)
+            
+            await session.commit()
+            
+            logger.info(f"Tracked play for: {song.title} (total: {song.play_count})")
+            return {"success": True, "play_count": song.play_count}
+            
+    except Exception as e:
+        logger.error(f"Error tracking play: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/music/analytics")
+async def get_music_analytics():
+    """Get music analytics data."""
+    try:
+        from database.models import MusicSong, MusicArtist, MusicAlbum, MusicPlay
+        
+        async with AsyncSessionLocal() as session:
+            # Get most played songs
+            most_played_stmt = (
+                select(MusicSong, MusicArtist.name.label("artist_name"), MusicAlbum.title.label("album_title"))
+                .join(MusicArtist, MusicSong.artist_id == MusicArtist.id)
+                .join(MusicAlbum, MusicSong.album_id == MusicAlbum.id)
+                .where(MusicSong.play_count > 0)
+                .order_by(MusicSong.play_count.desc())
+                .limit(50)
+            )
+            result = await session.execute(most_played_stmt)
+            most_played_raw = result.all()
+            
+            most_played = []
+            for song, artist_name, album_title in most_played_raw:
+                most_played.append({
+                    "id": song.id,
+                    "title": song.title,
+                    "artist": artist_name,
+                    "album": album_title,
+                    "play_count": song.play_count,
+                    "duration": song.duration_seconds,
+                    "path": song.file_path
+                })
+            
+            # Get total play count
+            total_plays_result = await session.execute(
+                select(func.sum(MusicSong.play_count))
+            )
+            total_plays = total_plays_result.scalar() or 0
+            
+            # Get total unique songs played
+            songs_played_result = await session.execute(
+                select(func.count(MusicSong.id)).where(MusicSong.play_count > 0)
+            )
+            songs_played = songs_played_result.scalar() or 0
+            
+            # Get most played artists
+            artist_plays_stmt = (
+                select(
+                    MusicArtist.name,
+                    func.sum(MusicSong.play_count).label("total_plays")
+                )
+                .join(MusicSong, MusicArtist.id == MusicSong.artist_id)
+                .where(MusicSong.play_count > 0)
+                .group_by(MusicArtist.id, MusicArtist.name)
+                .order_by(func.sum(MusicSong.play_count).desc())
+                .limit(10)
+            )
+            artist_result = await session.execute(artist_plays_stmt)
+            top_artists = [
+                {"name": name, "play_count": int(plays)}
+                for name, plays in artist_result.all()
+            ]
+            
+            # Get most played albums
+            album_plays_stmt = (
+                select(
+                    MusicAlbum.title,
+                    MusicArtist.name.label("artist_name"),
+                    func.sum(MusicSong.play_count).label("total_plays")
+                )
+                .join(MusicSong, MusicAlbum.id == MusicSong.album_id)
+                .join(MusicArtist, MusicAlbum.artist_id == MusicArtist.id)
+                .where(MusicSong.play_count > 0)
+                .group_by(MusicAlbum.id, MusicAlbum.title, MusicArtist.name)
+                .order_by(func.sum(MusicSong.play_count).desc())
+                .limit(10)
+            )
+            album_result = await session.execute(album_plays_stmt)
+            top_albums = [
+                {"title": title, "artist": artist, "play_count": int(plays)}
+                for title, artist, plays in album_result.all()
+            ]
+            
+            return {
+                "most_played": most_played,
+                "total_plays": int(total_plays),
+                "songs_played": songs_played,
+                "top_artists": top_artists,
+                "top_albums": top_albums
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting analytics: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # Mount static files for audio
 project_root = Path(__file__).parent.parent
 app.mount("/data", StaticFiles(directory=str(project_root / "data")), name="data")
@@ -3123,23 +3597,30 @@ async def get_system_ips():
 @app.get("/api/chat")
 async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optional[str] = None, mode: Optional[str] = None, persona: Optional[str] = None):
     """
-    Get chat history with pagination, filtered by mode and persona.
-    Session IDs are ignored; history is grouped by persona + mode instead.
+    Get chat history with pagination, filtered by session_id (for chat sessions), mode, and persona.
+    For chat sessions (starting with 'chat-'), filter by session_id. Otherwise filter by mode + persona.
     """
     async with AsyncSessionLocal() as session:
         # Build base query
         query = select(ChatMessage)
         count_query = select(func.count(ChatMessage.id))
         
-        # Filter by mode if provided
-        if mode:
-            query = query.where(ChatMessage.mode == mode)
-            count_query = count_query.where(ChatMessage.mode == mode)
-        
-        # Filter by persona if provided (especially important for conversational mode)
-        if persona:
-            query = query.where(ChatMessage.persona == persona)
-            count_query = count_query.where(ChatMessage.persona == persona)
+        # For chat sessions (starting with 'chat-'), filter by session_id ONLY
+        if session_id and session_id.startswith('chat-'):
+            logger.info(f"[get_chat_history] Filtering by session_id: {session_id}")
+            query = query.where(ChatMessage.session_id == session_id)
+            count_query = count_query.where(ChatMessage.session_id == session_id)
+        else:
+            # For non-chat sessions, filter by mode and persona (backward compatibility)
+            logger.info(f"[get_chat_history] Filtering by mode={mode}, persona={persona}")
+            if mode:
+                query = query.where(ChatMessage.mode == mode)
+                count_query = count_query.where(ChatMessage.mode == mode)
+            
+            # Filter by persona if provided (especially important for conversational mode)
+            if persona:
+                query = query.where(ChatMessage.persona == persona)
+                count_query = count_query.where(ChatMessage.persona == persona)
         
         # Get total count
         count_result = await session.execute(count_query)
@@ -3149,6 +3630,8 @@ async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optiona
         query = query.order_by(desc(ChatMessage.created_at)).limit(limit).offset(offset)
         result = await session.execute(query)
         messages = result.scalars().all()
+        
+        logger.info(f"[get_chat_history] Returning {len(messages)} messages for session_id={session_id}, total_count={total_count}")
         
         return {
             "messages": [
@@ -3181,12 +3664,14 @@ async def send_chat_message(request: Request):
         for attempt in range(3):
             try:
                 async with AsyncSessionLocal() as session:
+                    # For chat sessions (starting with 'chat-'), don't save mode
+                    # Mode is only relevant for non-chat sessions
                     msg = ChatMessage(
                         session_id=session_id,
                         role=role,
                         message=message_text,
                         service_name=service_name,
-                        mode=mode,
+                        mode=None if session_id.startswith('chat-') else mode,
                         persona=persona,
                         message_metadata=metadata or {},
                     )
@@ -3227,8 +3712,12 @@ async def send_chat_message(request: Request):
         logger.info(f"Using service: {actual_service_name}")
         
         # Save user message (retry on transient DB locks)
-        current_persona = get_current_persona_name()
-        session_key = f"{current_persona}_{mode}"
+        current_persona = await get_current_persona_name()
+        # Use provided session_id if it's a chat session (starts with 'chat-'), otherwise use persona_mode format
+        if session_id and session_id.startswith('chat-'):
+            session_key = session_id
+        else:
+            session_key = f"{current_persona}_{mode}"
         try:
             await asyncio.wait_for(
                 save_chat_message_with_retry(
@@ -3249,7 +3738,7 @@ async def send_chat_message(request: Request):
         # For streaming responses (AI service - Q&A mode)
         if stream and actual_service_name == "ai_service":
             ai_service = AIService()
-            ai_service.reload_persona_config()  # Ensure we have the latest persona
+            await ai_service.reload_persona_config()  # Ensure we have the latest persona
             input_data = {"question": message}
             
             async def generate_response():
@@ -3275,19 +3764,54 @@ async def send_chat_message(request: Request):
                             timeout=3,
                         )
                         message_id = assistant_msg.id
+                        
+                        # Auto-generate title from first user message if session doesn't have one
+                        async with AsyncSessionLocal() as session:
+                            session_result = await session.execute(
+                                select(ChatSession).where(ChatSession.session_id == session_key)
+                            )
+                            chat_session = session_result.scalar_one_or_none()
+                            
+                            if not chat_session or not chat_session.title:
+                                # Get first user message to use as title
+                                first_msg_result = await session.execute(
+                                    select(ChatMessage)
+                                    .where(ChatMessage.session_id == session_key)
+                                    .where(ChatMessage.role == "user")
+                                    .order_by(ChatMessage.created_at)
+                                    .limit(1)
+                                )
+                                first_msg = first_msg_result.scalar_one_or_none()
+                                
+                                if first_msg:
+                                    # Use first 50 chars of first message as title
+                                    auto_title = first_msg.message[:50].strip()
+                                    if len(first_msg.message) > 50:
+                                        auto_title += "..."
+                                    
+                                    if chat_session:
+                                        chat_session.title = auto_title
+                                        chat_session.updated_at = datetime.now(timezone.utc)
+                                    else:
+                                        chat_session = ChatSession(
+                                            session_id=session_key,
+                                            title=auto_title
+                                        )
+                                        session.add(chat_session)
+                                    await session.commit()
                     except Exception as e:
                         logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
                         assistant_msg = None
                     
                     # Save transcript
-                        try:
-                            persona_config = load_persona_config(current_persona)
-                            model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
-                            # Get audio file path from message metadata if available
-                            audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
-                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_key, audio_file=audio_file_path, mode="qa", expert_type="general")
-                        except Exception as e:
-                            logger.warning(f"Failed to save transcript: {e}")
+                    try:
+                        persona_config = await load_persona_config(current_persona)
+                        model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
+                        # Get audio file path from message metadata if available
+                        audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
+                        save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_key, audio_file=audio_file_path, mode="qa", expert_type="general")
+                    except Exception as e:
+                        logger.warning(f"Failed to save transcript: {e}")
                     
                     yield f"data: {json.dumps({'chunk': '', 'done': True, 'message_id': message_id})}\n\n"
                 except Exception as e:
@@ -3299,7 +3823,7 @@ async def send_chat_message(request: Request):
         # For streaming responses (RAG service - Conversational mode)
         if stream and actual_service_name == "rag_service":
             rag_service = RAGService()
-            rag_service.reload_persona_config()  # Ensure we have the latest persona
+            await rag_service.reload_persona_config()  # Ensure we have the latest persona
             
             async def generate_response():
                 full_response = ""
@@ -3336,13 +3860,48 @@ async def send_chat_message(request: Request):
                             timeout=3,
                         )
                         message_id = assistant_msg.id
+                        
+                        # Auto-generate title from first user message if session doesn't have one
+                        async with AsyncSessionLocal() as session:
+                            session_result = await session.execute(
+                                select(ChatSession).where(ChatSession.session_id == session_key)
+                            )
+                            chat_session = session_result.scalar_one_or_none()
+                            
+                            if not chat_session or not chat_session.title:
+                                # Get first user message to use as title
+                                first_msg_result = await session.execute(
+                                    select(ChatMessage)
+                                    .where(ChatMessage.session_id == session_key)
+                                    .where(ChatMessage.role == "user")
+                                    .order_by(ChatMessage.created_at)
+                                    .limit(1)
+                                )
+                                first_msg = first_msg_result.scalar_one_or_none()
+                                
+                                if first_msg:
+                                    # Use first 50 chars of first message as title
+                                    auto_title = first_msg.message[:50].strip()
+                                    if len(first_msg.message) > 50:
+                                        auto_title += "..."
+                                    
+                                    if chat_session:
+                                        chat_session.title = auto_title
+                                        chat_session.updated_at = datetime.now(timezone.utc)
+                                    else:
+                                        chat_session = ChatSession(
+                                            session_id=session_key,
+                                            title=auto_title
+                                        )
+                                        session.add(chat_session)
+                                    await session.commit()
                     except Exception as e:
                         logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
                         assistant_msg = None
                     
                     # Save transcript
                         try:
-                            persona_config = load_persona_config(current_persona)
+                            persona_config = await load_persona_config(current_persona)
                             model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
                             # Get audio file path from message metadata if available
                             audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
@@ -3364,6 +3923,145 @@ async def send_chat_message(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/chat/sessions")
+async def create_chat_session(request: Request):
+    """Create a new chat session with a temporary title."""
+    try:
+        data = await request.json()
+        session_id = data.get("session_id")
+        
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        async with AsyncSessionLocal() as session:
+            # Check if session already exists
+            result = await session.execute(
+                select(ChatSession).where(ChatSession.session_id == session_id)
+            )
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                return {
+                    "success": True,
+                    "session_id": existing.session_id,
+                    "title": existing.title
+                }
+            
+            # Create temp title: session_id + timestamp
+            # Extract timestamp from session_id (format: chat-1234567890)
+            timestamp = session_id.replace('chat-', '') if session_id.startswith('chat-') else str(int(datetime.now(timezone.utc).timestamp() * 1000))
+            temp_title = f"{session_id} {timestamp}"
+            
+            # Create new session
+            chat_session = ChatSession(
+                session_id=session_id,
+                title=temp_title
+            )
+            session.add(chat_session)
+            await session.commit()
+            
+            return {
+                "success": True,
+                "session_id": chat_session.session_id,
+                "title": chat_session.title
+            }
+    except Exception as e:
+        logger.error(f"Error creating chat session: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/chat/sessions")
+async def get_chat_sessions():
+    """Get all chat sessions with their titles."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ChatSession)
+                .where(ChatSession.session_id.like('chat-%'))
+                .order_by(desc(ChatSession.updated_at))
+            )
+            sessions = result.scalars().all()
+            
+            return {
+                "success": True,
+                "sessions": [
+                    {
+                        "session_id": s.session_id,
+                        "title": s.title,
+                        "created_at": s.created_at.isoformat() if s.created_at else None,
+                        "updated_at": s.updated_at.isoformat() if s.updated_at else None
+                    }
+                    for s in sessions
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting chat sessions: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.put("/api/chat/sessions/{session_id}/title")
+async def update_chat_session_title(session_id: str, request: Request):
+    """Update the title of a chat session."""
+    try:
+        data = await request.json()
+        title = data.get("title", "").strip()
+        
+        async with AsyncSessionLocal() as session:
+            # Get or create session
+            result = await session.execute(
+                select(ChatSession).where(ChatSession.session_id == session_id)
+            )
+            chat_session = result.scalar_one_or_none()
+            
+            if chat_session:
+                chat_session.title = title if title else None
+                chat_session.updated_at = datetime.now(timezone.utc)
+            else:
+                chat_session = ChatSession(
+                    session_id=session_id,
+                    title=title if title else None
+                )
+                session.add(chat_session)
+            
+            await session.commit()
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "title": chat_session.title
+            }
+    except Exception as e:
+        logger.error(f"Error updating chat session title: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/chat/sessions/{session_id}/title")
+async def get_chat_session_title(session_id: str):
+    """Get the title of a chat session."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ChatSession).where(ChatSession.session_id == session_id)
+            )
+            chat_session = result.scalar_one_or_none()
+            
+            if chat_session:
+                return {
+                    "success": True,
+                    "session_id": session_id,
+                    "title": chat_session.title
+                }
+            else:
+                return {
+                    "success": True,
+                    "session_id": session_id,
+                    "title": None
+                }
+    except Exception as e:
+        logger.error(f"Error getting chat session title: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/tts/generate")
 async def generate_tts(request: Request):
     """Generate audio from text using Fish Audio API with current persona voice."""
@@ -3376,7 +4074,7 @@ async def generate_tts(request: Request):
         raise HTTPException(status_code=400, detail="Text is required")
     
     # Load persona config to get voice settings
-    persona_config = load_persona_config(persona_name) if persona_name else load_persona_config()
+    persona_config = await load_persona_config(persona_name) if persona_name else await load_persona_config()
     if not persona_config:
         raise HTTPException(status_code=404, detail="Persona config not found")
     
@@ -3467,8 +4165,8 @@ async def play_last_message_audio(request: Request):
                     }
             
             # Generate audio for the message
-            current_persona = get_current_persona_name()
-            persona_config = load_persona_config(current_persona)
+            current_persona = await get_current_persona_name()
+            persona_config = await load_persona_config(current_persona)
             if not persona_config:
                 raise HTTPException(status_code=404, detail="Persona config not found")
             
@@ -3564,8 +4262,8 @@ async def generate_audio_for_message(request: Request):
                     }
             
             # Generate audio for the message
-            current_persona = get_current_persona_name()
-            persona_config = load_persona_config(current_persona)
+            current_persona = await get_current_persona_name()
+            persona_config = await load_persona_config(current_persona)
             if not persona_config:
                 raise HTTPException(status_code=404, detail="Persona config not found")
             
@@ -3620,9 +4318,9 @@ async def generate_audio_for_message(request: Request):
 @app.get("/api/personas")
 async def get_personas():
     """Get list of available personas and current persona."""
-    personas = list_available_personas()
-    current = get_current_persona_name()
-    current_config = load_persona_config(current)
+    personas = await list_available_personas()
+    current = await get_current_persona_name()
+    current_config = await load_persona_config(current)
     current_title = "CYBER" if current == "default" else (current_config.get("title", current) if current_config else current)
     return {
         "personas": personas,
@@ -3634,7 +4332,7 @@ async def get_personas():
 @app.get("/api/expert-types")
 async def get_expert_types_endpoint():
     """Get list of available expert types."""
-    expert_types = list_expert_types()
+    expert_types = await list_expert_types()
     return {
         "expert_types": expert_types
     }
@@ -3643,7 +4341,7 @@ async def get_expert_types_endpoint():
 @app.get("/api/expert-types")
 async def get_expert_types():
     """Get list of available expert types."""
-    expert_types = list_expert_types()
+    expert_types = await list_expert_types()
     return {
         "expert_types": expert_types
     }
@@ -3652,7 +4350,7 @@ async def get_expert_types():
 @app.get("/api/location")
 async def get_location():
     """Get location configuration."""
-    location_config = load_location_config()
+    location_config = await load_location_config()
     return location_config
 
 
@@ -3660,7 +4358,7 @@ async def get_location():
 @app.get("/api/config/persona/{persona_name}")
 async def get_persona_config_endpoint(persona_name: str):
     """Get a specific persona configuration."""
-    config = load_persona_config(persona_name)
+    config = await load_persona_config(persona_name)
     if not config:
         raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
     return config
@@ -3671,7 +4369,7 @@ async def save_persona_config_endpoint(persona_name: str, request: Request):
     """Save a persona configuration."""
     try:
         config = await request.json()
-        success = save_persona_config(persona_name, config)
+        success = await save_persona_config(persona_name, config)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save persona config")
         return {"success": True, "message": f"Persona '{persona_name}' config saved"}
@@ -3697,7 +4395,7 @@ async def create_persona_config_endpoint(persona_name: str, request: Request):
 @app.get("/api/config/location")
 async def get_location_config_endpoint():
     """Get location configuration."""
-    location_config = load_location_config()
+    location_config = await load_location_config()
     return location_config
 
 
@@ -3706,7 +4404,7 @@ async def save_location_config_endpoint(request: Request):
     """Save location configuration."""
     try:
         config = await request.json()
-        success = save_location_config(config)
+        success = await save_location_config(config)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save location config")
         return {"success": True, "message": "Location config saved"}
@@ -3718,7 +4416,7 @@ async def save_location_config_endpoint(request: Request):
 @app.get("/api/config/api_keys")
 async def get_api_keys_config_endpoint():
     """Get API keys configuration."""
-    api_keys_config = load_api_keys()
+    api_keys_config = await load_api_keys()
     return api_keys_config
 
 
@@ -3727,7 +4425,7 @@ async def save_api_keys_config_endpoint(request: Request):
     """Save API keys configuration."""
     try:
         config = await request.json()
-        success = save_api_keys(config)
+        success = await save_api_keys(config)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save API keys config")
         return {"success": True, "message": "API keys config saved"}
@@ -3736,10 +4434,89 @@ async def save_api_keys_config_endpoint(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/config/system")
+async def get_system_config_endpoint():
+    """Get system configuration from database."""
+    try:
+        from database.base import AsyncSessionLocal
+        from database.models import SystemConfig
+        from sqlalchemy import select
+        
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(SystemConfig))
+            config_items = result.scalars().all()
+            
+            if config_items:
+                config = {}
+                for item in config_items:
+                    config[item.config_key] = item.config_value
+                return config
+            else:
+                # Return default config if nothing in database
+                return {
+                    "paths": {
+                        "music_directory": "/Users/davidnorminton/Music",
+                        "audio_directory": "data/audio",
+                        "data_directory": "data"
+                    },
+                    "server": {
+                        "host": "0.0.0.0",
+                        "port": 1337,
+                        "websocket_port": 8765,
+                        "database_url": "postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly",
+                        "log_level": "INFO"
+                    },
+                    "ai": {
+                        "default_model": "claude-3-5-haiku-20241022"
+                    },
+                    "processing": {
+                        "max_concurrent_jobs": 10,
+                        "job_timeout": 300
+                    },
+                    "music": {
+                        "auto_scan_on_startup": False,
+                        "cache_album_covers": True
+                    }
+                }
+    except Exception as e:
+        logger.error(f"Error loading system config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/config/system")
+async def save_system_config_endpoint(request: Request):
+    """Save system configuration to database."""
+    try:
+        from database.base import AsyncSessionLocal
+        from database.models import SystemConfig
+        from sqlalchemy import select
+        
+        config = await request.json()
+        
+        async with AsyncSessionLocal() as session:
+            for key, value in config.items():
+                result = await session.execute(
+                    select(SystemConfig).where(SystemConfig.config_key == key)
+                )
+                existing = result.scalar_one_or_none()
+                
+                if existing:
+                    existing.config_value = value
+                else:
+                    session.add(SystemConfig(config_key=key, config_value=value))
+            
+            await session.commit()
+            logger.info("System config saved successfully to database")
+            return {"success": True, "message": "System config saved"}
+    except Exception as e:
+        logger.error(f"Error saving system config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/config/router")
 async def get_router_config_endpoint():
     """Get router configuration."""
-    cfg = load_router_config()
+    cfg = await load_router_config()
     if cfg is None:
         raise HTTPException(status_code=404, detail="router.config not found")
     return cfg
@@ -3752,7 +4529,7 @@ async def save_router_config_endpoint(request: Request):
         cfg = await request.json()
         if not isinstance(cfg, dict):
             raise HTTPException(status_code=400, detail="Router config must be a JSON object")
-        if not save_router_config(cfg):
+        if not await save_router_config(cfg):
             raise HTTPException(status_code=500, detail="Failed to save router config")
         return {"success": True, "message": "Router config saved"}
     except HTTPException:
@@ -3760,6 +4537,700 @@ async def save_router_config_endpoint(request: Request):
     except Exception as e:
         logger.error(f"Error saving router config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _fetch_account_info(account_number: str, api_key: str) -> Optional[Dict[str, Any]]:
+    """Fetch account information from Octopus Energy API. Returns account data or None."""
+    try:
+        account_url = f"https://api.octopus.energy/v1/accounts/{account_number}/"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(account_url, auth=(api_key, ""))
+            
+            if response.status_code == 200:
+                account_data = response.json()
+                logger.info(f"Successfully fetched account data for {account_number}")
+                return account_data
+            else:
+                logger.warning(f"Account endpoint returned {response.status_code} for account {account_number}")
+                return None
+    except Exception as e:
+        logger.warning(f"Error fetching account info: {e}")
+        return None
+
+
+async def _get_tariff_from_account(account_data: Dict[str, Any], meter_point: str) -> Optional[str]:
+    """Extract tariff code from account data for a specific meter point."""
+    try:
+        now = datetime.now(timezone.utc)
+        
+        # Iterate through properties
+        for property_data in account_data.get("properties", []):
+            # Check electricity meter points
+            for mp_data in property_data.get("electricity_meter_points", []):
+                if mp_data.get("mpan") == meter_point:
+                    # Find current agreement
+                    for agreement in mp_data.get("agreements", []):
+                        valid_from = datetime.fromisoformat(agreement["valid_from"].replace('Z', '+00:00'))
+                        valid_to = datetime.fromisoformat(agreement["valid_to"].replace('Z', '+00:00')) if agreement.get("valid_to") else None
+                        if valid_from <= now and (not valid_to or valid_to >= now):
+                            tariff_code = agreement.get("tariff_code")
+                            logger.info(f"Found tariff code from account endpoint: {tariff_code}")
+                            return tariff_code
+    except Exception as e:
+        logger.warning(f"Error extracting tariff from account data: {e}")
+    
+    return None
+
+
+async def _fetch_and_store_tariff(meter_point: str, api_key: str, account_number: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Fetch tariff information and store in database. Returns tariff info or None."""
+    try:
+        tariff_code = None
+        
+        # First, try account endpoint if account number is provided
+        if account_number:
+            account_data = await _fetch_account_info(account_number, api_key)
+            if account_data:
+                tariff_code = await _get_tariff_from_account(account_data, meter_point)
+        
+        # If account endpoint didn't work, try agreements endpoint
+        if not tariff_code:
+            agreements_url = f"https://api.octopus.energy/v1/electricity-meter-points/{meter_point}/agreements/"
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                agreements_response = await client.get(agreements_url, auth=(api_key, ""))
+                
+                if agreements_response.status_code == 200:
+                    try:
+                        agreements_data = agreements_response.json()
+                        # Find current agreement
+                        now = datetime.now(timezone.utc)
+                        for agreement in agreements_data.get("results", []):
+                            valid_from = datetime.fromisoformat(agreement["valid_from"].replace('Z', '+00:00'))
+                            valid_to = datetime.fromisoformat(agreement["valid_to"].replace('Z', '+00:00')) if agreement.get("valid_to") else None
+                            if valid_from <= now and (not valid_to or valid_to >= now):
+                                tariff_code = agreement.get("tariff_code")
+                                logger.info(f"Found tariff code from agreements: {tariff_code}")
+                                break
+                    except Exception as e:
+                        logger.warning(f"Error parsing agreements data: {e}")
+        
+        if not tariff_code:
+            # Try to get from database - might have been manually set
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(OctopusEnergyTariff)
+                    .where(OctopusEnergyTariff.meter_point == meter_point)
+                    .order_by(desc(OctopusEnergyTariff.valid_from))
+                    .limit(1)
+                )
+                existing_tariff = result.scalar_one_or_none()
+                if existing_tariff and existing_tariff.tariff_code:
+                    tariff_code = existing_tariff.tariff_code
+                    logger.info(f"Using tariff code from database: {tariff_code}")
+        
+        if not tariff_code:
+            logger.warning(f"Could not find tariff code for meter point {meter_point} - tariff lookup will be skipped")
+            return None
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            
+            # Get product info
+            product_code = tariff_code.split("-")[0] if "-" in tariff_code else None
+            if not product_code:
+                # Try to extract from tariff code
+                parts = tariff_code.split("-")
+                if len(parts) >= 2:
+                    product_code = "-".join(parts[:-1])
+            
+            # Get product details
+            product_url = f"https://api.octopus.energy/v1/products/{tariff_code.split('/')[-1] if '/' in tariff_code else tariff_code}/"
+            product_response = await client.get(product_url)
+            if product_response.status_code != 200:
+                # Try with product code
+                if product_code:
+                    product_url = f"https://api.octopus.energy/v1/products/{product_code}/"
+                    product_response = await client.get(product_url)
+            
+            product_data = product_response.json() if product_response.status_code == 200 else {}
+            is_prepay = product_data.get("is_prepay", False)
+            
+            # Get electricity tariffs for this product
+            tariffs_url = f"https://api.octopus.energy/v1/products/{product_code or tariff_code}/electricity-tariffs/"
+            tariffs_response = await client.get(tariffs_url)
+            if tariffs_response.status_code != 200:
+                return None
+            
+            tariffs_data = tariffs_response.json()
+            
+            # Find prepay tariff or first available
+            active_tariff = None
+            for tariff in tariffs_data.get("results", []):
+                if is_prepay:
+                    # Look for prepay-specific tariff
+                    if "prepay" in tariff.get("code", "").lower() or tariff.get("code") == tariff_code:
+                        active_tariff = tariff
+                        break
+                else:
+                    # For non-prepay, use first or matching
+                    if tariff.get("code") == tariff_code or not active_tariff:
+                        active_tariff = tariff
+            
+            if not active_tariff and tariffs_data.get("results"):
+                active_tariff = tariffs_data["results"][0]
+            
+            if not active_tariff:
+                return None
+            
+            # Get unit rates - try different endpoint patterns
+            unit_rates_url = None
+            if active_tariff.get("direct_debit_monthly"):
+                unit_rates_url = f"{active_tariff['direct_debit_monthly']}/standard-unit-rates/"
+            elif active_tariff.get("links"):
+                for link in active_tariff["links"]:
+                    if link.get("rel") == "self":
+                        unit_rates_url = f"{link['href']}/standard-unit-rates/"
+                        break
+            
+            if not unit_rates_url:
+                # Fallback: construct from tariff code
+                tariff_code_clean = active_tariff.get("code") or tariff_code
+                unit_rates_url = f"https://api.octopus.energy/v1/products/{product_code or tariff_code_clean.split('-')[0]}/electricity-tariffs/{tariff_code_clean}/standard-unit-rates/"
+            
+            unit_rates_response = await client.get(unit_rates_url)
+            if unit_rates_response.status_code != 200:
+                logger.warning(f"Could not fetch unit rates from {unit_rates_url}")
+                return None
+            
+            unit_rates_data = unit_rates_response.json()
+            
+            # Get current rate
+            current_rate = None
+            valid_from_dt = None
+            valid_to_dt = None
+            now = datetime.now(timezone.utc)
+            for rate in unit_rates_data.get("results", []):
+                valid_from = datetime.fromisoformat(rate["valid_from"].replace('Z', '+00:00'))
+                valid_to = datetime.fromisoformat(rate["valid_to"].replace('Z', '+00:00')) if rate.get("valid_to") else None
+                if valid_from <= now and (not valid_to or valid_to >= now):
+                    current_rate = rate["value_inc_vat"]
+                    valid_from_dt = valid_from
+                    valid_to_dt = valid_to
+                    break
+            
+            # Get standing charge
+            standing_charge_url = unit_rates_url.replace("/standard-unit-rates/", "/standing-charges/")
+            standing_charge_response = await client.get(standing_charge_url)
+            standing_charge_data = standing_charge_response.json() if standing_charge_response.status_code == 200 else {}
+            
+            current_standing_charge = None
+            for charge in standing_charge_data.get("results", []):
+                valid_from = datetime.fromisoformat(charge["valid_from"].replace('Z', '+00:00'))
+                valid_to = datetime.fromisoformat(charge["valid_to"].replace('Z', '+00:00')) if charge.get("valid_to") else None
+                if valid_from <= now and (not valid_to or valid_to >= now):
+                    current_standing_charge = charge["value_inc_vat"]
+                    break
+            
+            if current_rate is None:
+                return None
+            
+            # Store in database
+            async with AsyncSessionLocal() as session:
+                # Check if we have a current tariff record
+                result = await session.execute(
+                    select(OctopusEnergyTariff)
+                    .where(OctopusEnergyTariff.meter_point == meter_point)
+                    .where(
+                        or_(
+                            OctopusEnergyTariff.valid_to.is_(None),
+                            OctopusEnergyTariff.valid_to >= now
+                        )
+                    )
+                    .order_by(desc(OctopusEnergyTariff.valid_from))
+                    .limit(1)
+                )
+                existing = result.scalar_one_or_none()
+                
+                # Only create new record if rate changed or no existing record
+                if not existing or existing.unit_rate != current_rate:
+                    # Mark old record as expired if exists
+                    if existing:
+                        existing.valid_to = now
+                    
+                    # Create new tariff record
+                    tariff_record = OctopusEnergyTariff(
+                        meter_point=meter_point,
+                        tariff_code=tariff_code,
+                        product_name=product_data.get("display_name", ""),
+                        is_prepay="true" if is_prepay else "false",
+                        unit_rate=current_rate,
+                        standing_charge=current_standing_charge,
+                        valid_from=valid_from_dt or now,
+                        valid_to=valid_to_dt
+                    )
+                    session.add(tariff_record)
+                    await session.commit()
+                    logger.info(f"Stored new tariff: {current_rate}p/kWh for meter {meter_point}")
+            
+            return {
+                "success": True,
+                "tariff_code": tariff_code,
+                "product_name": product_data.get("display_name", ""),
+                "is_prepay": is_prepay,
+                "unit_rate": current_rate,
+                "standing_charge": current_standing_charge,
+            }
+    except Exception as e:
+        logger.error(f"Error fetching Octopus Energy tariff: {e}", exc_info=True)
+        return None
+
+
+@app.get("/api/octopus/tariff")
+async def get_octopus_tariff():
+    """Get tariff information for the meter to calculate costs."""
+    try:
+        api_key = await _get_octopus_api_key()
+        if not api_key:
+            return {
+                "success": False,
+                "error": "Octopus Energy API key not configured"
+            }
+        meter_point = "2343383923410"
+        
+        # Check for manual override in system config
+        try:
+            async with AsyncSessionLocal() as session:
+                system_config_result = await session.execute(
+                    select(SystemConfig).where(SystemConfig.key == "system")
+                )
+                system_config = system_config_result.scalar_one_or_none()
+                if system_config and system_config.value:
+                    octopus_config = system_config.value.get("octopus", {})
+                    if octopus_config.get("unit_rate_override"):
+                        # Use manual override
+                        return {
+                            "success": True,
+                            "tariff_code": octopus_config.get("tariff_code", "MANUAL"),
+                            "product_name": "Manual Configuration",
+                            "is_prepay": False,
+                            "unit_rate": float(octopus_config["unit_rate_override"]),
+                            "standing_charge": None,
+                            "manual_override": True
+                        }
+        except Exception as config_err:
+            logger.debug(f"Could not check system config for override: {config_err}")
+        
+        # Try to get from database first
+        now = datetime.now(timezone.utc)
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(OctopusEnergyTariff)
+                .where(OctopusEnergyTariff.meter_point == meter_point)
+                .where(
+                    or_(
+                        OctopusEnergyTariff.valid_to.is_(None),
+                        OctopusEnergyTariff.valid_to >= now
+                    )
+                )
+                .order_by(desc(OctopusEnergyTariff.valid_from))
+                .limit(1)
+            )
+            db_tariff = result.scalar_one_or_none()
+            
+            # Check if tariff is recent (less than 24 hours old)
+            if db_tariff:
+                age_hours = (now - db_tariff.updated_at.replace(tzinfo=timezone.utc)).total_seconds() / 3600
+                if age_hours < 24:
+                    return {
+                        "success": True,
+                        "tariff_code": db_tariff.tariff_code,
+                        "product_name": db_tariff.product_name,
+                        "is_prepay": db_tariff.is_prepay == "true",
+                        "unit_rate": db_tariff.unit_rate,
+                        "standing_charge": db_tariff.standing_charge,
+                        "cached": True
+                    }
+        
+        # Fetch fresh tariff data
+        tariff_info = await _fetch_and_store_tariff(meter_point, api_key, account_number)
+        
+        if tariff_info:
+            return tariff_info
+        else:
+            # Return database record if available, even if old
+            if db_tariff:
+                return {
+                    "success": True,
+                    "tariff_code": db_tariff.tariff_code,
+                    "product_name": db_tariff.product_name,
+                    "is_prepay": db_tariff.is_prepay == "true",
+                    "unit_rate": db_tariff.unit_rate,
+                    "standing_charge": db_tariff.standing_charge,
+                    "cached": True,
+                    "warning": "Using cached tariff data"
+                }
+            return {
+                "success": False,
+                "error": "Tariff code not found",
+                "message": "Unable to determine tariff for cost calculation"
+            }
+    except Exception as e:
+        logger.error(f"Error in get_octopus_tariff: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to fetch tariff information"
+        }
+
+
+@app.get("/api/octopus/consumption")
+async def get_octopus_consumption():
+    """Get electricity consumption data from Octopus Energy API."""
+    try:
+        # Octopus Energy API credentials
+        api_key = await _get_octopus_api_key()
+        if not api_key:
+            return {
+                "success": False,
+                "error": "Octopus Energy API key not configured"
+            }
+        meter_point = "2343383923410"
+        meter_serial = "22L4381884"
+        
+        # Build the API URL
+        url = f"https://api.octopus.energy/v1/electricity-meter-points/{meter_point}/meters/{meter_serial}/consumption/"
+        
+        # Calculate period: last 7 days
+        now = datetime.now(timezone.utc)
+        period_to = now
+        period_from = now - timedelta(days=7)
+        
+        # Make authenticated request
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                url,
+                auth=(api_key, ""),  # Basic auth with API key as username
+                params={
+                    "page_size": 100,
+                    "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "order_by": "period"
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Results come in chronological order (oldest first) with order_by=period
+            results = data.get("results", [])
+            if results:
+                results.reverse()  # Reverse to show most recent first
+            
+            # Store readings in database
+            stored_count = 0
+            try:
+                async with AsyncSessionLocal() as session:
+                    for reading in results:
+                        interval_start_str = reading.get("interval_start")
+                        interval_end_str = reading.get("interval_end")
+                        consumption = reading.get("consumption")
+                        
+                        if not interval_start_str or consumption is None:
+                            continue
+                        
+                        # Parse datetime strings
+                        try:
+                            interval_start = datetime.fromisoformat(interval_start_str.replace('Z', '+00:00'))
+                            interval_end = datetime.fromisoformat(interval_end_str.replace('Z', '+00:00')) if interval_end_str else None
+                        except Exception as parse_err:
+                            logger.warning(f"Failed to parse date: {interval_start_str} - {parse_err}")
+                            continue
+                        
+                        # Check if this reading already exists
+                        existing = await session.execute(
+                            select(OctopusEnergyConsumption).where(
+                                OctopusEnergyConsumption.interval_start == interval_start,
+                                OctopusEnergyConsumption.meter_point == meter_point,
+                                OctopusEnergyConsumption.meter_serial == meter_serial
+                            )
+                        )
+                        if existing.scalar_one_or_none():
+                            continue  # Already stored
+                        
+                        # Create new record
+                        consumption_record = OctopusEnergyConsumption(
+                            interval_start=interval_start,
+                            interval_end=interval_end,
+                            consumption=consumption,
+                            meter_point=meter_point,
+                            meter_serial=meter_serial
+                        )
+                        session.add(consumption_record)
+                        stored_count += 1
+                    
+                    if stored_count > 0:
+                        await session.commit()
+                        logger.info(f"Octopus Energy: Stored {stored_count} new consumption readings")
+            except Exception as db_err:
+                logger.warning(f"Failed to store Octopus Energy data: {db_err}")
+                # Continue even if storage fails
+            
+            logger.info(f"Octopus Energy: Retrieved {len(results)} consumption readings")
+            
+            # Get tariff information from database for cost calculation
+            tariff_info = None
+            unit_rate_pence = None
+            try:
+                now = datetime.now(timezone.utc)
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(
+                        select(OctopusEnergyTariff)
+                        .where(OctopusEnergyTariff.meter_point == meter_point)
+                        .where(
+                            or_(
+                                OctopusEnergyTariff.valid_to.is_(None),
+                                OctopusEnergyTariff.valid_to >= now
+                            )
+                        )
+                        .order_by(desc(OctopusEnergyTariff.valid_from))
+                        .limit(1)
+                    )
+                    db_tariff = result.scalar_one_or_none()
+                    if db_tariff:
+                        tariff_info = {
+                            "success": True,
+                            "tariff_code": db_tariff.tariff_code,
+                            "product_name": db_tariff.product_name,
+                            "is_prepay": db_tariff.is_prepay == "true",
+                            "unit_rate": db_tariff.unit_rate,
+                            "standing_charge": db_tariff.standing_charge,
+                        }
+                        unit_rate_pence = db_tariff.unit_rate
+            except Exception as tariff_err:
+                logger.debug(f"Could not get tariff info from database: {tariff_err}")
+            
+            # Calculate costs if tariff info is available
+            if unit_rate_pence:
+                for reading in results:
+                    consumption = reading.get("consumption", 0)
+                    if consumption:
+                        # Convert pence per kWh to cost
+                        cost_pence = consumption * unit_rate_pence
+                        reading["cost_pence"] = round(cost_pence, 2)
+                        reading["cost_pounds"] = round(cost_pence / 100, 2)
+            
+            return {
+                "success": True,
+                "results": results,
+                "count": data.get("count", 0),
+                "stored": stored_count,
+                "tariff": tariff_info
+            }
+    except httpx.HTTPStatusError as e:
+        error_text = ""
+        try:
+            error_text = e.response.text
+        except:
+            pass
+        logger.error(f"Octopus Energy API error: {e.response.status_code} - {error_text}")
+        return {
+            "success": False,
+            "error": f"API error: {e.response.status_code}",
+            "message": error_text or "Failed to fetch consumption data",
+            "details": error_text
+        }
+    except Exception as e:
+        logger.error(f"Error fetching Octopus Energy data: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to fetch consumption data"
+        }
+
+
+@app.get("/api/octopus/history")
+async def get_octopus_history(days: int = 7):
+    """Get historical Octopus Energy consumption data from database for graphing."""
+    try:
+        meter_point = "2343383923410"
+        meter_serial = "22L4381884"
+        
+        # Calculate date range
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+        
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(OctopusEnergyConsumption)
+                .where(
+                    OctopusEnergyConsumption.meter_point == meter_point,
+                    OctopusEnergyConsumption.meter_serial == meter_serial,
+                    OctopusEnergyConsumption.interval_start >= start_date,
+                    OctopusEnergyConsumption.interval_start <= end_date
+                )
+                .order_by(OctopusEnergyConsumption.interval_start)
+            )
+            readings = result.scalars().all()
+            
+            # Get tariff rates for the period (for Agile tariffs with variable rates)
+            tariff_rates = {}
+            tariff_info = None
+            unit_rate_pence = None
+            try:
+                now = datetime.now(timezone.utc)
+                result_tariff = await session.execute(
+                    select(OctopusEnergyTariff)
+                    .where(OctopusEnergyTariff.meter_point == meter_point)
+                    .order_by(desc(OctopusEnergyTariff.valid_from))
+                    .limit(1)
+                )
+                db_tariff = result_tariff.scalar_one_or_none()
+                
+                if db_tariff:
+                    tariff_info = {
+                        "success": True,
+                        "tariff_code": db_tariff.tariff_code,
+                        "product_name": db_tariff.product_name,
+                        "is_prepay": db_tariff.is_prepay == "true",
+                        "unit_rate": db_tariff.unit_rate,
+                        "standing_charge": db_tariff.standing_charge,
+                    }
+                    unit_rate_pence = db_tariff.unit_rate  # Default fallback
+                    
+                    # Get historical rates if available
+                    if db_tariff.tariff_code:
+                        result_rates = await session.execute(
+                            select(OctopusEnergyTariffRate)
+                            .where(
+                                OctopusEnergyTariffRate.meter_point == meter_point,
+                                OctopusEnergyTariffRate.tariff_code == db_tariff.tariff_code,
+                                OctopusEnergyTariffRate.valid_from >= start_date,
+                                OctopusEnergyTariffRate.valid_from <= end_date
+                            )
+                            .order_by(OctopusEnergyTariffRate.valid_from)
+                        )
+                        rates = result_rates.scalars().all()
+                        
+                        # Create a lookup dict: timestamp -> rate
+                        for rate in rates:
+                            tariff_rates[rate.valid_from.isoformat()] = rate.unit_rate
+            except Exception as e:
+                logger.debug(f"Could not get tariff rates: {e}")
+            
+            # Format data for charting
+            chart_data = []
+            total_cost = 0
+            for reading in readings:
+                # Try to find matching tariff rate for this reading
+                reading_rate = unit_rate_pence
+                if tariff_rates:
+                    # Find the rate that applies to this reading
+                    reading_time = reading.interval_start
+                    # Find the closest rate that's <= reading_time
+                    for rate_time_str, rate_value in sorted(tariff_rates.items(), reverse=True):
+                        rate_time = datetime.fromisoformat(rate_time_str.replace('Z', '+00:00'))
+                        if rate_time <= reading_time:
+                            reading_rate = rate_value
+                            break
+                
+                cost_pence = None
+                cost_pounds = None
+                if reading_rate:
+                    cost_pence = reading.consumption * reading_rate
+                    cost_pounds = cost_pence / 100
+                    total_cost += cost_pounds
+                
+                chart_data.append({
+                    "date": reading.interval_start.isoformat(),
+                    "consumption": reading.consumption,
+                    "cost_pence": round(cost_pence, 2) if cost_pence else None,
+                    "cost_pounds": round(cost_pounds, 2) if cost_pounds else None,
+                    "unit_rate": reading_rate,
+                    "interval_start": reading.interval_start.isoformat(),
+                    "interval_end": reading.interval_end.isoformat() if reading.interval_end else None
+                })
+            
+            return {
+                "success": True,
+                "data": chart_data,
+                "count": len(chart_data),
+                "days": days,
+                "total_cost_pounds": round(total_cost, 2) if total_cost else None,
+                "tariff": tariff_info
+            }
+    except Exception as e:
+        logger.error(f"Error fetching Octopus Energy history: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to fetch historical data"
+        }
+
+
+@app.get("/api/octopus/tariff-history")
+async def get_octopus_tariff_history(days: int = 7):
+    """Get historical Octopus Energy tariff rates from database for graphing."""
+    try:
+        meter_point = "2343383923410"
+        
+        # Calculate date range
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+        
+        async with AsyncSessionLocal() as session:
+            # Get current tariff code
+            result_tariff = await session.execute(
+                select(OctopusEnergyTariff)
+                .where(OctopusEnergyTariff.meter_point == meter_point)
+                .order_by(desc(OctopusEnergyTariff.valid_from))
+                .limit(1)
+            )
+            db_tariff = result_tariff.scalar_one_or_none()
+            
+            if not db_tariff or not db_tariff.tariff_code:
+                return {
+                    "success": False,
+                    "error": "No tariff code found",
+                    "message": "Please configure tariff code in settings"
+                }
+            
+            # Get historical rates
+            result_rates = await session.execute(
+                select(OctopusEnergyTariffRate)
+                .where(
+                    OctopusEnergyTariffRate.meter_point == meter_point,
+                    OctopusEnergyTariffRate.tariff_code == db_tariff.tariff_code,
+                    OctopusEnergyTariffRate.valid_from >= start_date,
+                    OctopusEnergyTariffRate.valid_from <= end_date
+                )
+                .order_by(OctopusEnergyTariffRate.valid_from)
+            )
+            rates = result_rates.scalars().all()
+            
+            # Format data for charting
+            chart_data = []
+            for rate in rates:
+                chart_data.append({
+                    "date": rate.valid_from.isoformat(),
+                    "unit_rate": rate.unit_rate,
+                    "unit_rate_pounds": round(rate.unit_rate / 100, 4),
+                    "valid_from": rate.valid_from.isoformat(),
+                    "valid_to": rate.valid_to.isoformat() if rate.valid_to else None
+                })
+            
+            return {
+                "success": True,
+                "data": chart_data,
+                "tariff_code": db_tariff.tariff_code,
+                "product_name": db_tariff.product_name
+            }
+    except Exception as e:
+        logger.error(f"Error fetching tariff history: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Failed to fetch tariff history"
+        }
 
 
 @app.get("/api/weather")
@@ -3848,12 +5319,12 @@ async def get_traffic(radius_miles: int = 30):
             )
             latest_data = result.scalar_one_or_none()
             
-            # If we have recent data (less than 15 minutes old), return it
+            # If we have recent data (less than 5 minutes old), return it
             if latest_data:
                 collected_at = latest_data.collected_at
                 if collected_at:
                     age_seconds = (datetime.now(timezone.utc) - collected_at.replace(tzinfo=timezone.utc)).total_seconds()
-                    if age_seconds < 900:  # 15 minutes
+                    if age_seconds < 300:  # 5 minutes
                         traffic_data = latest_data.data
                         return {
                             "success": True,
@@ -3881,7 +5352,7 @@ async def get_traffic(radius_miles: int = 30):
                     source=result.get("source", "traffic"),
                     data_type=result.get("data_type", "traffic_conditions"),
                     data=result,
-                    expires_at=datetime.utcnow() + timedelta(minutes=15)  # Expire after 15 minutes
+                    expires_at=datetime.utcnow() + timedelta(minutes=5)  # Expire after 5 minutes
                 )
                 session.add(collected_data)
                 await session.commit()
@@ -4115,7 +5586,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
         # Run router model on the transcript (Anthropic)
         try:
-            cfg = _load_router_config() or {}
+            cfg = await load_router_config() or {}
             anth_cfg = cfg.get("anthropic", {}) if isinstance(cfg, dict) else {}
             router_model = anth_cfg.get("anthropic_model", settings.ai_model)
             router_prompt = anth_cfg.get("prompt_context")
@@ -4221,12 +5692,12 @@ async def select_persona(request: Request):
         raise HTTPException(status_code=400, detail="Persona name is required")
     
     # Verify persona exists
-    config = load_persona_config(persona_name)
+    config = await load_persona_config(persona_name)
     if not config:
         raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
     
     # Set the persona
-    success = set_current_persona(persona_name)
+    success = await set_current_persona(persona_name)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to set persona")
     

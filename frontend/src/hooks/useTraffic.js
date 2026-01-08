@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { trafficAPI } from '../services/api';
 
-export function useTraffic(interval = 900000, radiusMiles = 30) {
+export function useTraffic(interval = 300000, radiusMiles = 30) {
   const [traffic, setTraffic] = useState(null);
   const [loading, setLoading] = useState(true);
 

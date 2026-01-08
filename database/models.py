@@ -85,6 +85,20 @@ class ChatMessage(Base):
         return f"<ChatMessage {self.role} - {self.id}>"
 
 
+class ChatSession(Base):
+    """Model for storing chat session metadata including titles."""
+    __tablename__ = "chat_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    session_id = Column(String, unique=True, index=True, nullable=False)
+    title = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<ChatSession {self.session_id} - {self.title}>"
+
+
 class MusicArtist(Base):
     """Artist table."""
     __tablename__ = "music_artists"
@@ -146,14 +160,32 @@ class MusicSong(Base):
     codec = Column(String, nullable=True)
     genre = Column(String, nullable=True)
     year = Column(Integer, nullable=True)
+    play_count = Column(Integer, default=0, nullable=False)  # Total play count
     extra_metadata = Column("metadata", JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     album = relationship("MusicAlbum", back_populates="songs")
     artist = relationship("MusicArtist", back_populates="songs")
+    plays = relationship("MusicPlay", back_populates="song", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Song {self.title} - album_id={self.album_id}>"
+
+
+class MusicPlay(Base):
+    """Track individual song plays for analytics."""
+    __tablename__ = "music_plays"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    song_id = Column(Integer, ForeignKey("music_songs.id"), nullable=False, index=True)
+    played_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    play_duration_seconds = Column(Integer, nullable=True)  # How long they listened
+    completed = Column(String, default="true")  # Whether they finished the song
+
+    song = relationship("MusicSong", back_populates="plays")
+
+    def __repr__(self):
+        return f"<MusicPlay song_id={self.song_id} at {self.played_at}>"
 
 
 class MusicPlaylist(Base):
@@ -203,4 +235,145 @@ class DeviceTelemetry(Base):
     
     def __repr__(self):
         return f"<DeviceTelemetry {self.device_id} - {self.metric_name}>"
+
+
+class SystemConfig(Base):
+    """System configuration settings."""
+    __tablename__ = "system_config"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    config_key = Column(String, unique=True, nullable=False, index=True)  # e.g., "paths", "server", "ai"
+    config_value = Column(JSON, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<SystemConfig {self.config_key}>"
+
+
+class ApiKeysConfig(Base):
+    """API keys configuration."""
+    __tablename__ = "api_keys_config"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    service_name = Column(String, unique=True, nullable=False, index=True)  # e.g., "anthropic", "perplexity"
+    api_key = Column(String, nullable=True)
+    config_data = Column(JSON, nullable=True)  # For additional config like voice_id, location_id, etc.
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<ApiKeysConfig {self.service_name}>"
+
+
+class LocationConfig(Base):
+    """Location configuration."""
+    __tablename__ = "location_config"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    city = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    postcode = Column(String, nullable=True)
+    display_name = Column(String, nullable=True)
+    location_id = Column(String, nullable=True)  # For BBC Weather or other services
+    extra_data = Column(JSON, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<LocationConfig {self.display_name}>"
+
+
+class PersonaConfig(Base):
+    """Persona configuration."""
+    __tablename__ = "persona_configs"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False, index=True)  # e.g., "default", "cortana", "rick_sanchez"
+    title = Column(String, nullable=True)  # Display title
+    config_data = Column(JSON, nullable=False)  # Full persona config (anthropic, fish_audio, filler, etc.)
+    is_active = Column(String, default="false")  # Whether this is the current persona
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<PersonaConfig {self.name}>"
+
+
+class RouterConfig(Base):
+    """Router configuration for classifying inputs."""
+    __tablename__ = "router_config"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    config_data = Column(JSON, nullable=False)  # Full router config
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<RouterConfig>"
+
+
+class ExpertTypesConfig(Base):
+    """Expert types configuration."""
+    __tablename__ = "expert_types_config"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    expert_type = Column(String, unique=True, nullable=False, index=True)  # e.g., "therapist", "engineer"
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    system_prompt = Column(Text, nullable=False)
+    icon = Column(String, nullable=True)
+    extra_data = Column(JSON, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<ExpertTypesConfig {self.expert_type}>"
+
+
+class OctopusEnergyConsumption(Base):
+    """Model for storing Octopus Energy consumption readings."""
+    __tablename__ = "octopus_energy_consumption"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    interval_start = Column(DateTime(timezone=True), nullable=False, index=True)
+    interval_end = Column(DateTime(timezone=True), nullable=False)
+    consumption = Column(Float, nullable=False)  # kWh
+    meter_point = Column(String, nullable=False, index=True)
+    meter_serial = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<OctopusEnergyConsumption {self.interval_start} - {self.consumption} kWh>"
+
+
+class OctopusEnergyTariff(Base):
+    """Model for storing Octopus Energy tariff information."""
+    __tablename__ = "octopus_energy_tariff"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    meter_point = Column(String, nullable=False, index=True)
+    tariff_code = Column(String, nullable=True)
+    product_name = Column(String, nullable=True)
+    is_prepay = Column(String, default="false")
+    unit_rate = Column(Float, nullable=True)  # pence per kWh
+    standing_charge = Column(Float, nullable=True)  # pence per day
+    valid_from = Column(DateTime(timezone=True), nullable=False)
+    valid_to = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<OctopusEnergyTariff {self.meter_point} - {self.unit_rate}p/kWh>"
+
+
+class OctopusEnergyTariffRate(Base):
+    """Model for storing historical Octopus Energy tariff rates (half-hourly for Agile tariffs)."""
+    __tablename__ = "octopus_energy_tariff_rates"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    meter_point = Column(String, nullable=False, index=True)
+    tariff_code = Column(String, nullable=False, index=True)
+    valid_from = Column(DateTime(timezone=True), nullable=False, index=True)
+    valid_to = Column(DateTime(timezone=True), nullable=False)
+    unit_rate = Column(Float, nullable=False)  # pence per kWh
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<OctopusEnergyTariffRate {self.valid_from} - {self.unit_rate}p/kWh>"
 

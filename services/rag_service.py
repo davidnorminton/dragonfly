@@ -22,7 +22,8 @@ class RAGService(BaseService):
         self.async_client = None
         self.persona_config = None
         self._load_api_key()
-        self._load_persona_config()
+        # Persona config will be loaded async on first use
+        self.persona_config = None
     
     def _load_api_key(self):
         """Load API key from config file or environment."""
@@ -51,21 +52,27 @@ class RAGService(BaseService):
         else:
             self.logger.warning("No Anthropic API key found. RAG service will return placeholder responses.")
     
-    def _load_persona_config(self):
-        """Load the current persona configuration."""
+    async def _load_persona_config(self):
+        """Load the current persona configuration from database."""
         try:
-            self.persona_config = load_persona_config()
+            self.persona_config = await load_persona_config()
             if self.persona_config:
-                self.logger.info(f"Loaded persona config: {get_current_persona_name()}")
+                persona_name = await get_current_persona_name()
+                self.logger.info(f"Loaded persona config: {persona_name}")
             else:
                 self.logger.warning("No persona config found, using defaults")
         except Exception as e:
             self.logger.error(f"Error loading persona config: {e}")
             self.persona_config = None
     
-    def reload_persona_config(self):
+    async def reload_persona_config(self):
         """Reload the persona configuration (useful when persona is changed)."""
-        self._load_persona_config()
+        await self._load_persona_config()
+    
+    async def _ensure_persona_config(self):
+        """Ensure persona config is loaded."""
+        if self.persona_config is None:
+            await self._load_persona_config()
     
     async def _load_conversation_history(self, session_id: str, limit: int = 50) -> List[Dict[str, str]]:
         """
@@ -150,6 +157,7 @@ This is essential for natural, focused conversation flow.
             - query: str - The original query
             - expert_type: str - The expert type used
         """
+        await self._ensure_persona_config()
         self.validate_input(input_data, ["query"])
         
         query = input_data["query"]

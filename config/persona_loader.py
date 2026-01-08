@@ -1,17 +1,48 @@
 """Utilities for loading and managing persona configurations."""
 import json
-import os
-from typing import Dict, Any, Optional
+import logging
+from typing import Dict, Any, Optional, List
 from pathlib import Path
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
-def get_personas_directory() -> Path:
-    """Get the path to the personas directory."""
-    return Path(__file__).parent / "personas"
+async def get_current_persona_name(session: Optional[AsyncSession] = None) -> str:
+    """Get the name of the currently selected persona from database."""
+    from database.base import AsyncSessionLocal
+    from database.models import PersonaConfig
+    
+    try:
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
+        
+        try:
+            result = await db_session.execute(
+                select(PersonaConfig).where(PersonaConfig.is_active == "true").limit(1)
+            )
+            persona = result.scalar_one_or_none()
+            
+            if persona:
+                return persona.name
+            else:
+                # Fallback: check file
+                return _get_current_persona_from_file()
+        finally:
+            if should_close:
+                await db_session.close()
+    except Exception as e:
+        logger.error(f"Error getting current persona from database: {e}", exc_info=True)
+        return _get_current_persona_from_file()
 
 
-def get_current_persona_name() -> str:
-    """Get the name of the currently selected persona."""
+def _get_current_persona_from_file() -> str:
+    """Fallback: Get current persona from file."""
     config_file = Path(__file__).parent / "current_persona.json"
     try:
         if config_file.exists():
@@ -23,103 +54,271 @@ def get_current_persona_name() -> str:
         return "default"
 
 
-def set_current_persona(persona_name: str) -> bool:
-    """Set the current persona. Returns True if successful."""
-    config_file = Path(__file__).parent / "current_persona.json"
+async def set_current_persona(persona_name: str, session: Optional[AsyncSession] = None) -> bool:
+    """Set the current persona in database. Returns True if successful."""
+    from database.base import AsyncSessionLocal
+    from database.models import PersonaConfig
+    
     try:
-        with open(config_file, 'w') as f:
-            json.dump({"persona": persona_name}, f, indent=2)
-        return True
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
+        
+        try:
+            # Mark all personas as inactive
+            await db_session.execute(
+                update(PersonaConfig).values(is_active="false")
+            )
+            
+            # Mark the selected persona as active
+            await db_session.execute(
+                update(PersonaConfig)
+                .where(PersonaConfig.name == persona_name)
+                .values(is_active="true")
+            )
+            
+            if not session:  # Only commit if we created the session
+                await db_session.commit()
+            
+            logger.info(f"Set current persona to: {persona_name}")
+            return True
+        finally:
+            if should_close:
+                await db_session.close()
     except Exception as e:
-        print(f"Error setting persona: {e}")
+        logger.error(f"Error setting current persona: {e}", exc_info=True)
+        if not session:
+            try:
+                await db_session.rollback()
+            except:
+                pass
         return False
 
 
-def load_persona_config(persona_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Load a persona configuration file.
+async def load_persona_config(persona_name: Optional[str] = None, session: Optional[AsyncSession] = None) -> Optional[Dict[str, Any]]:
+    """Load a persona configuration from database.
     
     Args:
-        persona_name: Name of the persona to load (without .config extension).
-                     If None, loads the current persona.
+        persona_name: Name of the persona to load. If None, loads the current persona.
+        session: Optional database session. If None, creates a new one.
     
     Returns:
         Dictionary with persona configuration or None if not found.
     """
-    if persona_name is None:
-        persona_name = get_current_persona_name()
+    from database.base import AsyncSessionLocal
+    from database.models import PersonaConfig
     
-    config_file = get_personas_directory() / f"{persona_name}.config"
-    
+    try:
+        if persona_name is None:
+            persona_name = await get_current_persona_name(session)
+        
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
+        
+        try:
+            result = await db_session.execute(
+                select(PersonaConfig).where(PersonaConfig.name == persona_name)
+            )
+            persona = result.scalar_one_or_none()
+            
+            if persona:
+                return persona.config_data
+            else:
+                # Fallback: try loading from file
+                return _load_persona_from_file(persona_name)
+        finally:
+            if should_close:
+                await db_session.close()
+    except Exception as e:
+        logger.error(f"Error loading persona config {persona_name}: {e}", exc_info=True)
+        return _load_persona_from_file(persona_name)
+
+
+def _load_persona_from_file(persona_name: str) -> Optional[Dict[str, Any]]:
+    """Fallback: Load persona config from file."""
+    config_file = Path(__file__).parent / "personas" / f"{persona_name}.config"
     try:
         if config_file.exists():
             with open(config_file, 'r') as f:
                 return json.load(f)
         return None
     except Exception as e:
-        print(f"Error loading persona config {persona_name}: {e}")
+        logger.error(f"Error loading persona config from file {persona_name}: {e}")
         return None
 
 
-def list_available_personas() -> list:
-    """List all available persona configuration files."""
-    personas_dir = get_personas_directory()
+async def list_available_personas(session: Optional[AsyncSession] = None) -> List[Dict[str, Any]]:
+    """List all available persona configurations from database."""
+    from database.base import AsyncSessionLocal
+    from database.models import PersonaConfig
+    
+    try:
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
+        
+        try:
+            result = await db_session.execute(select(PersonaConfig))
+            personas_list = result.scalars().all()
+            
+            personas = []
+            for persona in personas_list:
+                personas.append({
+                    "name": persona.name,
+                    "title": persona.title or persona.name
+                })
+            
+            return sorted(personas, key=lambda x: x["name"])
+        finally:
+            if should_close:
+                await db_session.close()
+    except Exception as e:
+        logger.error(f"Error listing personas from database: {e}", exc_info=True)
+        return _list_personas_from_files()
+
+
+def _list_personas_from_files() -> List[Dict[str, Any]]:
+    """Fallback: List personas from files."""
+    personas_dir = Path(__file__).parent / "personas"
     personas = []
     
     try:
         if personas_dir.exists():
             for config_file in personas_dir.glob("*.config"):
                 persona_name = config_file.stem
-                config = load_persona_config(persona_name)
+                config = _load_persona_from_file(persona_name)
                 if config:
                     personas.append({
                         "name": persona_name,
                         "title": config.get("title", persona_name)
                     })
     except Exception as e:
-        print(f"Error listing personas: {e}")
+        logger.error(f"Error listing personas from files: {e}")
     
     return sorted(personas, key=lambda x: x["name"])
 
 
-def save_persona_config(persona_name: str, config: Dict[str, Any]) -> bool:
-    """Save a persona configuration file.
+async def save_persona_config(persona_name: str, config: Dict[str, Any], session: Optional[AsyncSession] = None) -> bool:
+    """Save a persona configuration to database.
     
     Args:
-        persona_name: Name of the persona (without .config extension).
+        persona_name: Name of the persona.
         config: Dictionary with persona configuration.
+        session: Optional database session. If None, creates a new one.
     
     Returns:
         True if successful, False otherwise.
     """
-    config_file = get_personas_directory() / f"{persona_name}.config"
+    from database.base import AsyncSessionLocal
+    from database.models import PersonaConfig
     
     try:
-        # Ensure the personas directory exists
-        config_file.parent.mkdir(parents=True, exist_ok=True)
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
         
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-        return True
+        try:
+            title = config.get("title", persona_name)
+            
+            result = await db_session.execute(
+                select(PersonaConfig).where(PersonaConfig.name == persona_name)
+            )
+            persona = result.scalar_one_or_none()
+            
+            if persona:
+                persona.title = title
+                persona.config_data = config
+            else:
+                db_session.add(PersonaConfig(
+                    name=persona_name,
+                    title=title,
+                    config_data=config,
+                    is_active="false"
+                ))
+            
+            if not session:  # Only commit if we created the session
+                await db_session.commit()
+            
+            logger.info(f"Saved persona config: {persona_name}")
+            return True
+        finally:
+            if should_close:
+                await db_session.close()
     except Exception as e:
-        print(f"Error saving persona config {persona_name}: {e}")
+        logger.error(f"Error saving persona config {persona_name}: {e}", exc_info=True)
+        if not session:
+            try:
+                await db_session.rollback()
+            except:
+                pass
         return False
 
 
-def create_persona_config(persona_name: str, config: Dict[str, Any]) -> bool:
-    """Create a new persona configuration file.
+async def create_persona_config(persona_name: str, config: Dict[str, Any], session: Optional[AsyncSession] = None) -> bool:
+    """Create a new persona configuration in database.
     
     Args:
-        persona_name: Name of the persona (without .config extension).
+        persona_name: Name of the persona.
         config: Dictionary with persona configuration.
+        session: Optional database session. If None, creates a new one.
     
     Returns:
         True if successful, False otherwise.
     """
-    config_file = get_personas_directory() / f"{persona_name}.config"
+    from database.base import AsyncSessionLocal
+    from database.models import PersonaConfig
     
-    # Check if persona already exists
-    if config_file.exists():
+    try:
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
+        
+        try:
+            # Check if persona already exists
+            result = await db_session.execute(
+                select(PersonaConfig).where(PersonaConfig.name == persona_name)
+            )
+            if result.scalar_one_or_none():
+                logger.warning(f"Persona {persona_name} already exists")
+                return False
+            
+            title = config.get("title", persona_name)
+            db_session.add(PersonaConfig(
+                name=persona_name,
+                title=title,
+                config_data=config,
+                is_active="false"
+            ))
+            
+            if not session:  # Only commit if we created the session
+                await db_session.commit()
+            
+            logger.info(f"Created persona config: {persona_name}")
+            return True
+        finally:
+            if should_close:
+                await db_session.close()
+    except Exception as e:
+        logger.error(f"Error creating persona config {persona_name}: {e}", exc_info=True)
+        if not session:
+            try:
+                await db_session.rollback()
+            except:
+                pass
         return False
-    
-    return save_persona_config(persona_name, config)
-

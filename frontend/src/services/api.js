@@ -33,6 +33,10 @@ export const chatAPI = {
     });
     return response;
   },
+  getSessions: () => api.get('/chat/sessions').then(res => res.data),
+  createSession: (sessionId) => api.post('/chat/sessions', { session_id: sessionId }).then(res => res.data),
+  getSessionTitle: (sessionId) => api.get(`/chat/sessions/${sessionId}/title`).then(res => res.data),
+  updateSessionTitle: (sessionId, title) => api.put(`/chat/sessions/${sessionId}/title`, { title }).then(res => res.data),
 };
 
 export const expertTypesAPI = {
@@ -139,6 +143,8 @@ export const musicAPI = {
   addArtistVideo: (artist, video) => api.post('/music/artist/video/add', { artist, videoId: video.videoId, title: video.title }).then(res => res.data),
   updateArtistVideo: (artist, originalVideoId, video) => api.put('/music/artist/video/update', { artist, originalVideoId, videoId: video.videoId, title: video.title }).then(res => res.data),
   deleteArtistVideo: (artist, videoId) => api.delete('/music/artist/video/delete', { data: { artist, videoId } }).then(res => res.data),
+  trackPlay: (path, duration) => api.post('/music/track-play', { path, duration }).then(res => res.data),
+  getAnalytics: () => api.get('/music/analytics').then(res => res.data),
 };
 
 export const weatherAPI = {
@@ -176,6 +182,8 @@ export const configAPI = {
   saveLocationConfig: (config) => api.put('/config/location', config).then(res => res.data),
   getApiKeysConfig: () => api.get('/config/api_keys').then(res => res.data),
   saveApiKeysConfig: (config) => api.put('/config/api_keys', config).then(res => res.data),
+  getSystemConfig: () => api.get('/config/system').then(res => res.data),
+  saveSystemConfig: (config) => api.put('/config/system', config).then(res => res.data),
 };
 
 export const deviceAPI = {
@@ -198,6 +206,13 @@ export const actionsAPI = {
 export const audioAPI = {
   playLastMessage: (sessionId) => api.post('/audio/last-message', { session_id: sessionId }).then(res => res.data),
   generateAudioForMessage: (sessionId, messageId) => api.post('/audio/message', { session_id: sessionId, message_id: messageId }).then(res => res.data),
+};
+
+export const octopusAPI = {
+  getConsumption: () => api.get('/octopus/consumption').then(res => res.data),
+  getHistory: (days = 7) => api.get('/octopus/history', { params: { days } }).then(res => res.data),
+  getTariff: () => api.get('/octopus/tariff').then(res => res.data),
+  getTariffHistory: (days = 7) => api.get('/octopus/tariff-history', { params: { days } }).then(res => res.data),
 };
 
 export default api;

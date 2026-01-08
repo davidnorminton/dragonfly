@@ -4,7 +4,14 @@ import { WiDaySunny, WiNightClear, WiDayCloudy, WiNightAltCloudy, WiCloud, WiClo
          WiNightAltSnow, WiFog, WiDayFog, WiNightFog, WiWindy, WiStrongWind,
          WiRaindrops, WiHumidity } from 'react-icons/wi';
 
-// Map weather types/descriptions to icons
+// Get OpenWeatherMap icon URL
+const getWeatherIconUrl = (iconCode) => {
+  if (!iconCode) return null;
+  // OpenWeatherMap icon URLs format: https://openweathermap.org/img/wn/{icon}@2x.png
+  return `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+};
+
+// Map weather types/descriptions to icons (fallback if no icon URL)
 const getWeatherIcon = (description, weatherType) => {
   if (!description && !weatherType) return WiDaySunny;
   
@@ -68,20 +75,33 @@ export function Weather() {
     );
   }
 
-  const conditionText = weather.description 
-    ? weather.weather_type 
-      ? `${weather.description} (${weather.weather_type})`
-      : weather.description
-    : weather.weather_type || 'Data unavailable';
-
+  const conditionText = weather.description || weather.weather_main || 'Data unavailable';
+  
+  // Get weather icon URL if available, otherwise use fallback icon component
+  const weatherIconUrl = getWeatherIconUrl(weather.weather_icon);
   const WeatherIcon = getWeatherIcon(weather.description, weather.weather_type);
 
   return (
     <div className="widget">
-      <div className="widget-title">Weather</div>
       <div className="weather-main">
         <div className="weather-icon-container">
-          <WeatherIcon className="weather-icon" />
+          {weatherIconUrl ? (
+            <img 
+              src={weatherIconUrl} 
+              alt={conditionText}
+              className="weather-icon-image"
+              onError={(e) => {
+                // Fallback to icon component if image fails to load
+                e.target.style.display = 'none';
+                const fallback = e.target.nextSibling;
+                if (fallback) fallback.style.display = 'block';
+              }}
+            />
+          ) : null}
+          <WeatherIcon 
+            className="weather-icon" 
+            style={{ display: weatherIconUrl ? 'none' : 'block' }}
+          />
         </div>
         <div className="weather-info">
           <div className="weather-temp">
@@ -102,28 +122,37 @@ export function Weather() {
         {weather.wind_speed_kph !== null && weather.wind_speed_kph !== undefined && weather.wind_speed_kph > 0 && (
           <div className="stat-box">
             <div className="stat-box-label">Wind Speed</div>
-            <div className="stat-box-value">{weather.wind_speed_kph} km/h</div>
+            <div className="stat-box-value">
+              {weather.wind_speed_kph} km/h
+            </div>
           </div>
         )}
         {weather.wind_direction && 
          weather.wind_direction !== '-99' && 
-         weather.wind_direction !== 'Direction not available' &&
-         weather.wind_direction_full &&
-         weather.wind_direction_full !== 'Direction not available' && (
+         weather.wind_direction !== 'Direction not available' && (
           <div className="stat-box">
             <div className="stat-box-label">Wind Direction</div>
-            <div className="stat-box-value">{weather.wind_direction}</div>
+            <div className="stat-box-value">
+              {weather.wind_direction_full || weather.wind_direction}
+            </div>
           </div>
         )}
-        {weather.pressure !== null && weather.pressure !== undefined && (
+        {weather.visibility_km !== null && weather.visibility_km !== undefined && (
           <div className="stat-box">
-            <div className="stat-box-label">Pressure</div>
-            <div className="stat-box-value">
-              {weather.pressure} mb
-              {weather.pressure_direction && weather.pressure_direction !== 'Not available' 
-                ? ` (${weather.pressure_direction})` 
-                : ''}
-            </div>
+            <div className="stat-box-label">Visibility</div>
+            <div className="stat-box-value">{weather.visibility_km} km</div>
+          </div>
+        )}
+        {weather.cloud_coverage !== null && weather.cloud_coverage !== undefined && (
+          <div className="stat-box">
+            <div className="stat-box-label">Clouds</div>
+            <div className="stat-box-value">{weather.cloud_coverage}%</div>
+          </div>
+        )}
+        {(weather.snow_3h !== null && weather.snow_3h !== undefined && weather.snow_3h > 0) && (
+          <div className="stat-box">
+            <div className="stat-box-label">Snow (3h)</div>
+            <div className="stat-box-value">{weather.snow_3h} mm</div>
           </div>
         )}
       </div>

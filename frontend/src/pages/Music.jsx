@@ -374,6 +374,14 @@ export function MusicPage({ searchQuery = '' }) {
       try {
         await audioRef.current.play();
         setIsPlaying(true);
+        
+        // Track play for analytics
+        try {
+          await musicAPI.trackPlay(track.path, track.duration);
+        } catch (err) {
+          console.error('Failed to track play:', err);
+          // Don't stop playback if tracking fails
+        }
       } catch (e) {
         console.error('Play error', e, 'for src:', src);
         setIsPlaying(false);

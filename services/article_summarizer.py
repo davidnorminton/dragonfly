@@ -126,8 +126,8 @@ class ArticleSummarizer:
                 return None
             
             # Get default persona config
-            persona_name = get_current_persona_name()
-            persona_config = load_persona_config(persona_name)
+            persona_name = await get_current_persona_name()
+            persona_config = await load_persona_config(persona_name)
             
             # Create a summarization prompt
             prompt = f"""Please provide a concise summary of the following news article. Focus on the key facts, main points, and important information. Keep the summary clear and informative, approximately 3-5 sentences.
