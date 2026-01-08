@@ -342,9 +342,6 @@ body {
 }
 
 .news-container {
-  background: #141420;
-  border: 1px solid #2a2a3a;
-  border-radius: 12px;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -354,11 +351,6 @@ body {
   height: 100%;
 }
 
-.news-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid #2a2a3a;
-  flex-shrink: 0;
-}
 
 .news-title {
   font-size: 0.85em;
@@ -3822,6 +3814,9 @@ body {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .news-content-split {

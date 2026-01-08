@@ -59,9 +59,6 @@ export function NewsPage() {
   return (
     <div className="news-page">
       <div className="news-container">
-        <div className="news-header">
-          <div className="news-title">News</div>
-        </div>
         <div className="news-content-split">
           {/* Left pane: News articles list */}
           <div className="news-articles-pane">
