@@ -71,7 +71,7 @@ export function TopBar({ onSwitchAI, onSettingsClick, activePage = 'dashboard', 
             title="News"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/>
+              <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
             </svg>
           </button>
         </div>
