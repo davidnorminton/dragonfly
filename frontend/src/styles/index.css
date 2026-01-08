@@ -328,6 +328,30 @@ body {
   color: #808080;
 }
 
+.time-date-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.time-display {
+  font-size: 2em;
+  font-weight: 600;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+}
+
+.date-display {
+  font-size: 0.95em;
+  color: rgba(255, 255, 255, 0.8);
+  text-align: center;
+  line-height: 1.4;
+}
+
 /* Center Panel - News */
 .center-panel {
   display: flex;
