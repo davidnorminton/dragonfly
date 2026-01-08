@@ -179,6 +179,22 @@ export function MusicPage({ searchQuery = '' }) {
     loadPlaylists();
   }, []);
 
+  // Listen for stopAllAudio event (e.g., when entering AI focus mode)
+  useEffect(() => {
+    const handleStopAllAudio = () => {
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+        setIsPlaying(false);
+      }
+    };
+
+    window.addEventListener('stopAllAudio', handleStopAllAudio);
+    return () => {
+      window.removeEventListener('stopAllAudio', handleStopAllAudio);
+    };
+  }, []);
+
   useEffect(() => {
     // Auto-select a playlist when switching to playlists view or when playlists load
     if (viewMode === 'playlists' && playlists.length > 0 && !selectedPlaylist) {

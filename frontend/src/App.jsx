@@ -69,7 +69,60 @@ function App() {
     setPersonaModalOpen(false);
   };
 
-  const toggleAiFocus = () => setAiFocusActive((prev) => !prev);
+  const toggleAiFocus = () => {
+    const newState = !aiFocusActive;
+    setAiFocusActive(newState);
+    
+    // Stop all music/audio when entering focus mode
+    if (newState) {
+      // Stop all audio elements on the page (including in iframes)
+      const allAudioElements = document.querySelectorAll('audio');
+      allAudioElements.forEach((audio) => {
+        try {
+          if (!audio.paused) {
+            audio.pause();
+            audio.currentTime = 0;
+          }
+        } catch (e) {
+          console.warn('Error stopping audio:', e);
+        }
+      });
+      
+      // Also stop any audio objects in state
+      if (audioObj) {
+        try {
+          audioObj.pause();
+          audioObj.currentTime = 0;
+        } catch (e) {
+          console.warn('Error stopping audioObj:', e);
+        }
+      }
+      if (fillerAudioObj) {
+        try {
+          fillerAudioObj.pause();
+          fillerAudioObj.currentTime = 0;
+        } catch (e) {
+          console.warn('Error stopping fillerAudioObj:', e);
+        }
+      }
+      
+      // Dispatch custom event to stop music player
+      window.dispatchEvent(new CustomEvent('stopAllAudio'));
+      
+      // Also try to stop any HTMLAudioElement instances
+      setTimeout(() => {
+        const allAudio = document.querySelectorAll('audio');
+        allAudio.forEach((audio) => {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+          } catch (e) {
+            // Ignore errors
+          }
+        });
+      }, 100);
+    }
+  };
 
   // Play filler audio for immediate feedback
   const playFillerAudio = async () => {
@@ -446,6 +499,7 @@ function App() {
       <TopBar 
         onSwitchAI={handleSwitchAI}
         onSettingsClick={() => setActivePage('settings')}
+        onAiFocusClick={toggleAiFocus}
         activePage={activePage}
         onNavigate={(page) => setActivePage(page)}
         onMusicSearch={(query) => setMusicSearchQuery(query)}
