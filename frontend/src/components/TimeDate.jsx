@@ -36,7 +36,6 @@ export function TimeDate() {
 
   return (
     <div className="widget">
-      <div className="widget-title">Time & Date</div>
       <div className="time-date-content">
         <div className="time-display">{time}</div>
         <div className="date-display">{date}</div>

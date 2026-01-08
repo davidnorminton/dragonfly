@@ -2,33 +2,9 @@ import { useState, useEffect } from 'react';
 import { usePersonas } from '../hooks/usePersonas';
 
 export function TopBar({ onSwitchAI, onSettingsClick, activePage = 'dashboard', onNavigate, onMusicSearch, onChatSearch }) {
-  const [currentTime, setCurrentTime] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const { currentTitle } = usePersonas();
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit', 
-        second: '2-digit', 
-        hour12: true 
-      });
-      const dateStr = now.toLocaleDateString('en-US', { 
-        month: 'long', 
-        day: 'numeric', 
-        year: 'numeric' 
-      });
-      setCurrentTime(`${timeStr} | ${dateStr}`);
-    };
-
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="top-bar">
@@ -134,7 +110,6 @@ export function TopBar({ onSwitchAI, onSettingsClick, activePage = 'dashboard', 
         ) : null}
       </div>
       <div className="top-bar-right">
-        <span>{currentTime}</span>
         <button
           onClick={onSettingsClick}
           className="settings-icon-button"
