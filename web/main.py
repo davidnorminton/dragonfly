@@ -280,7 +280,9 @@ async def _get_octopus_account_number() -> Optional[str]:
         return None
 
 async def _get_meter_info_from_account(account_number: str, api_key: str) -> Optional[Dict[str, Any]]:
-    """Get meter point and serial number from account endpoint."""
+    """Get meter point and serial number from account endpoint.
+    Prefers meters with registers (consumption data) over meters without registers.
+    """
     try:
         account_data = await _fetch_account_info(account_number, api_key)
         if not account_data:
@@ -290,10 +292,24 @@ async def _get_meter_info_from_account(account_number: str, api_key: str) -> Opt
         for property_data in account_data.get("properties", []):
             for mp_data in property_data.get("electricity_meter_points", []):
                 mpan = mp_data.get("mpan")
-                # Get first meter serial number
                 meters = mp_data.get("meters", [])
-                if meters:
-                    meter_serial = meters[0].get("serial_number")
+                if not meters:
+                    continue
+                
+                # Prefer meter with registers (consumption data)
+                meter_with_registers = None
+                for meter in meters:
+                    registers = meter.get("registers", [])
+                    if registers:
+                        meter_with_registers = meter
+                        break
+                
+                # Use meter with registers if found, otherwise use first meter
+                selected_meter = meter_with_registers if meter_with_registers else meters[0]
+                meter_serial = selected_meter.get("serial_number")
+                
+                if meter_serial:
+                    logger.info(f"Selected meter {meter_serial} (has registers: {bool(meter_with_registers)})")
                     return {
                         "meter_point": mpan,
                         "meter_serial": meter_serial
@@ -4968,10 +4984,10 @@ async def get_octopus_consumption():
         # Build the API URL
         url = f"https://api.octopus.energy/v1/electricity-meter-points/{meter_point}/meters/{meter_serial}/consumption/"
         
-        # Calculate period: last 7 days
+        # Calculate period: last 30 days to ensure we get data
         now = datetime.now(timezone.utc)
         period_to = now
-        period_from = now - timedelta(days=7)
+        period_from = now - timedelta(days=30)
         
         # Make authenticated request
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -5043,6 +5059,15 @@ async def get_octopus_consumption():
                 # Continue even if storage fails
             
             logger.info(f"Octopus Energy: Retrieved {len(results)} consumption readings")
+            
+            # If no results, return error message
+            if not results:
+                return {
+                    "success": False,
+                    "error": "No consumption data available",
+                    "message": f"No consumption data found for meter {meter_serial} in the last 30 days. Data may not be available yet.",
+                    "results": []
+                }
             
             # Get tariff information from database for cost calculation
             tariff_info = None
@@ -5119,8 +5144,18 @@ async def get_octopus_consumption():
 async def get_octopus_history(days: int = 7):
     """Get historical Octopus Energy consumption data from database for graphing."""
     try:
-        meter_point = "2343383923410"
-        meter_serial = "22L4381884"
+        account_number = await _get_octopus_account_number()
+        meter_point = "2343383923410"  # Default fallback
+        meter_serial = "22L4381884"  # Default fallback
+        
+        # Get meter info from account if account number is available
+        if account_number:
+            api_key = await _get_octopus_api_key()
+            if api_key:
+                meter_info = await _get_meter_info_from_account(account_number, api_key)
+                if meter_info:
+                    meter_point = meter_info.get("meter_point", meter_point)
+                    meter_serial = meter_info.get("meter_serial", meter_serial)
         
         # Calculate date range
         end_date = datetime.now(timezone.utc)
