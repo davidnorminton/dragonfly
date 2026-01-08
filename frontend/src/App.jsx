@@ -42,7 +42,7 @@ function App() {
   const [activePage, setActivePage] = useState('dashboard');
   const [showLeft, setShowLeft] = useState(true);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
-  const { selectPersona } = usePersonas();
+  const { selectPersona, currentTitle } = usePersonas();
   const audioQueue = useAudioQueue();
 
   useEffect(() => {
@@ -547,6 +547,9 @@ function App() {
       />
       {aiFocusActive && (
         <div className="ai-focus-overlay">
+          <div className="ai-focus-persona-name">
+            {currentTitle || 'AI Assistant'}
+          </div>
           <div
             className={`ai-focus-mic ${
               ['listening', 'processing', 'playing'].includes(micStatus) ? 'active' : 'off'
@@ -588,11 +591,11 @@ function App() {
             </div>
           )}
           <button
-            className="ai-focus-revert"
+            className="ai-focus-exit"
             onClick={toggleAiFocus}
-            title="Exit AI Focus"
+            title="Exit AI Focus Mode"
           >
-            &lt;&gt;
+            ✕
           </button>
         </div>
       )}

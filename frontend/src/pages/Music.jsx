@@ -290,6 +290,59 @@ export function MusicPage({ searchQuery = '' }) {
     }
   }, [volume]);
 
+  // Restore player state from session storage on mount
+  useEffect(() => {
+    try {
+      const savedState = sessionStorage.getItem('musicPlayerState');
+      if (savedState) {
+        const state = JSON.parse(savedState);
+        console.log('Restoring player state:', state);
+        
+        // Restore context (artist/album/playlist)
+        if (state.selectedArtist) {
+          setSelectedArtist(state.selectedArtist);
+        }
+        if (state.selectedAlbum) {
+          setSelectedAlbum(state.selectedAlbum);
+        }
+        if (state.selectedPlaylist) {
+          setSelectedPlaylist(state.selectedPlaylist);
+        }
+        
+        // Restore playlist and current index
+        if (state.playlist && state.playlist.length > 0) {
+          setPlaylist(state.playlist);
+          playlistRef.current = state.playlist;
+          if (state.currentIndex >= 0) {
+            setCurrentIndex(state.currentIndex);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to restore player state:', err);
+    }
+  }, []); // Only run on mount
+
+  // Save player state to session storage when it changes
+  useEffect(() => {
+    if (currentIndex >= 0 && playlist.length > 0) {
+      const state = {
+        currentIndex,
+        playlist,
+        selectedArtist,
+        selectedAlbum,
+        selectedPlaylist,
+        timestamp: Date.now()
+      };
+      try {
+        sessionStorage.setItem('musicPlayerState', JSON.stringify(state));
+        console.log('Saved player state:', state);
+      } catch (err) {
+        console.error('Failed to save player state:', err);
+      }
+    }
+  }, [currentIndex, playlist, selectedArtist, selectedAlbum, selectedPlaylist]);
+
   const playIndex = async (idx, list) => {
     const songList = list || playlistRef.current;
     if (!songList || idx < 0 || idx >= songList.length) return;

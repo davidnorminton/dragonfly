@@ -122,6 +122,7 @@ export function CenterPanel({ audioUrl, onAudioUrlChange }) {
                     )}
                     {showButton && (
                       <button
+                        className="news-summarize-button"
                         onClick={() => handleSummarize(article.link, index)}
                         disabled={isSummarizing}
                       >
