@@ -1091,6 +1091,81 @@ async def ai_ask_question(request: Request):
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/chat/sessions/{session_id}/generate-title")
+async def generate_chat_title(session_id: str):
+    """Generate a title for a chat session using AI based on conversation context."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get all messages from this conversation
+            result = await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session_id)
+                .order_by(ChatMessage.created_at)
+            )
+            messages = result.scalars().all()
+            
+            if not messages:
+                return {"success": False, "error": "No messages found in this conversation"}
+            
+            # Build conversation context
+            conversation_text = "\n\n".join([
+                f"{'User' if msg.role == 'user' else 'Assistant'}: {msg.message}"
+                for msg in messages
+            ])
+            
+            # Generate title using AI
+            from services.ai_service import AIService
+            ai_service = AIService()
+            await ai_service.reload_persona_config()
+            
+            title_prompt = f"Based on this conversation, generate a concise, descriptive title (maximum 25 characters, no quotes or punctuation at the end):\n\n{conversation_text[:2000]}"
+            
+            title_result = await ai_service.execute_with_system_prompt(
+                question=title_prompt,
+                system_prompt="You are a helpful assistant that generates concise, descriptive titles for conversations. Return only the title text, no quotes, no punctuation at the end, maximum 25 characters.",
+                max_tokens=50
+            )
+            
+            generated_title = title_result.get("answer", "").strip()
+            # Remove quotes if present
+            generated_title = generated_title.strip('"\'')
+            # Limit to 25 characters
+            if len(generated_title) > 25:
+                generated_title = generated_title[:25].strip()
+            # Remove trailing punctuation
+            generated_title = generated_title.rstrip('.,!?;:')
+            
+            if not generated_title or len(generated_title) < 3:
+                return {"success": False, "error": "Failed to generate a valid title"}
+            
+            # Update title in database
+            session_result = await session.execute(
+                select(ChatSession).where(ChatSession.session_id == session_id)
+            )
+            chat_session = session_result.scalar_one_or_none()
+            
+            if chat_session:
+                chat_session.title = generated_title
+                chat_session.updated_at = datetime.now(timezone.utc)
+            else:
+                chat_session = ChatSession(
+                    session_id=session_id,
+                    title=generated_title
+                )
+                session.add(chat_session)
+            
+            await session.commit()
+            
+            return {
+                "success": True,
+                "title": generated_title
+            }
+            
+    except Exception as e:
+        logger.error(f"Error generating chat title: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/ai/ask-audio-stream")
 async def ai_ask_question_audio_stream(request: Request):
     """

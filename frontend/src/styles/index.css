@@ -4566,8 +4566,17 @@ body {
   transition: background 0.2s;
 }
 
-.chatgpt-chat-menu-item:hover {
+.chatgpt-chat-menu-item:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.chatgpt-chat-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chatgpt-chat-menu-item:disabled:hover {
+  background: transparent;
 }
 
 .chatgpt-chat-menu-item-danger {

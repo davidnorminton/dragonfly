@@ -22,6 +22,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const [pinnedSessions, setPinnedSessions] = useState(new Set());
   const [deleteConfirmSession, setDeleteConfirmSession] = useState(null);
+  const [generatingTitle, setGeneratingTitle] = useState(null);
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (baseSessionId && baseSessionId.startsWith('chat-')) {
@@ -390,6 +391,36 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     });
   };
 
+  const handleGenerateTitle = async (sessionId, e) => {
+    e.stopPropagation();
+    setOpenMenuId(null);
+    setGeneratingTitle(sessionId);
+    
+    try {
+      const response = await fetch(`/api/chat/sessions/${sessionId}/generate-title`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const result = await response.json();
+      
+      if (result.success && result.title) {
+        // Update local state
+        setSessionTitles(prev => ({
+          ...prev,
+          [sessionId]: result.title
+        }));
+      } else {
+        alert(result.error || 'Failed to generate title');
+      }
+    } catch (error) {
+      console.error('Error generating title:', error);
+      alert('Error generating title: ' + error.message);
+    } finally {
+      setGeneratingTitle(null);
+    }
+  };
+
   const handleDelete = (sessionId, e) => {
     e.stopPropagation();
     setOpenMenuId(null);
@@ -583,6 +614,13 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
+                        <button className="chatgpt-chat-menu-item" onClick={(e) => handleGenerateTitle(session, e)} disabled={generatingTitle === session}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 2v4M12 18v4M4 12H2M6.314 6.314l-2.828-2.828M20.485 20.485l-2.828-2.828M17.686 6.314l2.828-2.828M3.515 20.485l2.828-2.828M22 12h-2M6.314 17.686l-2.828 2.828M20.485 3.515l-2.828 2.828"/>
+                            <circle cx="12" cy="12" r="4"/>
+                          </svg>
+                          {generatingTitle === session ? 'Generating...' : 'Generate'}
+                        </button>
                         <button className="chatgpt-chat-menu-item" onClick={(e) => handleRename(session, e)}>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
