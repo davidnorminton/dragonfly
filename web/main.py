@@ -4578,6 +4578,38 @@ async def get_chat_sessions():
         return {"success": False, "error": str(e)}
 
 
+@app.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str):
+    """Delete a chat session and all its messages."""
+    try:
+        logger.info(f"Delete request received for session: {session_id}")
+        async with AsyncSessionLocal() as db_session:
+            # Delete all messages for this session
+            result_messages = await db_session.execute(
+                delete(ChatMessage).where(ChatMessage.session_id == session_id)
+            )
+            logger.info(f"Deleted {result_messages.rowcount} messages for session {session_id}")
+            
+            # Delete the session record
+            result_session = await db_session.execute(
+                delete(ChatSession).where(ChatSession.session_id == session_id)
+            )
+            logger.info(f"Deleted session record: {result_session.rowcount} rows")
+            
+            await db_session.commit()
+            
+            logger.info(f"Successfully deleted chat session {session_id} and all its messages")
+            return JSONResponse(content={"success": True, "message": "Chat session deleted successfully"})
+            
+    except Exception as e:
+        logger.error(f"Error deleting chat session: {e}", exc_info=True)
+        try:
+            await db_session.rollback()
+        except:
+            pass
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
 @app.put("/api/chat/sessions/{session_id}/title")
 async def update_chat_session_title(session_id: str, request: Request):
     """Update the title of a chat session."""
@@ -4612,31 +4644,6 @@ async def update_chat_session_title(session_id: str, request: Request):
     except Exception as e:
         logger.error(f"Error updating chat session title: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
-
-
-@app.delete("/api/chat/sessions/{session_id}")
-async def delete_chat_session(session_id: str):
-    """Delete a chat session and all its messages."""
-    try:
-        async with AsyncSessionLocal() as db_session:
-            # Delete all messages for this session
-            deleted_messages = await db_session.execute(
-                delete(ChatMessage).where(ChatMessage.session_id == session_id)
-            )
-            
-            # Delete the session record
-            deleted_session = await db_session.execute(
-                delete(ChatSession).where(ChatSession.session_id == session_id)
-            )
-            
-            await db_session.commit()
-            
-            logger.info(f"Deleted chat session {session_id} and all its messages")
-            return JSONResponse(content={"success": True, "message": "Chat session deleted successfully"})
-            
-    except Exception as e:
-        logger.error(f"Error deleting chat session: {e}", exc_info=True)
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 @app.get("/api/chat/sessions/{session_id}/title")
