@@ -138,9 +138,23 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   // Note: reloadHistory is handled by useChat hook when sessionId changes
   // No need to call it here to avoid double-loading
 
+  // Combine messages: DB messages first, then pending user message, then streaming response
+  // Filter out duplicates by checking if pending message already exists in filteredMessages
+  const pendingExistsInHistory = pendingUserMessage && filteredMessages.some(
+    msg => msg.role === 'user' && 
+           msg.message === pendingUserMessage.message &&
+           Math.abs(new Date(msg.created_at) - new Date(pendingUserMessage.created_at)) < 5000
+  );
+  
+  const allMessages = [
+    ...filteredMessages,
+    ...(pendingUserMessage && !pendingExistsInHistory ? [pendingUserMessage] : []),
+    ...(streamingMessage ? [streamingMessage] : [])
+  ];
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingMessage, pendingUserMessage]);
+  }, [allMessages.length, streamingMessage?.message]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -175,11 +189,13 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     await sendMessage(
       userMessage,
       (fullResponse) => {
+        // Update streaming message as chunks arrive
         setStreamingMessage({ id: 'streaming', role: 'assistant', message: fullResponse });
         setIsWaiting(false);
-        setPendingUserMessage(null);
+        // Keep pendingUserMessage until history reloads to prevent jumping
       },
       async (fullResponse) => {
+        // Message complete - clear streaming and pending, then reload history
         setStreamingMessage(null);
         setIsWaiting(false);
         setPendingUserMessage(null);
@@ -348,12 +364,6 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     // For other sessions, match if session_id starts with currentSessionId
     return msg.session_id.startsWith(currentSessionId);
   });
-  
-  const allMessages = [
-    ...(pendingUserMessage ? [pendingUserMessage] : []),
-    ...filteredMessages,
-    ...(streamingMessage ? [streamingMessage] : [])
-  ];
 
   useEffect(() => {
     // Focus input when component mounts or when empty
