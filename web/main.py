@@ -4178,12 +4178,12 @@ async def send_chat_message(request: Request):
                                         
                                         if first_user_msg:
                                             # Generate title using AI based on the conversation
-                                            ai_service = AIService()
-                                            await ai_service.reload_persona_config()
+                                            title_ai_service = AIService()
+                                            await title_ai_service.reload_persona_config()
                                             
                                             title_prompt = f"Based on this conversation, generate a concise title (maximum 25 characters, no quotes or punctuation at the end):\n\nUser: {first_user_msg.message}\nAssistant: {full_response[:200]}"
                                             
-                                            title_result = await ai_service.execute_with_system_prompt(
+                                            title_result = await title_ai_service.execute_with_system_prompt(
                                                 question=title_prompt,
                                                 system_prompt="You are a helpful assistant that generates concise, descriptive titles for conversations. Return only the title text, no quotes, no punctuation at the end, maximum 25 characters.",
                                                 max_tokens=50
@@ -4335,12 +4335,12 @@ async def send_chat_message(request: Request):
                                         
                                         if first_user_msg:
                                             # Generate title using AI based on the conversation
-                                            ai_service = AIService()
-                                            await ai_service.reload_persona_config()
+                                            title_ai_service = AIService()
+                                            await title_ai_service.reload_persona_config()
                                             
                                             title_prompt = f"Based on this conversation, generate a concise title (maximum 25 characters, no quotes or punctuation at the end):\n\nUser: {first_user_msg.message}\nAssistant: {full_response[:200]}"
                                             
-                                            title_result = await ai_service.execute_with_system_prompt(
+                                            title_result = await title_ai_service.execute_with_system_prompt(
                                                 question=title_prompt,
                                                 system_prompt="You are a helpful assistant that generates concise, descriptive titles for conversations. Return only the title text, no quotes, no punctuation at the end, maximum 25 characters.",
                                                 max_tokens=50
