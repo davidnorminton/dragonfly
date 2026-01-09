@@ -49,66 +49,106 @@ hljs.registerLanguage('php', php);
 export function formatMessage(text) {
   if (!text) return '';
   
-  // Escape HTML first
+  // Escape HTML
   const escapeHtml = (str) => {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
   };
   
-  // Replace code blocks with highlighted versions
-  // Match ```language\ncode\n``` pattern
+  // Process the text by splitting on code blocks
   const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
   
-  let result = text;
+  const parts = [];
+  let lastIndex = 0;
   let match;
-  const replacements = [];
   
-  // Find all code blocks
+  // Find all code blocks and split text around them
   while ((match = codeBlockRegex.exec(text)) !== null) {
+    // Add text before the code block
+    if (match.index > lastIndex) {
+      const textBefore = text.substring(lastIndex, match.index);
+      parts.push({ type: 'text', content: textBefore });
+    }
+    
+    // Add the code block
     const language = match[1] || 'plaintext';
     const code = match[2];
+    parts.push({ type: 'code', language, content: code });
     
-    let highlightedCode;
-    try {
-      if (language === 'plaintext' || !hljs.getLanguage(language)) {
-        highlightedCode = escapeHtml(code);
-      } else {
-        highlightedCode = hljs.highlight(code, { language }).value;
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add any remaining text after the last code block
+  if (lastIndex < text.length) {
+    const textAfter = text.substring(lastIndex);
+    parts.push({ type: 'text', content: textAfter });
+  }
+  
+  // Process each part
+  const processedParts = parts.map(part => {
+    if (part.type === 'code') {
+      // Highlight the code
+      let highlightedCode;
+      try {
+        if (part.language === 'plaintext' || !hljs.getLanguage(part.language)) {
+          highlightedCode = escapeHtml(part.content);
+        } else {
+          highlightedCode = hljs.highlight(part.content, { language: part.language }).value;
+        }
+      } catch (e) {
+        console.error('Highlighting error:', e);
+        highlightedCode = escapeHtml(part.content);
       }
-    } catch (e) {
-      console.error('Highlighting error:', e);
-      highlightedCode = escapeHtml(code);
+      
+      const languageLabel = part.language !== 'plaintext' ? part.language : '';
+      return `<div class="code-block-wrapper">${languageLabel ? `<div class="code-block-language">${languageLabel}</div>` : ''}<pre><code class="hljs language-${part.language}">${highlightedCode}</code></pre></div>`;
+    } else {
+      // Process text: handle inline code, escape HTML, convert newlines
+      let processedText = part.content;
+      
+      // Replace inline code first (preserve backticks content)
+      const inlineCodeParts = [];
+      let inlineLastIndex = 0;
+      const inlineCodeRegex = /`([^`]+)`/g;
+      let inlineMatch;
+      
+      while ((inlineMatch = inlineCodeRegex.exec(part.content)) !== null) {
+        if (inlineMatch.index > inlineLastIndex) {
+          inlineCodeParts.push({
+            type: 'text',
+            content: part.content.substring(inlineLastIndex, inlineMatch.index)
+          });
+        }
+        inlineCodeParts.push({
+          type: 'inline-code',
+          content: inlineMatch[1]
+        });
+        inlineLastIndex = inlineMatch.index + inlineMatch[0].length;
+      }
+      
+      if (inlineLastIndex < part.content.length) {
+        inlineCodeParts.push({
+          type: 'text',
+          content: part.content.substring(inlineLastIndex)
+        });
+      }
+      
+      // If no inline code was found, treat the whole thing as text
+      if (inlineCodeParts.length === 0) {
+        return escapeHtml(part.content).replace(/\n/g, '<br>');
+      }
+      
+      // Process inline code parts
+      return inlineCodeParts.map(p => {
+        if (p.type === 'inline-code') {
+          return `<code class="inline-code">${escapeHtml(p.content)}</code>`;
+        } else {
+          return escapeHtml(p.content).replace(/\n/g, '<br>');
+        }
+      }).join('');
     }
-    
-    const languageLabel = language !== 'plaintext' ? language : '';
-    const htmlBlock = `<div class="code-block-wrapper">
-      ${languageLabel ? `<div class="code-block-language">${languageLabel}</div>` : ''}
-      <pre><code class="hljs language-${language}">${highlightedCode}</code></pre>
-    </div>`;
-    
-    replacements.push({
-      original: match[0],
-      replacement: htmlBlock
-    });
-  }
+  });
   
-  // Replace code blocks
-  for (const { original, replacement } of replacements) {
-    result = result.replace(original, replacement);
-  }
-  
-  // Replace inline code (backticks)
-  result = result.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-  
-  // Escape remaining HTML and convert newlines to <br>
-  const parts = result.split(/(<div class="code-block-wrapper">[\s\S]*?<\/div>|<code class="inline-code">.*?<\/code>)/);
-  result = parts.map((part, i) => {
-    if (part.startsWith('<div class="code-block-wrapper">') || part.startsWith('<code class="inline-code">')) {
-      return part; // Keep code blocks and inline code as-is
-    }
-    return escapeHtml(part).replace(/\n/g, '<br>');
-  }).join('');
-  
-  return result;
+  return processedParts.join('');
 }
