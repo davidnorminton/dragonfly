@@ -1,8 +1,6 @@
 """Utilities for loading and managing persona configurations."""
-import json
 import logging
 from typing import Dict, Any, Optional, List
-from pathlib import Path
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,26 +29,13 @@ async def get_current_persona_name(session: Optional[AsyncSession] = None) -> st
             if persona:
                 return persona.name
             else:
-                # Fallback: check file
-                return _get_current_persona_from_file()
+                logger.warning("No active persona found in database, defaulting to 'default'")
+                return "default"
         finally:
             if should_close:
                 await db_session.close()
     except Exception as e:
         logger.error(f"Error getting current persona from database: {e}", exc_info=True)
-        return _get_current_persona_from_file()
-
-
-def _get_current_persona_from_file() -> str:
-    """Fallback: Get current persona from file."""
-    config_file = Path(__file__).parent / "current_persona.json"
-    try:
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                data = json.load(f)
-                return data.get("persona", "default")
-        return "default"
-    except Exception:
         return "default"
 
 
@@ -131,26 +116,13 @@ async def load_persona_config(persona_name: Optional[str] = None, session: Optio
             if persona:
                 return persona.config_data
             else:
-                # Fallback: try loading from file
-                return _load_persona_from_file(persona_name)
+                logger.warning(f"Persona '{persona_name}' not found in database")
+                return None
         finally:
             if should_close:
                 await db_session.close()
     except Exception as e:
         logger.error(f"Error loading persona config {persona_name}: {e}", exc_info=True)
-        return _load_persona_from_file(persona_name)
-
-
-def _load_persona_from_file(persona_name: str) -> Optional[Dict[str, Any]]:
-    """Fallback: Load persona config from file."""
-    config_file = Path(__file__).parent / "personas" / f"{persona_name}.config"
-    try:
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                return json.load(f)
-        return None
-    except Exception as e:
-        logger.error(f"Error loading persona config from file {persona_name}: {e}")
         return None
 
 
@@ -184,28 +156,7 @@ async def list_available_personas(session: Optional[AsyncSession] = None) -> Lis
                 await db_session.close()
     except Exception as e:
         logger.error(f"Error listing personas from database: {e}", exc_info=True)
-        return _list_personas_from_files()
-
-
-def _list_personas_from_files() -> List[Dict[str, Any]]:
-    """Fallback: List personas from files."""
-    personas_dir = Path(__file__).parent / "personas"
-    personas = []
-    
-    try:
-        if personas_dir.exists():
-            for config_file in personas_dir.glob("*.config"):
-                persona_name = config_file.stem
-                config = _load_persona_from_file(persona_name)
-                if config:
-                    personas.append({
-                        "name": persona_name,
-                        "title": config.get("title", persona_name)
-                    })
-    except Exception as e:
-        logger.error(f"Error listing personas from files: {e}")
-    
-    return sorted(personas, key=lambda x: x["name"])
+        return []
 
 
 async def save_persona_config(persona_name: str, config: Dict[str, Any], session: Optional[AsyncSession] = None) -> bool:

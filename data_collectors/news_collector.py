@@ -99,6 +99,9 @@ class NewsCollector(BaseCollector):
             if enclosure is not None and enclosure.get("type", "").startswith("image/"):
                 image_url = enclosure.get("url", "")
         
+        # Enhance image URL to get larger size if it's a BBC image
+        image_url = self._enhance_image_url(image_url)
+        
         return {
             "title": title_text.strip(),
             "link": link_text.strip(),
@@ -107,6 +110,56 @@ class NewsCollector(BaseCollector):
             "published_at": pub_date_text.strip(),
             "image_url": image_url
         }
+    
+    def _enhance_image_url(self, image_url: str) -> str:
+        """
+        Enhance BBC image URLs to get larger sizes.
+        BBC images often use patterns like:
+        - https://ichef.bbci.co.uk/images/ic/640x360/... (can upgrade to 1920x1080)
+        - https://ichef.bbci.co.uk/news/1024/... (can upgrade to 2048)
+        - https://ichef.bbci.co.uk/news/976/... (can upgrade to 2048)
+        """
+        if not image_url or "ichef.bbci.co.uk" not in image_url:
+            return image_url
+        
+        try:
+            # Pattern 1: /images/ic/640x360/ or similar dimensions
+            # Upgrade to 1920x1080 (16:9 aspect ratio, high quality)
+            if "/images/ic/" in image_url:
+                pattern = r'(/images/ic/)\d+x\d+(/.+)'
+                match = re.search(pattern, image_url)
+                if match:
+                    # Replace with larger size (1920x1080 is typically the max)
+                    enhanced_url = re.sub(pattern, r'\g<1>1920x1080\g<2>', image_url)
+                    logger.debug(f"Enhanced image URL: {image_url} -> {enhanced_url}")
+                    return enhanced_url
+            
+            # Pattern 2: /news/1024/ or /news/976/ (news images)
+            # Upgrade to 2048 for better quality
+            if "/news/" in image_url:
+                # Match patterns like /news/1024/ or /news/976/
+                pattern = r'(/news/)\d+(/.+)'
+                match = re.search(pattern, image_url)
+                if match:
+                    # Try 2048 first (larger), fallback to 976 if that doesn't work
+                    enhanced_url = re.sub(pattern, r'\g<1>2048\g<2>', image_url)
+                    logger.debug(f"Enhanced news image URL: {image_url} -> {enhanced_url}")
+                    return enhanced_url
+            
+            # Pattern 3: Check for width parameter in URL
+            # Some BBC URLs use width parameters
+            if "width=" in image_url or "w=" in image_url:
+                # Replace width parameters with larger values
+                enhanced_url = re.sub(r'[?&](width|w)=\d+', r'\1=1920', image_url)
+                if enhanced_url != image_url:
+                    logger.debug(f"Enhanced image URL with width param: {image_url} -> {enhanced_url}")
+                    return enhanced_url
+            
+        except Exception as e:
+            logger.debug(f"Error enhancing image URL {image_url}: {e}")
+        
+        # Return original URL if we couldn't enhance it
+        return image_url
     
     async def _fetch_feed(self, feed_info: Dict[str, str]) -> List[Dict[str, Any]]:
         """Fetch and parse a single RSS feed."""

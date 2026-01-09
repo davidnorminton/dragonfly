@@ -1,14 +1,10 @@
 """Utility functions for loading expert type configurations."""
-import json
 import logging
-from pathlib import Path
 from typing import Dict, Any, Optional, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
-
-EXPERT_TYPES_CONFIG_PATH = Path(__file__).parent / "expert_types.json"
 
 
 async def load_expert_types(session: Optional[AsyncSession] = None) -> Dict[str, Dict[str, Any]]:
@@ -53,22 +49,6 @@ async def load_expert_types(session: Optional[AsyncSession] = None) -> Dict[str,
                 await db_session.close()
     except Exception as e:
         logger.error(f"Error loading expert types from database: {e}", exc_info=True)
-        return _load_expert_types_from_file()
-
-
-def _load_expert_types_from_file() -> Dict[str, Dict[str, Any]]:
-    """Fallback: Load expert types from file."""
-    try:
-        if not EXPERT_TYPES_CONFIG_PATH.exists():
-            logger.warning(f"Expert types config file not found at {EXPERT_TYPES_CONFIG_PATH}")
-            return {}
-        
-        with open(EXPERT_TYPES_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            logger.debug("Loaded expert types config from file")
-            return config
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"Error loading expert types config from file: {e}", exc_info=True)
         return {}
 
 

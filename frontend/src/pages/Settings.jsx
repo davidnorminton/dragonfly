@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { configAPI, systemAPI, routerAPI, musicAPI } from '../services/api';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { configAPI, systemAPI, routerAPI, musicAPI, personaAPI, databaseAPI } from '../services/api';
 import { useRouterConfig } from '../hooks/useRouterConfig';
 
 export function SettingsPage({ onNavigate }) {
@@ -14,6 +14,7 @@ export function SettingsPage({ onNavigate }) {
   const [apiKeysConfig, setApiKeysConfig] = useState('');
   const [apiKeysFields, setApiKeysFields] = useState({});
   const [loading, setLoading] = useState(false);
+  const [loadingTableData, setLoadingTableData] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -24,6 +25,20 @@ export function SettingsPage({ onNavigate }) {
   const [musicMessage, setMusicMessage] = useState('');
   const [systemConfig, setSystemConfig] = useState('');
   const [systemFields, setSystemFields] = useState({});
+  const [expandedSections, setExpandedSections] = useState({});
+  const [locationFields, setLocationFields] = useState({});
+  const [fillerWords, setFillerWords] = useState([]);
+  const [newFillerText, setNewFillerText] = useState('');
+  const [creatingFiller, setCreatingFiller] = useState(false);
+  const [playingAudio, setPlayingAudio] = useState(null);
+  const [databaseTables, setDatabaseTables] = useState([]);
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [tableData, setTableData] = useState(null);
+  const [tablePage, setTablePage] = useState(1);
+  const [tableLimit] = useState(15);
+  const [editingCell, setEditingCell] = useState(null);
+  const [editedRow, setEditedRow] = useState({});
+  const loadingTableRef = useRef(null);
   const {
     model,
     temperature,
@@ -46,12 +61,77 @@ export function SettingsPage({ onNavigate }) {
     removeRule,
   } = useRouterConfig(activeRouterTab === 'router');
 
+  const loadTableData = useCallback(async (tableName, page = 1) => {
+    if (!tableName) {
+      return;
+    }
+    
+    // Prevent multiple simultaneous loads for the same table/page
+    const loadKey = `${tableName}-${page}`;
+    if (loadingTableRef.current === loadKey) {
+      console.log('Already loading this table/page, skipping');
+      return;
+    }
+    
+    console.log('loadTableData called:', tableName, page);
+    loadingTableRef.current = loadKey;
+    
+    try {
+      setLoadingTableData(true);
+      setError(null);
+      const result = await databaseAPI.getTableData(tableName, page, tableLimit);
+      console.log('Table data result:', result);
+      
+      if (result && result.success) {
+        console.log('Setting table data:', result.data?.length, 'rows');
+        console.log('Table data structure:', { success: result.success, columns: result.columns?.length, data: result.data?.length });
+        console.log('BEFORE setTableData - result:', result);
+        setTableData(result);
+        console.log('AFTER setTableData called');
+        setError(null);
+        // Force a re-render check
+        setTimeout(() => {
+          console.log('After setTableData - current tableData state should be set now');
+        }, 100);
+      } else {
+        console.error('Table data result not successful:', result);
+        setError('Failed to load table data');
+      }
+    } catch (err) {
+      console.error('Error loading table data:', err);
+      console.error('Error details:', err.response?.data || err.message);
+      setError(err.response?.data?.detail || err.message || 'Failed to load table data');
+    } finally {
+      setLoadingTableData(false);
+      loadingTableRef.current = null;
+      console.log('loadTableData finished');
+    }
+  }, [tableLimit]);
+
   useEffect(() => {
     loadPersonas();
     loadLocationConfig();
     loadApiKeysConfig();
     loadSystemConfig();
-  }, []);
+    if (activeTab === 'database') {
+      loadDatabaseTables();
+    }
+  }, [activeTab]);
+  
+  useEffect(() => {
+    console.log('useEffect fired - selectedTable:', selectedTable, 'activeTab:', activeTab, 'tablePage:', tablePage);
+    if (selectedTable && activeTab === 'database') {
+      console.log('useEffect triggered - Loading table data:', selectedTable, 'page:', tablePage);
+      loadTableData(selectedTable, tablePage);
+    } else if (activeTab !== 'database') {
+      // Clear table data when switching away from database tab
+      console.log('Clearing table data - activeTab is not database');
+      setTableData(null);
+      setSelectedTable(null);
+      setTablePage(1);
+      loadingTableRef.current = null;
+    }
+  }, [selectedTable, tablePage, activeTab, loadTableData]);
 
   const loadPersonas = async () => {
     try {
@@ -71,6 +151,9 @@ export function SettingsPage({ onNavigate }) {
       setPersonaConfig(JSON.stringify(data, null, 2));
       setPersonaFields(data);
       setSelectedPersona(personaName);
+      
+      // Load filler words
+      await loadFillerWords(personaName);
     } catch (err) {
       console.error('Error loading persona config:', err);
       setError(`Failed to load config for ${personaName}`);
@@ -79,10 +162,145 @@ export function SettingsPage({ onNavigate }) {
     }
   };
 
+  const loadFillerWords = async (personaName) => {
+    if (!personaName) {
+      setFillerWords([]);
+      return;
+    }
+    
+    try {
+      console.log('Loading filler words for persona:', personaName);
+      const result = await personaAPI.getFillerWords(personaName);
+      console.log('Filler words result:', result);
+      
+      if (result && result.success) {
+        const words = result.filler_words || [];
+        console.log(`Found ${words.length} filler words:`, words);
+        setFillerWords(words);
+      } else {
+        console.warn('Filler words request not successful:', result);
+        setFillerWords([]);
+      }
+    } catch (err) {
+      console.error('Error loading filler words:', err);
+      console.error('Error details:', err.response?.data || err.message);
+      setFillerWords([]);
+      // Don't set error here as it might be expected if no filler words exist
+      // Only log for debugging
+    }
+  };
+
+  const handlePlayFillerWord = async (personaName, filename) => {
+    try {
+      setPlayingAudio(filename);
+      const audioUrl = personaAPI.getFillerWordAudio(personaName, filename);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => {
+        setPlayingAudio(null);
+      };
+      
+      audio.onerror = () => {
+        setPlayingAudio(null);
+        setError('Failed to play audio');
+      };
+      
+      await audio.play();
+    } catch (err) {
+      console.error('Error playing filler word:', err);
+      setPlayingAudio(null);
+      setError('Failed to play audio');
+    }
+  };
+
+  const handleDeleteFillerWord = async (personaName, filename) => {
+    if (!confirm(`Delete filler word "${filename}"?`)) {
+      return;
+    }
+    
+    try {
+      await personaAPI.deleteFillerWord(personaName, filename);
+      await loadFillerWords(personaName);
+      setSuccess('Filler word deleted');
+    } catch (err) {
+      console.error('Error deleting filler word:', err);
+      setError('Failed to delete filler word');
+    }
+  };
+
+  const handleCreateFillerWord = async () => {
+    if (!newFillerText.trim() || !selectedPersona) {
+      setError('Please enter text for the filler word');
+      return;
+    }
+    
+    setCreatingFiller(true);
+    setError(null);
+    
+    try {
+      await personaAPI.createFillerWord(selectedPersona, newFillerText.trim());
+      setNewFillerText('');
+      await loadFillerWords(selectedPersona);
+      setSuccess('Filler word created successfully');
+    } catch (err) {
+      console.error('Error creating filler word:', err);
+      setError(err.response?.data?.detail || 'Failed to create filler word');
+    } finally {
+      setCreatingFiller(false);
+    }
+  };
+
+  const loadDatabaseTables = async () => {
+    try {
+      setLoading(true);
+      const result = await databaseAPI.getTables();
+      if (result.success) {
+        setDatabaseTables(result.tables || []);
+      }
+    } catch (err) {
+      console.error('Error loading database tables:', err);
+      setError('Failed to load database tables');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCellEdit = (rowId, column, value) => {
+    setEditingCell({ rowId, column });
+    setEditedRow(prev => ({
+      ...prev,
+      [rowId]: {
+        ...prev[rowId],
+        [column]: value
+      }
+    }));
+  };
+
+  const handleSaveRow = async (rowId, rowData) => {
+    try {
+      setSaving(true);
+      await databaseAPI.updateTableRow(selectedTable, rowId, rowData);
+      setSuccess('Row updated successfully');
+      setEditingCell(null);
+      setEditedRow(prev => {
+        const newState = { ...prev };
+        delete newState[rowId];
+        return newState;
+      });
+      await loadTableData(selectedTable, tablePage);
+    } catch (err) {
+      console.error('Error updating row:', err);
+      setError(err.response?.data?.detail || 'Failed to update row');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const loadLocationConfig = async () => {
     try {
       const data = await configAPI.getLocationConfig();
       setLocationConfig(JSON.stringify(data, null, 2));
+      setLocationFields(data);
     } catch (err) {
       console.error('Error loading location config:', err);
     }
@@ -295,6 +513,13 @@ export function SettingsPage({ onNavigate }) {
     }
   };
 
+  const toggleSection = (sectionId) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [sectionId]: !prev[sectionId]
+    }));
+  };
+
   const handleMusicScan = async () => {
     setMusicLoading(true);
     setMusicMessage('');
@@ -382,6 +607,12 @@ export function SettingsPage({ onNavigate }) {
             onClick={() => setActiveTab('system')}
           >
             System
+          </button>
+          <button
+            className={activeTab === 'database' ? 'active' : ''}
+            onClick={() => setActiveTab('database')}
+          >
+            Database
           </button>
         </div>
 
@@ -589,7 +820,15 @@ export function SettingsPage({ onNavigate }) {
                       {/* Anthropic AI Section */}
                       {personaFields.anthropic && (
                         <div className="config-section">
-                          <h4 className="config-section-title">AI Configuration (Anthropic)</h4>
+                          <h4 
+                            className="config-section-title collapsible" 
+                            onClick={() => toggleSection('persona-anthropic')}
+                          >
+                            <span className="collapse-icon">{expandedSections['persona-anthropic'] ? '▼' : '▶'}</span>
+                            AI Configuration (Anthropic)
+                          </h4>
+                          {expandedSections['persona-anthropic'] && (
+                          <div>
                           <div className="form-grid">
                             <div className="form-group">
                               <label>Model</label>
@@ -639,13 +878,23 @@ export function SettingsPage({ onNavigate }) {
                               rows={8}
                             />
                           </div>
+                          </div>
+                          )}
                         </div>
                       )}
 
                       {/* Fish Audio Section */}
                       {personaFields.fish_audio && (
                         <div className="config-section">
-                          <h4 className="config-section-title">Voice Configuration (Fish Audio)</h4>
+                          <h4 
+                            className="config-section-title collapsible" 
+                            onClick={() => toggleSection('persona-fish')}
+                          >
+                            <span className="collapse-icon">{expandedSections['persona-fish'] ? '▼' : '▶'}</span>
+                            Voice Configuration (Fish Audio)
+                          </h4>
+                          {expandedSections['persona-fish'] && (
+                          <div>
                           <div className="form-grid">
                             <div className="form-group">
                               <label>Voice ID</label>
@@ -664,39 +913,115 @@ export function SettingsPage({ onNavigate }) {
                               />
                             </div>
                           </div>
+                          </div>
+                          )}
                         </div>
                       )}
 
                       {/* Filler Audio Section */}
                       {personaFields.filler && (
                         <div className="config-section">
-                          <h4 className="config-section-title">Filler Audio Files</h4>
-                          <div className="form-grid">
-                            <div className="form-group">
-                              <label>Answer Question</label>
-                              <input
-                                type="text"
-                                value={personaFields.filler.answer_question || ''}
-                                onChange={(e) => updatePersonaField('filler.answer_question', e.target.value)}
-                              />
+                          <h4 
+                            className="config-section-title collapsible" 
+                            onClick={() => toggleSection('persona-filler')}
+                          >
+                            <span className="collapse-icon">{expandedSections['persona-filler'] ? '▼' : '▶'}</span>
+                            Filler Audio Files
+                          </h4>
+                          {expandedSections['persona-filler'] && (
+                          <div>
+                          {/* Filler Words List */}
+                          <div className="filler-words-section" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                            <h5 style={{ color: '#fff', marginBottom: '16px', fontSize: '1em', fontWeight: 600 }}>Filler Words</h5>
+                            
+                            {/* Add New Filler Word */}
+                            <div className="form-group" style={{ marginBottom: '20px' }}>
+                              <label>Add New Filler Word</label>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                  type="text"
+                                  value={newFillerText}
+                                  onChange={(e) => setNewFillerText(e.target.value)}
+                                  placeholder="Enter text for filler word (e.g., 'let me think')"
+                                  onKeyPress={(e) => {
+                                    if (e.key === 'Enter' && !creatingFiller) {
+                                      handleCreateFillerWord();
+                                    }
+                                  }}
+                                  style={{ flex: 1 }}
+                                />
+                                <button
+                                  onClick={handleCreateFillerWord}
+                                  disabled={creatingFiller || !newFillerText.trim()}
+                                  className="save-button"
+                                  style={{ minWidth: '100px' }}
+                                >
+                                  {creatingFiller ? 'Creating...' : 'Create'}
+                                </button>
+                              </div>
+                              <span className="form-help">Text will be converted to speech using this persona's voice</span>
                             </div>
-                            <div className="form-group">
-                              <label>Wake Word Confirmation</label>
-                              <input
-                                type="text"
-                                value={personaFields.filler.wake_word_confirmation || ''}
-                                onChange={(e) => updatePersonaField('filler.wake_word_confirmation', e.target.value)}
-                              />
-                            </div>
-                            <div className="form-group">
-                              <label>Translating</label>
-                              <input
-                                type="text"
-                                value={personaFields.filler.translating || ''}
-                                onChange={(e) => updatePersonaField('filler.translating', e.target.value)}
-                              />
-                            </div>
+                            
+                            {/* Filler Words List */}
+                            {fillerWords.length === 0 ? (
+                              <div style={{ color: 'rgba(255,255,255,0.5)', padding: '20px', textAlign: 'center' }}>
+                                No filler words yet. Add one above.
+                              </div>
+                            ) : (
+                              <div className="filler-words-list">
+                                {fillerWords.map((word, idx) => (
+                                  <div key={idx} className="filler-word-item" style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '12px',
+                                    background: 'rgba(255,255,255,0.03)',
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    borderRadius: '8px',
+                                    marginBottom: '8px'
+                                  }}>
+                                    <div style={{ flex: 1 }}>
+                                      <div style={{ color: '#fff', fontWeight: 500, marginBottom: '4px' }}>
+                                        {word.text}
+                                      </div>
+                                      <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.85em' }}>
+                                        {word.filename}
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                      <button
+                                        onClick={() => handlePlayFillerWord(selectedPersona, word.filename)}
+                                        disabled={playingAudio === word.filename}
+                                        className="save-button"
+                                        style={{
+                                          padding: '6px 12px',
+                                          fontSize: '0.9em',
+                                          background: playingAudio === word.filename ? '#2563eb' : '#3b82f6',
+                                          minWidth: '70px'
+                                        }}
+                                      >
+                                        {playingAudio === word.filename ? 'Playing...' : '▶ Play'}
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteFillerWord(selectedPersona, word.filename)}
+                                        className="save-button"
+                                        style={{
+                                          padding: '6px 12px',
+                                          fontSize: '0.9em',
+                                          background: '#dc3545',
+                                          minWidth: '70px'
+                                        }}
+                                      >
+                                        🗑️ Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
+                          </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -718,12 +1043,54 @@ export function SettingsPage({ onNavigate }) {
                   {saving ? 'Saving...' : 'Save'}
                 </button>
               </div>
-              <textarea
-                value={locationConfig}
-                onChange={(e) => setLocationConfig(e.target.value)}
-                className="config-textarea"
-                rows={15}
-              />
+              {success && <div className="settings-message success">{success}</div>}
+              {error && <div className="settings-message error">{error}</div>}
+              
+              <div className="config-form-container">
+                <div className="config-section">
+                  <h4 className="config-section-title">Location Details</h4>
+                  <div className="form-group">
+                    <label>City</label>
+                    <input
+                      type="text"
+                      value={locationFields.city || ''}
+                      onChange={(e) => updateLocationField('city', e.target.value)}
+                      placeholder="e.g., London"
+                    />
+                    <span className="form-help">Your city or town name</span>
+                  </div>
+                  <div className="form-group">
+                    <label>Region</label>
+                    <input
+                      type="text"
+                      value={locationFields.region || ''}
+                      onChange={(e) => updateLocationField('region', e.target.value)}
+                      placeholder="e.g., Greater London"
+                    />
+                    <span className="form-help">County, state, or region</span>
+                  </div>
+                  <div className="form-group">
+                    <label>Postcode</label>
+                    <input
+                      type="text"
+                      value={locationFields.postcode || ''}
+                      onChange={(e) => updateLocationField('postcode', e.target.value)}
+                      placeholder="e.g., SW1A 1AA"
+                    />
+                    <span className="form-help">Your postcode or ZIP code</span>
+                  </div>
+                  <div className="form-group">
+                    <label>BBC Weather Location ID (Optional)</label>
+                    <input
+                      type="text"
+                      value={locationFields.location_id || ''}
+                      onChange={(e) => updateLocationField('location_id', e.target.value)}
+                      placeholder="e.g., 2643743"
+                    />
+                    <span className="form-help">BBC Weather location ID for weather data. Leave empty to auto-detect from postcode.</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -742,7 +1109,14 @@ export function SettingsPage({ onNavigate }) {
               <div className="config-form-container">
                 {/* Anthropic Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Anthropic (Claude AI)</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('api-anthropic')}
+                  >
+                    <span className="collapse-icon">{expandedSections['api-anthropic'] ? '▼' : '▶'}</span>
+                    Anthropic (Claude AI)
+                  </h4>
+                  {expandedSections['api-anthropic'] && (
                   <div className="form-group">
                     <label>API Key</label>
                     <input
@@ -752,11 +1126,20 @@ export function SettingsPage({ onNavigate }) {
                       placeholder="sk-ant-..."
                     />
                   </div>
+                  )}
                 </div>
 
                 {/* Perplexity Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Perplexity AI</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('api-perplexity')}
+                  >
+                    <span className="collapse-icon">{expandedSections['api-perplexity'] ? '▼' : '▶'}</span>
+                    Perplexity AI
+                  </h4>
+                  {expandedSections['api-perplexity'] && (
+                  <div>
                   <div className="form-group">
                     <label>API Key</label>
                     <input
@@ -766,11 +1149,21 @@ export function SettingsPage({ onNavigate }) {
                       placeholder="pplx-..."
                     />
                   </div>
+                  </div>
+                  )}
                 </div>
 
                 {/* Fish Audio Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Fish Audio (Text-to-Speech)</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('api-fish')}
+                  >
+                    <span className="collapse-icon">{expandedSections['api-fish'] ? '▼' : '▶'}</span>
+                    Fish Audio (Text-to-Speech)
+                  </h4>
+                  {expandedSections['api-fish'] && (
+                  <div>
                   <div className="form-group">
                     <label>API Key</label>
                     <input
@@ -800,11 +1193,21 @@ export function SettingsPage({ onNavigate }) {
                       />
                     </div>
                   </div>
+                  </div>
+                  )}
                 </div>
 
                 {/* BBC Weather Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">BBC Weather</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('api-weather')}
+                  >
+                    <span className="collapse-icon">{expandedSections['api-weather'] ? '▼' : '▶'}</span>
+                    BBC Weather
+                  </h4>
+                  {expandedSections['api-weather'] && (
+                  <div>
                   <div className="form-group">
                     <label>Location ID</label>
                     <input
@@ -814,6 +1217,8 @@ export function SettingsPage({ onNavigate }) {
                       placeholder="2637891"
                     />
                   </div>
+                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -822,8 +1227,15 @@ export function SettingsPage({ onNavigate }) {
           {activeTab === 'music' && (
             <div className="settings-panel">
               <div className="settings-panel-header">
-                <h3>Music</h3>
+                <h3>Music Configuration</h3>
                 <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={saveSystemConfig}
+                    disabled={saving}
+                    className="save-button"
+                  >
+                    {saving ? 'Saving...' : 'Save Config'}
+                  </button>
                   <button
                     onClick={handleMusicScan}
                     disabled={musicLoading}
@@ -842,32 +1254,57 @@ export function SettingsPage({ onNavigate }) {
                 </div>
               </div>
               {musicMessage && <div className="settings-message info">{musicMessage}</div>}
-              <p className="settings-help">
-                Scan `/Users/davidnorminton/Music` for artists, albums, and songs, updating the library metadata.
-              </p>
               
-              <div className="settings-section" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                <h4 style={{ marginBottom: '12px', color: '#fff' }}>Music Library Editor</h4>
-                <p className="settings-help" style={{ marginBottom: '12px' }}>
-                  Edit artist names, album titles, song titles, and other metadata for your music library.
-                </p>
-                <button
-                  onClick={() => {
-                    if (onNavigate) onNavigate('music-editor');
-                  }}
-                  className="save-button"
-                >
-                  Open Music Editor
-                </button>
-                <button
-                  onClick={() => {
-                    if (onNavigate) onNavigate('analytics');
-                  }}
-                  className="save-button"
-                  style={{ marginTop: '12px' }}
-                >
-                  📊 View Analytics
-                </button>
+              <div className="config-form-container">
+                {/* Music Directory Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Music Library Path</h4>
+                  <div className="form-group">
+                    <label>Music Directory</label>
+                    <input
+                      type="text"
+                      value={systemFields.paths?.music_directory || ''}
+                      onChange={(e) => updateSystemField('paths.music_directory', e.target.value)}
+                      placeholder="/Users/username/Music"
+                    />
+                    <span className="form-help">Path to your music library folder. Save config before scanning.</span>
+                  </div>
+                </div>
+
+                {/* Library Scanning Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Library Management</h4>
+                  <p className="settings-help">
+                    Scan your music directory for artists, albums, and songs to update the library metadata.
+                  </p>
+                </div>
+
+                {/* Music Tools Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Music Tools</h4>
+                  <div className="form-group">
+                    <button
+                      onClick={() => {
+                        if (onNavigate) onNavigate('music-editor');
+                      }}
+                      className="save-button"
+                      style={{ marginRight: '12px' }}
+                    >
+                      🎵 Open Music Editor
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (onNavigate) onNavigate('analytics');
+                      }}
+                      className="save-button"
+                    >
+                      📊 View Analytics
+                    </button>
+                  </div>
+                  <p className="settings-help">
+                    Use the Music Editor to modify artist names, album titles, song titles, and other metadata.
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -899,17 +1336,15 @@ export function SettingsPage({ onNavigate }) {
               <div className="config-form-container">
                 {/* Paths Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Directory Paths</h4>
-                  <div className="form-group">
-                    <label>Music Directory</label>
-                    <input
-                      type="text"
-                      value={systemFields.paths?.music_directory || ''}
-                      onChange={(e) => updateSystemField('paths.music_directory', e.target.value)}
-                      placeholder="/Users/username/Music"
-                    />
-                    <span className="form-help">Path to your music library folder</span>
-                  </div>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('paths')}
+                  >
+                    <span className="collapse-icon">{expandedSections['paths'] ? '▼' : '▶'}</span>
+                    Directory Paths
+                  </h4>
+                  {expandedSections['paths'] && (
+                  <div>
                   <div className="form-group">
                     <label>Audio Output Directory</label>
                     <input
@@ -930,11 +1365,46 @@ export function SettingsPage({ onNavigate }) {
                     />
                     <span className="form-help">Base directory for application data</span>
                   </div>
+                  </div>
+                  )}
+                </div>
+
+                {/* Alarm Settings Section */}
+                <div className="config-section">
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('alarm')}
+                  >
+                    <span className="collapse-icon">{expandedSections['alarm'] ? '▼' : '▶'}</span>
+                    Alarm Settings
+                  </h4>
+                  {expandedSections['alarm'] && (
+                  <div>
+                  <div className="form-group">
+                    <label>Default Alarm Audio File</label>
+                    <input
+                      type="text"
+                      value={systemFields.alarm_audio_file || ''}
+                      onChange={(e) => updateSystemField('alarm_audio_file', e.target.value)}
+                      placeholder="/path/to/alarm.mp3"
+                    />
+                    <span className="form-help">Path to audio file to play when alarms trigger. Leave empty to use default beep sound.</span>
+                  </div>
+                  </div>
+                  )}
                 </div>
 
                 {/* Server Settings Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Server Settings</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('server')}
+                  >
+                    <span className="collapse-icon">{expandedSections['server'] ? '▼' : '▶'}</span>
+                    Server Settings
+                  </h4>
+                  {expandedSections['server'] && (
+                  <div>
                   <div className="form-grid">
                     <div className="form-group">
                       <label>Host</label>
@@ -986,11 +1456,21 @@ export function SettingsPage({ onNavigate }) {
                     />
                     <span className="form-help">PostgreSQL or SQLite database connection string</span>
                   </div>
+                  </div>
+                  )}
                 </div>
 
                 {/* AI/Processing Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">AI & Processing</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('ai')}
+                  >
+                    <span className="collapse-icon">{expandedSections['ai'] ? '▼' : '▶'}</span>
+                    AI & Processing
+                  </h4>
+                  {expandedSections['ai'] && (
+                  <div>
                   <div className="form-grid">
                     <div className="form-group">
                       <label>Default AI Model</label>
@@ -1020,11 +1500,21 @@ export function SettingsPage({ onNavigate }) {
                       />
                     </div>
                   </div>
+                  </div>
+                  )}
                 </div>
 
                 {/* Music Settings Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Music Player Settings</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('music')}
+                  >
+                    <span className="collapse-icon">{expandedSections['music'] ? '▼' : '▶'}</span>
+                    Music Player Settings
+                  </h4>
+                  {expandedSections['music'] && (
+                  <div>
                   <div className="form-group">
                     <label>
                       <input
@@ -1046,10 +1536,20 @@ export function SettingsPage({ onNavigate }) {
                     </label>
                   </div>
                 </div>
+                  )}
+                </div>
 
                 {/* Octopus Energy Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Octopus Energy</h4>
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('octopus')}
+                  >
+                    <span className="collapse-icon">{expandedSections['octopus'] ? '▼' : '▶'}</span>
+                    Octopus Energy
+                  </h4>
+                  {expandedSections['octopus'] && (
+                  <div>
                   <div className="form-group">
                     <label>Account Number (Optional - for auto-detection)</label>
                     <input
@@ -1100,8 +1600,332 @@ export function SettingsPage({ onNavigate }) {
                     />
                     <span className="form-help">If set, this rate will be used instead of fetching from API. Leave empty to use API rate.</span>
                   </div>
+                  </div>
+                  )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'database' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>Database Management</h3>
+              </div>
+              {error && <div className="settings-message error">{error}</div>}
+              {success && <div className="settings-message success">{success}</div>}
+              
+              {loading && !tableData && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                  Loading tables...
+                </div>
+              )}
+              {!loading && databaseTables.length === 0 && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                  No tables found
+                </div>
+              )}
+              {!loading && databaseTables.length > 0 && (
+                <div className="database-tables-list" style={{ display: 'grid', gap: '12px', padding: '20px' }}>
+                      {databaseTables.map((table) => (
+                        <div key={table.name}>
+                          <div
+                            onClick={() => {
+                              if (selectedTable === table.name) {
+                                setSelectedTable(null);
+                                setTableData(null);
+                              } else {
+                                setTablePage(1);
+                                setSelectedTable(table.name);
+                              }
+                            }}
+                            className={`database-table-card ${selectedTable === table.name ? 'active' : ''}`}
+                            style={{
+                              padding: '16px',
+                              background: selectedTable === table.name 
+                                ? 'rgba(59, 130, 246, 0.2)' 
+                                : 'rgba(255, 255, 255, 0.03)',
+                              border: `1px solid ${selectedTable === table.name ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`,
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <div style={{ fontWeight: 600, color: '#fff', marginBottom: '4px' }}>
+                                  {table.name}
+                                </div>
+                                <div style={{ fontSize: '0.85em', color: 'rgba(255,255,255,0.5)' }}>
+                                  {table.row_count} rows • {table.columns.length} columns
+                                </div>
+                              </div>
+                              <div style={{ fontSize: '0.9em', color: 'rgba(255,255,255,0.4)' }}>
+                                {selectedTable === table.name ? '▼' : '→'}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Table Data View - Inline below the clicked table */}
+                          {selectedTable === table.name && (
+                            <div style={{ 
+                              marginTop: '12px',
+                              padding: '16px',
+                              background: 'rgba(0,0,0,0.3)',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(59, 130, 246, 0.3)',
+                              overflow: 'hidden'
+                            }}>
+
+                              {loadingTableData && !tableData && (
+                                <div style={{ padding: '40px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                                  Loading data...
+                                </div>
+                              )}
+
+                              {!loadingTableData && !tableData && (
+                                <div style={{ padding: '40px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                                  {error ? `Error: ${error}` : 'No data available'}
+                                </div>
+                              )}
+
+                              {tableData && (
+                                <div className="database-table-view">
+                        {/* Data Table */}
+                        {tableData.data && tableData.data.length === 0 ? (
+                          <div style={{ padding: '40px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                            No data in this table
+                          </div>
+                        ) : tableData.data && tableData.data.length > 0 ? (
+                          <>
+                            <div style={{ 
+                              overflowX: 'auto', 
+                              marginBottom: '16px',
+                              maxWidth: '100%',
+                              WebkitOverflowScrolling: 'touch'
+                            }}>
+                              <table style={{ 
+                                width: '100%', 
+                                minWidth: '600px',
+                                borderCollapse: 'collapse', 
+                                fontSize: '0.9em' 
+                              }}>
+                                <thead>
+                                  <tr style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
+                                    {tableData.columns.map((col) => (
+                                      <th
+                                        key={col}
+                                        style={{
+                                          padding: '12px',
+                                          textAlign: 'left',
+                                          color: '#fff',
+                                          fontWeight: 600,
+                                          background: 'rgba(255,255,255,0.05)'
+                                        }}
+                                      >
+                                        {col}
+                                      </th>
+                                    ))}
+                                    <th style={{ padding: '12px', width: '100px' }}></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {tableData.data.map((row, idx) => {
+                                    // Find primary key column
+                                    const tableInfo = databaseTables.find(t => t.name === selectedTable);
+                                    const pkColumn = tableInfo?.columns.find(c => c.primary_key);
+                                    const rowId = pkColumn ? row[pkColumn.name] : row[tableData.columns[0]];
+                                    const editedRowData = editedRow[rowId] || {};
+                                    return (
+                                      <tr
+                                        key={idx}
+                                        style={{
+                                          borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                          background: editingCell?.rowId === rowId ? 'rgba(59, 130, 246, 0.1)' : 'transparent'
+                                        }}
+                                      >
+                                        {tableData.columns.map((col) => {
+                                          const isEditing = editingCell?.rowId === rowId && editingCell?.column === col;
+                                          const value = editedRowData[col] !== undefined ? editedRowData[col] : row[col];
+                                          return (
+                                            <td
+                                              key={col}
+                                              style={{ padding: '8px 12px', color: 'rgba(255,255,255,0.8)' }}
+                                            >
+                                              {isEditing ? (
+                                                <input
+                                                  type="text"
+                                                  value={value || ''}
+                                                  onChange={(e) => handleCellEdit(rowId, col, e.target.value)}
+                                                  onBlur={() => {
+                                                    if (editedRowData[col] !== undefined && editedRowData[col] !== row[col]) {
+                                                      handleSaveRow(rowId, { [col]: editedRowData[col] });
+                                                    } else {
+                                                      setEditingCell(null);
+                                                    }
+                                                  }}
+                                                  onKeyPress={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                      if (editedRowData[col] !== undefined && editedRowData[col] !== row[col]) {
+                                                        handleSaveRow(rowId, { [col]: editedRowData[col] });
+                                                      } else {
+                                                        setEditingCell(null);
+                                                      }
+                                                    } else if (e.key === 'Escape') {
+                                                      setEditingCell(null);
+                                                      setEditedRow(prev => {
+                                                        const newState = { ...prev };
+                                                        if (newState[rowId]) {
+                                                          delete newState[rowId][col];
+                                                          if (Object.keys(newState[rowId]).length === 0) {
+                                                            delete newState[rowId];
+                                                          }
+                                                        }
+                                                        return newState;
+                                                      });
+                                                    }
+                                                  }}
+                                                  autoFocus
+                                                  style={{
+                                                    width: '100%',
+                                                    padding: '4px 8px',
+                                                    background: 'rgba(255,255,255,0.1)',
+                                                    border: '1px solid rgba(59, 130, 246, 0.5)',
+                                                    borderRadius: '4px',
+                                                    color: '#fff'
+                                                  }}
+                                                />
+                                              ) : (
+                                                <div
+                                                  onClick={() => {
+                                                    const tableInfo = databaseTables.find(t => t.name === selectedTable);
+                                                    const colInfo = tableInfo?.columns.find(c => c.name === col);
+                                                    if (!colInfo?.primary_key) {
+                                                      handleCellEdit(rowId, col, row[col]);
+                                                    }
+                                                  }}
+                                                  style={{
+                                                    cursor: (() => {
+                                                      const tableInfo = databaseTables.find(t => t.name === selectedTable);
+                                                      const colInfo = tableInfo?.columns.find(c => c.name === col);
+                                                      return colInfo?.primary_key ? 'default' : 'pointer';
+                                                    })(),
+                                                    padding: '4px',
+                                                    borderRadius: '4px',
+                                                    transition: 'background 0.2s'
+                                                  }}
+                                                  onMouseEnter={(e) => {
+                                                    const tableInfo = databaseTables.find(t => t.name === selectedTable);
+                                                    const colInfo = tableInfo?.columns.find(c => c.name === col);
+                                                    if (!colInfo?.primary_key) {
+                                                      e.target.style.background = 'rgba(255,255,255,0.05)';
+                                                    }
+                                                  }}
+                                                  onMouseLeave={(e) => {
+                                                    e.target.style.background = 'transparent';
+                                                  }}
+                                                >
+                                                  {value !== null && value !== undefined ? String(value).substring(0, 100) : 'NULL'}
+                                                </div>
+                                              )}
+                                            </td>
+                                          );
+                                        })}
+                                        <td style={{ padding: '8px' }}>
+                                          {editingCell?.rowId === rowId ? (
+                                            <div style={{ display: 'flex', gap: '4px' }}>
+                                              <button
+                                                onClick={() => {
+                                                  const changes = editedRowData;
+                                                  const hasChanges = Object.keys(changes).some(key => changes[key] !== row[key]);
+                                                  if (hasChanges) {
+                                                    handleSaveRow(rowId, changes);
+                                                  } else {
+                                                    setEditingCell(null);
+                                                  }
+                                                }}
+                                                className="save-button"
+                                                style={{ padding: '4px 8px', fontSize: '0.85em', minWidth: '50px' }}
+                                                disabled={saving}
+                                              >
+                                                {saving ? 'Saving...' : 'Save'}
+                                              </button>
+                                              <button
+                                                onClick={() => {
+                                                  setEditingCell(null);
+                                                  setEditedRow(prev => {
+                                                    const newState = { ...prev };
+                                                    delete newState[rowId];
+                                                    return newState;
+                                                  });
+                                                }}
+                                                className="save-button"
+                                                style={{ padding: '4px 8px', fontSize: '0.85em', minWidth: '50px', background: 'rgba(255,255,255,0.1)' }}
+                                              >
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <button
+                                              onClick={() => {
+                                                // Start editing mode - click any non-PK cell to edit
+                                                const firstEditableCol = tableData.columns.find(col => {
+                                                  const colInfo = tableInfo?.columns.find(c => c.name === col);
+                                                  return !colInfo?.primary_key;
+                                                });
+                                                if (firstEditableCol) {
+                                                  handleCellEdit(rowId, firstEditableCol, row[firstEditableCol]);
+                                                }
+                                              }}
+                                              className="save-button"
+                                              style={{ padding: '4px 8px', fontSize: '0.85em', minWidth: '60px', background: 'rgba(255,255,255,0.1)' }}
+                                            >
+                                              Edit
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* Pagination */}
+                            {tableData.pagination.total_pages > 1 && (
+                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '20px' }}>
+                                <button
+                                  onClick={() => setTablePage(p => Math.max(1, p - 1))}
+                                  disabled={tableData.pagination.page === 1}
+                                  className="save-button"
+                                  style={{ padding: '6px 12px', fontSize: '0.9em' }}
+                                >
+                                  ← Previous
+                                </button>
+                                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.9em' }}>
+                                  Page {tableData.pagination.page} of {tableData.pagination.total_pages}
+                                  {' '}({tableData.pagination.total_rows} total rows)
+                                </span>
+                                <button
+                                  onClick={() => setTablePage(p => Math.min(tableData.pagination.total_pages, p + 1))}
+                                  disabled={tableData.pagination.page === tableData.pagination.total_pages}
+                                  className="save-button"
+                                  style={{ padding: '6px 12px', fontSize: '0.9em' }}
+                                >
+                                  Next →
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
             </div>
           )}
         </div>

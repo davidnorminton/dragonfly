@@ -5,8 +5,10 @@ export function AnalyticsPage() {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const songsPerPage = 25;
+  const [songsPage, setSongsPage] = useState(1);
+  const [artistsPage, setArtistsPage] = useState(1);
+  const [albumsPage, setAlbumsPage] = useState(1);
+  const itemsPerPage = 10;
 
   useEffect(() => {
     loadAnalytics();
@@ -64,10 +66,45 @@ export function AnalyticsPage() {
   const maxAlbumPlays = Math.max(...analytics.top_albums.map(a => a.play_count), 1);
   
   // Pagination for most played songs
-  const totalPages = Math.ceil(analytics.most_played.length / songsPerPage);
-  const startIdx = (currentPage - 1) * songsPerPage;
-  const endIdx = startIdx + songsPerPage;
-  const paginatedSongs = analytics.most_played.slice(startIdx, endIdx);
+  const songsTotalPages = Math.ceil(analytics.most_played.length / itemsPerPage);
+  const songsStartIdx = (songsPage - 1) * itemsPerPage;
+  const paginatedSongs = analytics.most_played.slice(songsStartIdx, songsStartIdx + itemsPerPage);
+
+  // Pagination for top artists
+  const artistsTotalPages = Math.ceil(analytics.top_artists.length / itemsPerPage);
+  const artistsStartIdx = (artistsPage - 1) * itemsPerPage;
+  const paginatedArtists = analytics.top_artists.slice(artistsStartIdx, artistsStartIdx + itemsPerPage);
+
+  // Pagination for top albums
+  const albumsTotalPages = Math.ceil(analytics.top_albums.length / itemsPerPage);
+  const albumsStartIdx = (albumsPage - 1) * itemsPerPage;
+  const paginatedAlbums = analytics.top_albums.slice(albumsStartIdx, albumsStartIdx + itemsPerPage);
+
+  const renderPagination = (currentPage, totalPages, setPage) => {
+    if (totalPages <= 1) return null;
+    
+    return (
+      <div className="analytics-pagination">
+        <button
+          onClick={() => setPage(p => Math.max(1, p - 1))}
+          disabled={currentPage === 1}
+          className="pagination-button"
+        >
+          ←
+        </button>
+        <span className="pagination-info">
+          {currentPage} / {totalPages}
+        </span>
+        <button
+          onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+          disabled={currentPage === totalPages}
+          className="pagination-button"
+        >
+          →
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div className="analytics-page">
@@ -81,49 +118,47 @@ export function AnalyticsPage() {
       {/* Summary Stats */}
       <div className="analytics-summary">
         <div className="analytics-stat-card">
-          <div className="stat-value">{analytics.total_plays}</div>
-          <div className="stat-label">Total Plays</div>
+          <div className="stat-icon">🎵</div>
+          <div className="stat-content">
+            <div className="stat-value">{analytics.total_plays.toLocaleString()}</div>
+            <div className="stat-label">Total Plays</div>
+          </div>
         </div>
         <div className="analytics-stat-card">
-          <div className="stat-value">{analytics.songs_played}</div>
-          <div className="stat-label">Songs Played</div>
+          <div className="stat-icon">🎶</div>
+          <div className="stat-content">
+            <div className="stat-value">{analytics.songs_played.toLocaleString()}</div>
+            <div className="stat-label">Songs Played</div>
+          </div>
         </div>
         <div className="analytics-stat-card">
-          <div className="stat-value">{analytics.top_artists.length}</div>
-          <div className="stat-label">Active Artists</div>
+          <div className="stat-icon">🎤</div>
+          <div className="stat-content">
+            <div className="stat-value">{analytics.top_artists.length}</div>
+            <div className="stat-label">Active Artists</div>
+          </div>
+        </div>
+        <div className="analytics-stat-card">
+          <div className="stat-icon">💿</div>
+          <div className="stat-content">
+            <div className="stat-value">{analytics.top_albums.length}</div>
+            <div className="stat-label">Albums Played</div>
+          </div>
         </div>
       </div>
 
       {/* Most Played Songs */}
       <div className="analytics-section">
         <div className="analytics-section-header">
-          <h2>Most Played Songs</h2>
-          {totalPages > 1 && (
-            <div className="analytics-pagination">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="pagination-button"
-              >
-                ← Previous
-              </button>
-              <span className="pagination-info">
-                Page {currentPage} of {totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="pagination-button"
-              >
-                Next →
-              </button>
-            </div>
-          )}
+          <h2>🎵 Most Played Songs</h2>
+          {renderPagination(songsPage, songsTotalPages, setSongsPage)}
         </div>
         <div className="analytics-chart">
           {paginatedSongs.map((song, idx) => (
             <div key={song.id} className="chart-row">
-              <div className="chart-rank">{startIdx + idx + 1}</div>
+              <div className="chart-rank">
+                <span className="rank-number">{songsStartIdx + idx + 1}</span>
+              </div>
               <div className="chart-info">
                 <div className="chart-song-title">{song.title}</div>
                 <div className="chart-song-meta">
@@ -133,9 +168,12 @@ export function AnalyticsPage() {
               <div className="chart-bar-container">
                 <div 
                   className="chart-bar" 
-                  style={{ width: `${(song.play_count / maxPlays) * 100}%` }}
+                  style={{ 
+                    width: `${(song.play_count / maxPlays) * 100}%`,
+                    background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)'
+                  }}
                 >
-                  <span className="chart-bar-label">{song.play_count} plays</span>
+                  <span className="chart-bar-label">{song.play_count}</span>
                 </div>
               </div>
             </div>
@@ -145,20 +183,29 @@ export function AnalyticsPage() {
 
       {/* Top Artists */}
       <div className="analytics-section">
-        <h2>Top Artists</h2>
+        <div className="analytics-section-header">
+          <h2>🎤 Top Artists</h2>
+          {renderPagination(artistsPage, artistsTotalPages, setArtistsPage)}
+        </div>
         <div className="analytics-chart">
-          {analytics.top_artists.map((artist, idx) => (
+          {paginatedArtists.map((artist, idx) => (
             <div key={idx} className="chart-row">
-              <div className="chart-rank">{idx + 1}</div>
+              <div className="chart-rank">
+                <span className="rank-number">{artistsStartIdx + idx + 1}</span>
+              </div>
               <div className="chart-info">
                 <div className="chart-song-title">{artist.name}</div>
+                <div className="chart-song-meta">{artist.play_count} {artist.play_count === 1 ? 'play' : 'plays'}</div>
               </div>
               <div className="chart-bar-container">
                 <div 
                   className="chart-bar artist-bar" 
-                  style={{ width: `${(artist.play_count / maxArtistPlays) * 100}%` }}
+                  style={{ 
+                    width: `${(artist.play_count / maxArtistPlays) * 100}%`,
+                    background: 'linear-gradient(90deg, #10b981, #3b82f6)'
+                  }}
                 >
-                  <span className="chart-bar-label">{artist.play_count} plays</span>
+                  <span className="chart-bar-label">{artist.play_count}</span>
                 </div>
               </div>
             </div>
@@ -168,11 +215,16 @@ export function AnalyticsPage() {
 
       {/* Top Albums */}
       <div className="analytics-section">
-        <h2>Top Albums</h2>
+        <div className="analytics-section-header">
+          <h2>💿 Top Albums</h2>
+          {renderPagination(albumsPage, albumsTotalPages, setAlbumsPage)}
+        </div>
         <div className="analytics-chart">
-          {analytics.top_albums.map((album, idx) => (
+          {paginatedAlbums.map((album, idx) => (
             <div key={idx} className="chart-row">
-              <div className="chart-rank">{idx + 1}</div>
+              <div className="chart-rank">
+                <span className="rank-number">{albumsStartIdx + idx + 1}</span>
+              </div>
               <div className="chart-info">
                 <div className="chart-song-title">{album.title}</div>
                 <div className="chart-song-meta">{album.artist}</div>
@@ -180,9 +232,12 @@ export function AnalyticsPage() {
               <div className="chart-bar-container">
                 <div 
                   className="chart-bar album-bar" 
-                  style={{ width: `${(album.play_count / maxAlbumPlays) * 100}%` }}
+                  style={{ 
+                    width: `${(album.play_count / maxAlbumPlays) * 100}%`,
+                    background: 'linear-gradient(90deg, #f59e0b, #ef4444)'
+                  }}
                 >
-                  <span className="chart-bar-label">{album.play_count} plays</span>
+                  <span className="chart-bar-label">{album.play_count}</span>
                 </div>
               </div>
             </div>

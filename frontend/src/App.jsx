@@ -12,6 +12,7 @@ import { AnalyticsPage } from './pages/Analytics';
 import { ChatPage } from './pages/Chat';
 import { NewsPage } from './pages/News';
 import { SettingsPage } from './pages/Settings';
+import { AlertsPage } from './pages/Alerts';
 import { WaveformMic } from './components/WaveformMic';
 import './styles/index.css';
 
@@ -73,9 +74,12 @@ function App() {
     const newState = !aiFocusActive;
     setAiFocusActive(newState);
     
-    // Stop all music/audio when entering focus mode
     if (newState) {
-      // Stop all audio elements on the page (including in iframes)
+      // Entering focus mode - pause music and other audio
+      // Dispatch event for music player to pause (and remember state)
+      window.dispatchEvent(new CustomEvent('enterFocusMode'));
+      
+      // Stop all other audio elements on the page (including in iframes)
       const allAudioElements = document.querySelectorAll('audio');
       allAudioElements.forEach((audio) => {
         try {
@@ -105,22 +109,9 @@ function App() {
           console.warn('Error stopping fillerAudioObj:', e);
         }
       }
-      
-      // Dispatch custom event to stop music player
-      window.dispatchEvent(new CustomEvent('stopAllAudio'));
-      
-      // Also try to stop any HTMLAudioElement instances
-      setTimeout(() => {
-        const allAudio = document.querySelectorAll('audio');
-        allAudio.forEach((audio) => {
-          try {
-            audio.pause();
-            audio.currentTime = 0;
-          } catch (e) {
-            // Ignore errors
-          }
-        });
-      }, 100);
+    } else {
+      // Exiting focus mode - resume music if it was playing
+      window.dispatchEvent(new CustomEvent('exitFocusMode'));
     }
   };
 
@@ -526,6 +517,8 @@ function App() {
         <NewsPage />
       ) : activePage === 'settings' ? (
         <SettingsPage onNavigate={(page) => setActivePage(page)} />
+      ) : activePage === 'alerts' ? (
+        <AlertsPage />
       ) : (
         <div className="main-container">
           {showLeft && (

@@ -1,14 +1,10 @@
 """Utility functions for loading and saving API keys configuration."""
-import json
 import logging
-from pathlib import Path
 from typing import Dict, Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
-
-API_KEYS_CONFIG_PATH = Path(__file__).parent / "api_keys.json"
 
 
 async def load_api_keys(session: Optional[AsyncSession] = None) -> Dict[str, Any]:
@@ -51,23 +47,6 @@ async def load_api_keys(session: Optional[AsyncSession] = None) -> Dict[str, Any
                 await db_session.close()
     except Exception as e:
         logger.error(f"Error loading API keys config from database: {e}", exc_info=True)
-        # Fallback to file if database fails
-        return _load_api_keys_from_file()
-
-
-def _load_api_keys_from_file() -> Dict[str, Any]:
-    """Fallback: Load API keys configuration from JSON file."""
-    try:
-        if not API_KEYS_CONFIG_PATH.exists():
-            logger.warning(f"API keys config file not found at {API_KEYS_CONFIG_PATH}, using defaults")
-            return {}
-        
-        with open(API_KEYS_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            logger.debug("Loaded API keys config from file")
-            return config
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"Error loading API keys config from file: {e}", exc_info=True)
         return {}
 
 

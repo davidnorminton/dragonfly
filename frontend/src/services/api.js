@@ -47,6 +47,14 @@ export const personaAPI = {
   getPersonas: () => api.get('/personas').then(res => res.data),
   selectPersona: (persona) => 
     api.post('/personas/select', { persona }).then(res => res.data),
+  getFillerWords: (personaName) => 
+    api.get(`/personas/${personaName}/filler-words`).then(res => res.data),
+  createFillerWord: (personaName, text) => 
+    api.post(`/personas/${personaName}/filler-words`, { text }).then(res => res.data),
+  deleteFillerWord: (personaName, filename) => 
+    api.delete(`/personas/${personaName}/filler-words/${filename}`).then(res => res.data),
+  getFillerWordAudio: (personaName, filename) => 
+    `/api/personas/${personaName}/filler-words/${filename}/audio`,
 };
 
 export const locationAPI = {
@@ -162,6 +170,14 @@ export const newsAPI = {
   summarizeArticle: (url, title) => api.post('/news/summarize', { url, title }).then(res => res.data),
 };
 
+export const databaseAPI = {
+  getTables: () => api.get('/database/tables').then(res => res.data),
+  getTableData: (tableName, page = 1, limit = 50) => 
+    api.get(`/database/tables/${tableName}/data`, { params: { page, limit } }).then(res => res.data),
+  updateTableRow: (tableName, rowId, data) => 
+    api.put(`/database/tables/${tableName}/data/${rowId}`, data).then(res => res.data),
+};
+
 export const ttsAPI = {
   generate: async (text, messageId, persona) => {
     const response = await fetch('/api/tts/generate', {
@@ -213,6 +229,14 @@ export const octopusAPI = {
   getHistory: (days = 7) => api.get('/octopus/history', { params: { days } }).then(res => res.data),
   getTariff: () => api.get('/octopus/tariff').then(res => res.data),
   getTariffHistory: (days = 7) => api.get('/octopus/tariff-history', { params: { days } }).then(res => res.data),
+};
+
+export const alarmsAPI = {
+  getAlarms: () => api.get('/alarms').then(res => res.data),
+  createAlarm: (alarm) => api.post('/alarms', alarm).then(res => res.data),
+  deleteAlarm: (alarmId) => api.delete(`/alarms/${alarmId}`).then(res => res.data),
+  toggleAlarm: (alarmId) => api.post(`/alarms/${alarmId}/toggle`).then(res => res.data),
+  checkAlarms: () => api.get('/alarms/check').then(res => res.data),
 };
 
 export default api;

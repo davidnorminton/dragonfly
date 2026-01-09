@@ -25,7 +25,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType
 from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -109,34 +109,66 @@ async def _fetch_octopus_consumption_task():
             first_run = False
             logger.info("[OCTOPUS TASK] Fetching consumption data...")
             
-            # Calculate period: last 48 hours to catch any missed readings
+            # Calculate period: last 7 days to catch any missed readings and ensure we get recent data
             now = datetime.now(timezone.utc)
             period_to = now
-            period_from = now - timedelta(hours=48)
+            period_from = now - timedelta(days=7)
             
             url = f"https://api.octopus.energy/v1/electricity-meter-points/{meter_point}/meters/{meter_serial}/consumption/"
             
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    url,
-                    auth=(api_key, ""),
-                    params={
-                        "page_size": 100,
-                        "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "order_by": "period"
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
+                # Handle pagination - fetch all pages
+                all_results = []
+                next_url = None
+                page_count = 0
                 
-                results = data.get("results", [])
-                # Results are ordered by period, oldest first
+                while True:
+                    if next_url:
+                        # Fetch next page
+                        response = await client.get(next_url, auth=(api_key, ""))
+                    else:
+                        # First page
+                        response = await client.get(
+                            url,
+                            auth=(api_key, ""),
+                            params={
+                                "page_size": 1000,  # Increased from 100 to get more data per page
+                                "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "order_by": "period"
+                            }
+                        )
+                    
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    results = data.get("results", [])
+                    all_results.extend(results)
+                    page_count += 1
+                    logger.info(f"[OCTOPUS TASK] Fetched page {page_count} with {len(results)} readings")
+                    
+                    # Check for next page
+                    next_url = data.get("next")
+                    if not next_url:
+                        break
+                
+                logger.info(f"[OCTOPUS TASK] Total readings fetched: {len(all_results)}")
+                
+                # Log the date range of fetched data
+                if all_results:
+                    latest_reading = all_results[-1] if all_results else None  # Most recent (last in list after order_by=period)
+                    oldest_reading = all_results[0] if all_results else None
+                    if latest_reading:
+                        latest_date = latest_reading.get("interval_start", "unknown")
+                        logger.info(f"[OCTOPUS TASK] Latest reading date: {latest_date}")
+                    if oldest_reading:
+                        oldest_date = oldest_reading.get("interval_start", "unknown")
+                        logger.info(f"[OCTOPUS TASK] Oldest reading date: {oldest_date}")
                 
                 # Store new readings
                 stored_count = 0
                 async with AsyncSessionLocal() as session:
-                    for reading in results:
+                    for reading in all_results:
                         interval_start_str = reading.get("interval_start")
                         consumption = reading.get("consumption")
                         
@@ -374,6 +406,58 @@ async def _fetch_octopus_tariff_task():
             logger.error(f"[OCTOPUS TASK] Error fetching tariff: {e}", exc_info=True)
 
 
+async def _check_alarms_task():
+    """Background task to check for alarms that need to be triggered."""
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            
+            now = datetime.now(timezone.utc)
+            current_time = now.time()
+            current_weekday = now.weekday()  # 0=Monday, 6=Sunday
+            
+            async with AsyncSessionLocal() as session:
+                # Get all active alarms
+                result = await session.execute(
+                    select(Alarm)
+                    .where(Alarm.is_active == "true")
+                )
+                all_alarms = result.scalars().all()
+                
+                alarms_to_trigger = []
+                for alarm in all_alarms:
+                    alarm_time_only = alarm.alarm_time.time()
+                    
+                    # Check if time matches (within 1 minute window)
+                    time_diff = abs((current_time.hour * 60 + current_time.minute) - 
+                                   (alarm_time_only.hour * 60 + alarm_time_only.minute))
+                    
+                    if time_diff <= 1:  # Within 1 minute window
+                        if alarm.recurring_days:
+                            # Recurring alarm - check if today is in the recurring days
+                            # Convert weekday: Python's weekday() is 0=Monday, 6=Sunday
+                            if current_weekday in alarm.recurring_days:
+                                alarms_to_trigger.append(alarm)
+                        else:
+                            # One-time alarm - check if not already triggered
+                            if alarm.triggered == "false":
+                                alarms_to_trigger.append(alarm)
+                                # Mark as triggered for one-time alarms
+                                alarm.triggered = "true"
+                                alarm.triggered_at = now
+                
+                if alarms_to_trigger:
+                    for alarm in alarms_to_trigger:
+                        logger.info(f"[ALARM] Triggered alarm {alarm.id} at {alarm.alarm_time} - Reason: {alarm.reason}")
+                    
+                    # Commit changes (only for one-time alarms that were marked as triggered)
+                    await session.commit()
+                    
+                    # Note: Audio playback will be handled by frontend polling /api/alarms/check
+        except Exception as e:
+            logger.error(f"[ALARM TASK] Error checking alarms: {e}", exc_info=True)
+
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on server startup."""
@@ -385,6 +469,10 @@ async def startup_event():
         # Start tariff task (daily)
         asyncio.create_task(_fetch_octopus_tariff_task())
         logger.info("Started Octopus Energy background tasks (hourly consumption, daily tariff)")
+    
+    # Start alarm checking task (every minute)
+    asyncio.create_task(_check_alarms_task())
+    logger.info("Started alarm checking background task")
 
 # Vosk model path (warn if missing)
 VOSK_MODEL_PREFERRED = Path(__file__).parent / ".." / "models" / "vosk" / "vosk-model-en-us-0.22"
@@ -674,6 +762,226 @@ async def ai_ask_question_stream(request: Request):
     except Exception as e:
         logger.error(f"[AI ASK STREAM] Failed: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/personas/{persona_name}/filler-words")
+async def get_filler_words(persona_name: str):
+    """Get list of filler words/audio files for a persona from both filesystem and config."""
+    try:
+        persona_config = await load_persona_config(persona_name)
+        if not persona_config:
+            raise HTTPException(status_code=404, detail=f"Persona {persona_name} not found")
+        
+        # Determine persona folder name (use persona name or 'default')
+        persona_folder = persona_name if persona_name != "default" else "default"
+        
+        # Scan filesystem for filler words
+        project_root = Path(__file__).parent.parent
+        filler_dir = project_root / "data" / "audio" / "filler_words" / persona_folder
+        
+        filler_words_dict = {}  # Use dict to avoid duplicates, keyed by filename
+        
+        # First, scan filesystem for all .mp3 files
+        logger.info(f"Scanning filler directory: {filler_dir}")
+        logger.info(f"Directory exists: {filler_dir.exists()}, is_dir: {filler_dir.is_dir() if filler_dir.exists() else 'N/A'}")
+        
+        if filler_dir.exists() and filler_dir.is_dir():
+            mp3_files = list(filler_dir.glob("*.mp3"))
+            logger.info(f"Found {len(mp3_files)} MP3 files in {filler_dir}")
+            for audio_file in mp3_files:
+                filename = audio_file.name
+                # Extract word/text from filename (remove .mp3, replace _ with space)
+                word_text = filename.replace(".mp3", "").replace("_", " ")
+                relative_path = f"../data/audio/filler_words/{persona_folder}/{filename}"
+                
+                filler_words_dict[filename] = {
+                    "filename": filename,
+                    "path": relative_path,
+                    "text": word_text,
+                    "source": "filesystem"
+                }
+                logger.debug(f"Added filler word from filesystem: {filename}")
+        else:
+            logger.warning(f"Filler directory does not exist or is not a directory: {filler_dir}")
+        
+        # Then, add any from config that might not be in filesystem
+        filler_audio = persona_config.get("filler_audio", [])
+        for path in filler_audio:
+            filename = Path(path).name
+            if filename not in filler_words_dict:
+                # File might not exist in filesystem, but is in config
+                word_text = filename.replace(".mp3", "").replace("_", " ")
+                filler_words_dict[filename] = {
+                    "filename": filename,
+                    "path": path,
+                    "text": word_text,
+                    "source": "config"
+                }
+        
+        # Convert to list and sort by filename
+        filler_words = sorted(filler_words_dict.values(), key=lambda x: x["filename"])
+        
+        logger.info(f"Returning {len(filler_words)} filler words for persona {persona_name}")
+        
+        return {"success": True, "filler_words": filler_words}
+    except Exception as e:
+        logger.error(f"Error getting filler words: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/personas/{persona_name}/filler-words")
+async def create_filler_word(persona_name: str, request: Request):
+    """Create a new filler word by generating audio from text."""
+    try:
+        payload = await request.json()
+        text = payload.get("text", "").strip()
+        
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required")
+        
+        # Load persona config to get voice settings
+        persona_config = await load_persona_config(persona_name)
+        if not persona_config:
+            raise HTTPException(status_code=404, detail=f"Persona {persona_name} not found")
+        
+        fish_audio_config = persona_config.get("fish_audio", {})
+        voice_id = fish_audio_config.get("voice_id")
+        voice_engine = fish_audio_config.get("voice_engine", "s1")
+        
+        if not voice_id:
+            raise HTTPException(status_code=400, detail="Voice ID not configured for this persona")
+        
+        # Generate audio using TTS service
+        from services.tts_service import TTSService
+        tts = TTSService()
+        audio_bytes = await tts.generate_audio_simple(text, voice_id, voice_engine)
+        
+        if not audio_bytes:
+            raise HTTPException(status_code=500, detail="Failed to generate audio")
+        
+        # Create filename from text (sanitize and convert to filename)
+        import re
+        safe_filename = re.sub(r'[^a-zA-Z0-9\s]', '', text)
+        safe_filename = safe_filename.replace(' ', '_').lower()
+        safe_filename = safe_filename[:50]  # Limit length
+        filename = f"{safe_filename}.mp3"
+        
+        # Determine persona folder name (use persona name or 'default')
+        persona_folder = persona_name if persona_name != "default" else "default"
+        
+        # Save audio file (path relative to project root)
+        project_root = Path(__file__).parent.parent
+        audio_dir = project_root / "data" / "audio" / "filler_words" / persona_folder
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Check if file already exists, add number if needed
+        file_path = audio_dir / filename
+        counter = 1
+        while file_path.exists():
+            name_part = safe_filename
+            filename = f"{name_part}_{counter}.mp3"
+            file_path = audio_dir / filename
+            counter += 1
+        
+        file_path.write_bytes(audio_bytes)
+        logger.info(f"Created filler audio: {file_path}")
+        
+        # Add to persona config filler_audio array (path relative to config directory)
+        relative_path = f"../data/audio/filler_words/{persona_folder}/{filename}"
+        if "filler_audio" not in persona_config:
+            persona_config["filler_audio"] = []
+        
+        persona_config["filler_audio"].append(relative_path)
+        
+        # Save updated persona config
+        await save_persona_config(persona_name, persona_config)
+        
+        return {
+            "success": True,
+            "filename": filename,
+            "path": relative_path,
+            "text": text
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating filler word: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/personas/{persona_name}/filler-words/{filename}")
+async def delete_filler_word(persona_name: str, filename: str):
+    """Delete a filler word audio file."""
+    try:
+        # Load persona config
+        persona_config = await load_persona_config(persona_name)
+        if not persona_config:
+            raise HTTPException(status_code=404, detail=f"Persona {persona_name} not found")
+        
+        # Determine persona folder name
+        persona_folder = persona_name if persona_name != "default" else "default"
+        
+        # Delete physical file from filesystem
+        project_root = Path(__file__).parent.parent
+        audio_dir = project_root / "data" / "audio" / "filler_words" / persona_folder
+        audio_file = audio_dir / filename
+        
+        if audio_file.exists():
+            audio_file.unlink()
+            logger.info(f"Deleted filler audio file: {audio_file}")
+        else:
+            logger.warning(f"Filler audio file not found: {audio_file}")
+        
+        # Remove from config if it exists there
+        filler_audio = persona_config.get("filler_audio", [])
+        relative_path_to_remove = None
+        for path in filler_audio:
+            if filename in path:
+                relative_path_to_remove = path
+                break
+        
+        if relative_path_to_remove:
+            persona_config["filler_audio"] = [p for p in filler_audio if p != relative_path_to_remove]
+            # Save updated persona config
+            await save_persona_config(persona_name, persona_config)
+        
+        return {"success": True, "message": "Filler word deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting filler word: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/personas/{persona_name}/filler-words/{filename}/audio")
+async def get_filler_word_audio(persona_name: str, filename: str):
+    """Get audio file for a specific filler word."""
+    try:
+        # Determine persona folder name
+        persona_folder = persona_name if persona_name != "default" else "default"
+        
+        # Get file from filesystem (path relative to project root)
+        project_root = Path(__file__).parent.parent
+        audio_dir = project_root / "data" / "audio" / "filler_words" / persona_folder
+        audio_file = audio_dir / filename
+        
+        if not audio_file.exists():
+            raise HTTPException(status_code=404, detail="Audio file not found")
+        
+        return FileResponse(
+            audio_file,
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving filler word audio: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/ai/filler-audio")
@@ -4479,6 +4787,265 @@ async def save_location_config_endpoint(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Database management endpoints
+@app.get("/api/database/tables")
+async def get_database_tables():
+    """Get list of all database tables."""
+    try:
+        from sqlalchemy import inspect, text
+        from database.base import engine
+        
+        # Use run_sync to access sync inspector with async engine
+        def get_tables_sync(conn):
+            inspector = inspect(conn)
+            return inspector.get_table_names()
+        
+        def get_columns_sync(conn, table_name):
+            inspector = inspect(conn)
+            return inspector.get_columns(table_name)
+        
+        def get_pk_constraint_sync(conn, table_name):
+            inspector = inspect(conn)
+            return inspector.get_pk_constraint(table_name)
+        
+        async with engine.connect() as conn:
+            # Get table names using inspector
+            tables = await conn.run_sync(lambda sync_conn: get_tables_sync(sync_conn))
+            
+            # Get table info with row counts
+            table_info = []
+            for table_name in sorted(tables):
+                # Skip SQLAlchemy metadata tables
+                if table_name.startswith('_') or table_name.startswith('alembic'):
+                    continue
+                
+                # Get row count
+                count_result = await conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+                row_count = count_result.scalar()
+                
+                # Get columns using inspector
+                columns = await conn.run_sync(lambda sync_conn: get_columns_sync(sync_conn, table_name))
+                
+                # Get primary key constraint
+                pk_constraint = await conn.run_sync(lambda sync_conn: get_pk_constraint_sync(sync_conn, table_name))
+                pk_columns = set(pk_constraint.get("constrained_columns", []) if pk_constraint else [])
+                
+                column_info = [
+                    {
+                        "name": col["name"],
+                        "type": str(col["type"]),
+                        "nullable": col.get("nullable", True),
+                        "primary_key": col["name"] in pk_columns
+                    }
+                    for col in columns
+                ]
+                
+                table_info.append({
+                    "name": table_name,
+                    "row_count": row_count,
+                    "columns": column_info
+                })
+            
+            return {"success": True, "tables": table_info}
+    except Exception as e:
+        logger.error(f"Error getting database tables: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/database/tables/{table_name}/data")
+async def get_table_data(table_name: str, page: int = 1, limit: int = 50):
+    """Get paginated data from a table."""
+    try:
+        from sqlalchemy import inspect, text
+        from database.base import engine
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if limit < 1 or limit > 1000:
+            limit = 50
+        
+        # Validate table name (prevent SQL injection)
+        # Sanitize table name - only allow alphanumeric and underscores
+        if not table_name.replace('_', '').isalnum():
+            raise HTTPException(status_code=400, detail="Invalid table name")
+        
+        # Validate table exists by checking if we can query it
+        async with AsyncSessionLocal() as session:
+            try:
+                # Try to get table info to validate it exists
+                test_query = text(f'SELECT COUNT(*) FROM "{table_name}"')
+                await session.execute(test_query)
+            except Exception as e:
+                logger.error(f"Table validation error: {e}")
+                raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found or inaccessible")
+            # Get total count using parameterized query
+            count_query = text(f'SELECT COUNT(*) FROM "{table_name}"')
+            count_result = await session.execute(count_query)
+            total_rows = count_result.scalar()
+            
+            # Calculate pagination
+            offset = (page - 1) * limit
+            total_pages = (total_rows + limit - 1) // limit if total_rows > 0 else 1
+            
+            # Get paginated data
+            # Limit and offset are validated integers, safe to use directly
+            data_query = text(f'SELECT * FROM "{table_name}" LIMIT {limit} OFFSET {offset}')
+            result = await session.execute(data_query)
+            
+            # Get column names from result keys (works with asyncpg Row objects)
+            rows_data = result.fetchall()
+            columns = []
+            if rows_data:
+                # Get column names from first row keys
+                first_row = rows_data[0]
+                if hasattr(first_row, '_mapping'):
+                    # SQLAlchemy 2.0 Row objects
+                    columns = list(first_row._mapping.keys())
+                elif hasattr(first_row, 'keys'):
+                    # RowProxy objects
+                    columns = list(first_row.keys())
+                else:
+                    # Fallback: use inspector to get column names
+                    def get_columns_sync(conn, table_name):
+                        inspector = inspect(conn)
+                        return [col["name"] for col in inspector.get_columns(table_name)]
+                    async with engine.connect() as conn:
+                        columns = await conn.run_sync(lambda sync_conn: get_columns_sync(sync_conn, table_name))
+            
+            # Convert rows to dictionaries
+            rows = []
+            for row in rows_data:
+                row_dict = {}
+                if hasattr(row, '_mapping'):
+                    # SQLAlchemy 2.0 Row objects
+                    row_dict = dict(row._mapping)
+                elif hasattr(row, '_asdict'):
+                    # Named tuple-like
+                    row_dict = row._asdict()
+                elif hasattr(row, 'keys'):
+                    # RowProxy - access by key
+                    for key in row.keys():
+                        row_dict[key] = row[key]
+                else:
+                    # Fallback: access by index
+                    for i, col_name in enumerate(columns):
+                        row_dict[col_name] = row[i] if i < len(row) else None
+                
+                # Convert datetime and other types to strings for JSON
+                for key, value in row_dict.items():
+                    if hasattr(value, 'isoformat'):
+                        row_dict[key] = value.isoformat()
+                    elif isinstance(value, (dict, list)):
+                        import json
+                        row_dict[key] = json.dumps(value) if value else None
+                
+                rows.append(row_dict)
+            
+            logger.info(f"Returning {len(rows)} rows for table {table_name}, columns: {columns}")
+            
+            return {
+                "success": True,
+                "table_name": table_name,
+                "columns": columns,
+                "data": rows,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total_rows": total_rows,
+                    "total_pages": total_pages
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting table data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/database/tables/{table_name}/data/{row_id}")
+async def update_table_row(table_name: str, row_id: int, request: Request):
+    """Update a row in a table."""
+    try:
+        from sqlalchemy import inspect, text
+        from database.base import engine
+        
+        # Sanitize table name
+        if not table_name.replace('_', '').isalnum():
+            raise HTTPException(status_code=400, detail="Invalid table name")
+        
+        # Get primary key column using inspector
+        def get_pk_constraint_sync(conn, table_name):
+            inspector = inspect(conn)
+            return inspector.get_pk_constraint(table_name)
+        
+        def get_columns_sync(conn, table_name):
+            inspector = inspect(conn)
+            return inspector.get_columns(table_name)
+        
+        async with engine.connect() as conn:
+            pk_constraint = await conn.run_sync(lambda sync_conn: get_pk_constraint_sync(sync_conn, table_name))
+            columns = await conn.run_sync(lambda sync_conn: get_columns_sync(sync_conn, table_name))
+        
+        if not pk_constraint or not pk_constraint.get("constrained_columns"):
+            raise HTTPException(status_code=400, detail="Table does not have a primary key")
+        
+        pk_column = pk_constraint["constrained_columns"][0]
+        
+        # Validate column names exist
+        column_names = [col["name"] for col in columns]
+        
+        # Get update data
+        update_data = await request.json()
+        
+        # Build UPDATE query with proper escaping
+        set_clauses = []
+        params = {"row_id": row_id}
+        
+        # Get valid column names
+        columns = inspector.get_columns(table_name)
+        column_names = [col["name"] for col in columns]
+        
+        for column, value in update_data.items():
+            # Validate column exists
+            if column not in column_names:
+                continue  # Skip unknown columns
+            
+            # Skip primary key
+            if column == pk_column:
+                continue
+            
+            # Sanitize column name
+            if not column.replace('_', '').isalnum():
+                continue
+            
+            # Use proper parameter name (replace spaces and special chars)
+            param_name = column.replace(" ", "_").replace("-", "_")
+            set_clauses.append(f'"{column}" = :{param_name}')
+            params[param_name] = value
+        
+        if not set_clauses:
+            raise HTTPException(status_code=400, detail="No valid columns to update")
+        
+        async with AsyncSessionLocal() as session:
+            # Use proper quoting for table and column names
+            query = text(
+                f'UPDATE "{table_name}" SET {", ".join(set_clauses)} WHERE "{pk_column}" = :row_id'
+            )
+            result = await session.execute(query, params)
+            await session.commit()
+            
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Row not found")
+            
+            return {"success": True, "message": "Row updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating table row: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/config/api_keys")
 async def get_api_keys_config_endpoint():
     """Get API keys configuration."""
@@ -4989,23 +5556,47 @@ async def get_octopus_consumption():
         period_to = now
         period_from = now - timedelta(days=30)
         
-        # Make authenticated request
+        # Make authenticated request with pagination
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                url,
-                auth=(api_key, ""),  # Basic auth with API key as username
-                params={
-                    "page_size": 100,
-                    "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "order_by": "period"
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
+            # Handle pagination - fetch all pages
+            all_results = []
+            next_url = None
+            page_count = 0
+            
+            while True:
+                if next_url:
+                    # Fetch next page
+                    response = await client.get(next_url, auth=(api_key, ""))
+                else:
+                    # First page
+                    response = await client.get(
+                        url,
+                        auth=(api_key, ""),
+                        params={
+                            "page_size": 1000,  # Increased to get more data per page
+                            "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "order_by": "period"
+                        }
+                    )
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                results = data.get("results", [])
+                all_results.extend(results)
+                page_count += 1
+                logger.info(f"[OCTOPUS API] Fetched page {page_count} with {len(results)} readings")
+                
+                # Check for next page
+                next_url = data.get("next")
+                if not next_url:
+                    break
+            
+            logger.info(f"[OCTOPUS API] Total readings fetched: {len(all_results)}")
             
             # Results come in chronological order (oldest first) with order_by=period
-            results = data.get("results", [])
+            results = all_results
             if results:
                 results.reverse()  # Reverse to show most recent first
             
@@ -5060,6 +5651,17 @@ async def get_octopus_consumption():
             
             logger.info(f"Octopus Energy: Retrieved {len(results)} consumption readings")
             
+            # Log the date range of fetched data
+            if results:
+                latest_reading = results[0] if results else None  # Most recent (after reverse)
+                oldest_reading = results[-1] if results else None
+                if latest_reading:
+                    latest_date = latest_reading.get("interval_start", "unknown")
+                    logger.info(f"[OCTOPUS API] Latest reading date: {latest_date}")
+                if oldest_reading:
+                    oldest_date = oldest_reading.get("interval_start", "unknown")
+                    logger.info(f"[OCTOPUS API] Oldest reading date: {oldest_date}")
+            
             # If no results, return error message
             if not results:
                 return {
@@ -5111,12 +5713,34 @@ async def get_octopus_consumption():
                         reading["cost_pence"] = round(cost_pence, 2)
                         reading["cost_pounds"] = round(cost_pence / 100, 2)
             
+            # Also check what's in the database to see latest stored data
+            latest_db_date = None
+            try:
+                async with AsyncSessionLocal() as session:
+                    db_result = await session.execute(
+                        select(OctopusEnergyConsumption)
+                        .where(
+                            OctopusEnergyConsumption.meter_point == meter_point,
+                            OctopusEnergyConsumption.meter_serial == meter_serial
+                        )
+                        .order_by(desc(OctopusEnergyConsumption.interval_start))
+                        .limit(1)
+                    )
+                    latest_db = db_result.scalar_one_or_none()
+                    if latest_db:
+                        latest_db_date = latest_db.interval_start.isoformat()
+                        logger.info(f"[OCTOPUS API] Latest data in database: {latest_db_date}")
+            except Exception as db_check_err:
+                logger.debug(f"Could not check database for latest data: {db_check_err}")
+            
             return {
                 "success": True,
                 "results": results,
-                "count": data.get("count", 0),
+                "count": len(all_results),
                 "stored": stored_count,
-                "tariff": tariff_info
+                "tariff": tariff_info,
+                "latest_db_date": latest_db_date,
+                "pages_fetched": page_count
             }
     except httpx.HTTPStatusError as e:
         error_text = ""
@@ -5269,6 +5893,131 @@ async def get_octopus_history(days: int = 7):
         }
 
 
+@app.post("/api/octopus/refresh")
+async def refresh_octopus_data():
+    """Manually trigger a refresh of Octopus Energy consumption and tariff data."""
+    try:
+        logger.info("[OCTOPUS REFRESH] Manual refresh triggered")
+        
+        # Trigger consumption fetch
+        api_key = await _get_octopus_api_key()
+        if not api_key:
+            return {
+                "success": False,
+                "error": "Octopus Energy API key not configured"
+            }
+        
+        account_number = await _get_octopus_account_number()
+        meter_point = "2343383923410"  # Default fallback
+        meter_serial = "22L4381884"  # Default fallback
+        
+        # Get meter info from account if account number is available
+        if account_number:
+            meter_info = await _get_meter_info_from_account(account_number, api_key)
+            if meter_info:
+                meter_point = meter_info.get("meter_point", meter_point)
+                meter_serial = meter_info.get("meter_serial", meter_serial)
+        
+        # Fetch consumption data
+        now = datetime.now(timezone.utc)
+        period_to = now
+        period_from = now - timedelta(days=7)
+        
+        url = f"https://api.octopus.energy/v1/electricity-meter-points/{meter_point}/meters/{meter_serial}/consumption/"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            all_results = []
+            next_url = None
+            page_count = 0
+            
+            while True:
+                if next_url:
+                    response = await client.get(next_url, auth=(api_key, ""))
+                else:
+                    response = await client.get(
+                        url,
+                        auth=(api_key, ""),
+                        params={
+                            "page_size": 1000,
+                            "period_from": period_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "period_to": period_to.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "order_by": "period"
+                        }
+                    )
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                results = data.get("results", [])
+                all_results.extend(results)
+                page_count += 1
+                logger.info(f"[OCTOPUS REFRESH] Fetched page {page_count} with {len(results)} readings")
+                
+                next_url = data.get("next")
+                if not next_url:
+                    break
+            
+            logger.info(f"[OCTOPUS REFRESH] Total readings fetched: {len(all_results)}")
+            
+            # Store new readings
+            stored_count = 0
+            async with AsyncSessionLocal() as session:
+                for reading in all_results:
+                    interval_start_str = reading.get("interval_start")
+                    consumption = reading.get("consumption")
+                    
+                    if not interval_start_str or consumption is None:
+                        continue
+                    
+                    try:
+                        interval_start = datetime.fromisoformat(interval_start_str.replace('Z', '+00:00'))
+                    except Exception:
+                        continue
+                    
+                    # Check if exists
+                    existing = await session.execute(
+                        select(OctopusEnergyConsumption).where(
+                            OctopusEnergyConsumption.interval_start == interval_start,
+                            OctopusEnergyConsumption.meter_point == meter_point,
+                            OctopusEnergyConsumption.meter_serial == meter_serial
+                        )
+                    )
+                    if existing.scalar_one_or_none():
+                        continue
+                    
+                    interval_end_str = reading.get("interval_end")
+                    interval_end = datetime.fromisoformat(interval_end_str.replace('Z', '+00:00')) if interval_end_str else None
+                    
+                    consumption_record = OctopusEnergyConsumption(
+                        interval_start=interval_start,
+                        interval_end=interval_end,
+                        consumption=consumption,
+                        meter_point=meter_point,
+                        meter_serial=meter_serial
+                    )
+                    session.add(consumption_record)
+                    stored_count += 1
+                
+                if stored_count > 0:
+                    await session.commit()
+                    logger.info(f"[OCTOPUS REFRESH] Stored {stored_count} new consumption readings")
+        
+        # Also refresh tariff data
+        tariff_info = await _fetch_and_store_tariff(meter_point, api_key, account_number)
+        
+        return {
+            "success": True,
+            "message": f"Refreshed Octopus Energy data. Stored {stored_count} new consumption readings.",
+            "consumption_readings_stored": stored_count,
+            "tariff_updated": tariff_info is not None
+        }
+    except Exception as e:
+        logger.error(f"[OCTOPUS REFRESH] Error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 @app.get("/api/octopus/tariff-history")
 async def get_octopus_tariff_history(days: int = 7):
     """Get historical Octopus Energy tariff rates from database for graphing."""
@@ -5341,6 +6090,241 @@ async def get_octopus_tariff_history(days: int = 7):
             "success": False,
             "error": str(e),
             "message": "Failed to fetch tariff history"
+        }
+
+
+# Alarm API endpoints
+@app.get("/api/alarms")
+async def get_alarms():
+    """Get all alarms."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Alarm)
+                .order_by(Alarm.alarm_time)
+            )
+            alarms = result.scalars().all()
+            
+            alarms_data = []
+            for alarm in alarms:
+                alarms_data.append({
+                    "id": alarm.id,
+                    "alarm_type": alarm.alarm_type.value,
+                    "alarm_time": alarm.alarm_time.isoformat(),
+                    "reason": alarm.reason,
+                    "audio_file": alarm.audio_file,
+                    "is_active": alarm.is_active == "true",
+                    "triggered": alarm.triggered == "true",
+                    "triggered_at": alarm.triggered_at.isoformat() if alarm.triggered_at else None,
+                    "recurring_days": alarm.recurring_days,
+                    "created_at": alarm.created_at.isoformat() if alarm.created_at else None
+                })
+            
+            return {
+                "success": True,
+                "alarms": alarms_data
+            }
+    except Exception as e:
+        logger.error(f"Error fetching alarms: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/alarms")
+async def create_alarm(request: Request):
+    """Create a new alarm."""
+    try:
+        payload = await request.json()
+        alarm_type_str = payload.get("alarm_type", "time")
+        alarm_time_str = payload.get("alarm_time")
+        reason = payload.get("reason", "")
+        audio_file = payload.get("audio_file")
+        recurring_days = payload.get("recurring_days")  # List of day numbers (0=Monday, 6=Sunday)
+        
+        if not alarm_time_str:
+            return {
+                "success": False,
+                "error": "alarm_time is required"
+            }
+        
+        # Parse alarm time (time only, date will be ignored for recurring alarms)
+        try:
+            alarm_time = datetime.fromisoformat(alarm_time_str.replace('Z', '+00:00'))
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Invalid alarm_time format: {e}"
+            }
+        
+        # Parse alarm type
+        try:
+            alarm_type = AlarmType(alarm_type_str)
+        except ValueError:
+            alarm_type = AlarmType.TIME
+        
+        async with AsyncSessionLocal() as session:
+            alarm = Alarm(
+                alarm_type=alarm_type,
+                alarm_time=alarm_time,
+                reason=reason,
+                audio_file=audio_file,
+                recurring_days=recurring_days if recurring_days else None,
+                is_active="true",
+                triggered="false"
+            )
+            session.add(alarm)
+            await session.commit()
+            await session.refresh(alarm)
+            
+            logger.info(f"Created alarm: {alarm_type.value} at {alarm_time}")
+            
+            return {
+                "success": True,
+                "alarm": {
+                    "id": alarm.id,
+                    "alarm_type": alarm.alarm_type.value,
+                    "alarm_time": alarm.alarm_time.isoformat(),
+                    "reason": alarm.reason,
+                    "audio_file": alarm.audio_file,
+                    "recurring_days": alarm.recurring_days,
+                    "is_active": alarm.is_active == "true"
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error creating alarm: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.delete("/api/alarms/{alarm_id}")
+async def delete_alarm(alarm_id: int):
+    """Delete an alarm."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Alarm).where(Alarm.id == alarm_id)
+            )
+            alarm = result.scalar_one_or_none()
+            
+            if not alarm:
+                return {
+                    "success": False,
+                    "error": "Alarm not found"
+                }
+            
+            await session.delete(alarm)
+            await session.commit()
+            
+            logger.info(f"Deleted alarm {alarm_id}")
+            
+            return {
+                "success": True,
+                "message": "Alarm deleted"
+            }
+    except Exception as e:
+        logger.error(f"Error deleting alarm: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/alarms/{alarm_id}/toggle")
+async def toggle_alarm(alarm_id: int):
+    """Toggle alarm active state."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Alarm).where(Alarm.id == alarm_id)
+            )
+            alarm = result.scalar_one_or_none()
+            
+            if not alarm:
+                return {
+                    "success": False,
+                    "error": "Alarm not found"
+                }
+            
+            alarm.is_active = "false" if alarm.is_active == "true" else "true"
+            await session.commit()
+            
+            return {
+                "success": True,
+                "is_active": alarm.is_active == "true"
+            }
+    except Exception as e:
+        logger.error(f"Error toggling alarm: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/alarms/check")
+async def check_alarms():
+    """Check for alarms that should be triggered. Returns alarms that need to fire."""
+    try:
+        now = datetime.now(timezone.utc)
+        current_time = now.time()
+        current_weekday = now.weekday()  # 0=Monday, 6=Sunday
+        
+        async with AsyncSessionLocal() as session:
+            # Get all active alarms
+            result = await session.execute(
+                select(Alarm)
+                .where(Alarm.is_active == "true")
+            )
+            all_alarms = result.scalars().all()
+            
+            alarms_to_trigger = []
+            for alarm in all_alarms:
+                alarm_time_only = alarm.alarm_time.time()
+                
+                # Check if time matches (within 1 minute window)
+                time_diff = abs((current_time.hour * 60 + current_time.minute) - 
+                               (alarm_time_only.hour * 60 + alarm_time_only.minute))
+                
+                if time_diff <= 1:  # Within 1 minute window
+                    if alarm.recurring_days:
+                        # Recurring alarm - check if today is in the recurring days
+                        if current_weekday in alarm.recurring_days:
+                            alarms_to_trigger.append(alarm)
+                    else:
+                        # One-time alarm - check if not already triggered
+                        if alarm.triggered == "false":
+                            alarms_to_trigger.append(alarm)
+                            # Mark as triggered for one-time alarms
+                            alarm.triggered = "true"
+                            alarm.triggered_at = now
+            
+            alarms_data = []
+            for alarm in alarms_to_trigger:
+                alarms_data.append({
+                    "id": alarm.id,
+                    "alarm_type": alarm.alarm_type.value,
+                    "alarm_time": alarm.alarm_time.isoformat(),
+                    "reason": alarm.reason,
+                    "audio_file": alarm.audio_file,
+                    "recurring_days": alarm.recurring_days
+                })
+            
+            if alarms_data:
+                logger.info(f"Triggered {len(alarms_data)} alarm(s)")
+                await session.commit()  # Commit one-time alarm triggers
+            
+            return {
+                "success": True,
+                "alarms": alarms_data
+            }
+    except Exception as e:
+        logger.error(f"Error checking alarms: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 

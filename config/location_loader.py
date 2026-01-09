@@ -1,14 +1,10 @@
 """Utility functions for loading location configuration."""
-import json
 import logging
-from pathlib import Path
 from typing import Dict, Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
-
-LOCATION_CONFIG_PATH = Path(__file__).parent / "location.json"
 
 _DEFAULT_LOCATION = {
     "city": "Unknown",
@@ -65,22 +61,6 @@ async def load_location_config(session: Optional[AsyncSession] = None) -> Dict[s
                 await db_session.close()
     except Exception as e:
         logger.error(f"Error loading location config from database: {e}", exc_info=True)
-        return _load_location_from_file()
-
-
-def _load_location_from_file() -> Dict[str, Any]:
-    """Fallback: Load location configuration from JSON file."""
-    try:
-        if not LOCATION_CONFIG_PATH.exists():
-            logger.warning(f"Location config file not found at {LOCATION_CONFIG_PATH}, using defaults")
-            return _DEFAULT_LOCATION.copy()
-        
-        with open(LOCATION_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            logger.debug(f"Loaded location config from file: {config.get('display_name', 'Unknown')}")
-            return config
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"Error loading location config from file: {e}", exc_info=True)
         return _DEFAULT_LOCATION.copy()
 
 
@@ -133,11 +113,21 @@ async def save_location_config(config: Dict[str, Any], session: Optional[AsyncSe
             result = await db_session.execute(select(LocationConfig).limit(1))
             location = result.scalar_one_or_none()
             
+            # Auto-generate display_name from city, region, and postcode
+            display_parts = []
+            if config.get("city"):
+                display_parts.append(config["city"])
+            if config.get("region"):
+                display_parts.append(config["region"])
+            if config.get("postcode"):
+                display_parts.append(config["postcode"])
+            display_name = ", ".join(display_parts) if display_parts else "Unknown Location"
+            
             if location:
                 location.city = config.get("city")
                 location.region = config.get("region")
                 location.postcode = config.get("postcode")
-                location.display_name = config.get("display_name")
+                location.display_name = display_name
                 location.location_id = config.get("location_id")
                 # Store any extra keys in extra_data
                 extra_keys = {k: v for k, v in config.items() 
@@ -150,7 +140,7 @@ async def save_location_config(config: Dict[str, Any], session: Optional[AsyncSe
                     city=config.get("city"),
                     region=config.get("region"),
                     postcode=config.get("postcode"),
-                    display_name=config.get("display_name"),
+                    display_name=display_name,
                     location_id=config.get("location_id"),
                     extra_data=extra_keys if extra_keys else None
                 ))
@@ -158,7 +148,7 @@ async def save_location_config(config: Dict[str, Any], session: Optional[AsyncSe
             if not session:  # Only commit if we created the session
                 await db_session.commit()
             
-            logger.info(f"Location config saved to database: {config.get('display_name', 'Unknown')}")
+            logger.info(f"Location config saved to database: {display_name}")
             return True
         finally:
             if should_close:

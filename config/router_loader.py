@@ -1,7 +1,5 @@
 """Router configuration loader."""
-import json
 import logging
-from pathlib import Path
 from typing import Optional, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,26 +34,13 @@ async def load_router_config(session: Optional[AsyncSession] = None) -> Optional
             if router:
                 return router.config_data
             else:
-                # Fallback: try loading from file
-                return _load_router_from_file()
+                logger.warning("No router config found in database")
+                return None
         finally:
             if should_close:
                 await db_session.close()
     except Exception as e:
         logger.error(f"Error loading router config from database: {e}", exc_info=True)
-        return _load_router_from_file()
-
-
-def _load_router_from_file() -> Optional[Dict[str, Any]]:
-    """Fallback: Load router config from file."""
-    path = Path(__file__).parent / "router.config"
-    if not path.exists():
-        return None
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading router config from file: {e}")
         return None
 
 

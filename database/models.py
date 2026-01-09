@@ -392,3 +392,28 @@ class ArticleSummary(Base):
     def __repr__(self):
         return f"<ArticleSummary {self.article_url[:50]}...>"
 
+
+class AlarmType(enum.Enum):
+    """Alarm type enumeration."""
+    TIME = "time"
+    # Future types: reminder, notification, etc.
+
+
+class Alarm(Base):
+    """Model for storing alarms."""
+    __tablename__ = "alarms"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    alarm_type = Column(SQLEnum(AlarmType), nullable=False, default=AlarmType.TIME)
+    alarm_time = Column(DateTime(timezone=True), nullable=False, index=True)  # When the alarm should trigger (time only, date ignored for recurring)
+    reason = Column(Text, nullable=True)  # User-provided reason/description
+    audio_file = Column(String, nullable=True)  # Path to audio file to play (deprecated - use default from settings)
+    is_active = Column(String, default="true")  # Whether alarm is active
+    triggered = Column(String, default="false")  # Whether alarm has been triggered (for one-time alarms)
+    triggered_at = Column(DateTime(timezone=True), nullable=True)  # When it was triggered
+    recurring_days = Column(JSON, nullable=True)  # List of days of week (0=Monday, 6=Sunday) for recurring alarms. Null = one-time alarm
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<Alarm {self.alarm_type.value} at {self.alarm_time}>"
+

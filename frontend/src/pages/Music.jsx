@@ -1,16 +1,38 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { musicAPI } from '../services/api';
+import { useMusicPlayer } from '../contexts/MusicPlayerContext';
 
 export function MusicPage({ searchQuery = '' }) {
   const [library, setLibrary] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [playlist, setPlaylist] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(-1);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
+  // Use music player context for audio state
+  const {
+    isPlaying,
+    progress,
+    duration,
+    volume,
+    currentSong,
+    playlist: contextPlaylist,
+    currentIndex: contextCurrentIndex,
+    isShuffled: contextIsShuffled,
+    shuffleQueue: contextShuffleQueue,
+    audioRef,
+    playSong,
+    pause,
+    resume,
+    togglePlayPause,
+    seek,
+    setVolume: setContextVolume,
+    setIsShuffled: setContextIsShuffled,
+    setShuffleQueue: setContextShuffleQueue,
+    setNextHandler,
+    setPlaylistAndIndex,
+    setCurrentIndex: setContextCurrentIndex,
+  } = useMusicPlayer();
+
+  // Local state for UI
   const [selectedArtist, setSelectedArtist] = useState(null);
   const [selectedAlbum, setSelectedAlbum] = useState(null);
   const [viewMode, setViewMode] = useState('artists'); // artists | albums
@@ -38,11 +60,14 @@ export function MusicPage({ searchQuery = '' }) {
   const [playlistModalError, setPlaylistModalError] = useState('');
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [songToRemove, setSongToRemove] = useState(null);
-  const [volume, setVolume] = useState(1.0); // 0.0 to 1.0
   const [isScrolled, setIsScrolled] = useState(false);
-  const [isShuffled, setIsShuffled] = useState(false);
-  const [shuffleQueue, setShuffleQueue] = useState([]);
-  const audioRef = useRef(null);
+  
+  // Use context values for playlist and shuffle
+  const playlist = contextPlaylist;
+  const currentIndex = contextCurrentIndex;
+  const isShuffled = contextIsShuffled;
+  const shuffleQueue = contextShuffleQueue;
+  
   const heroImgRef = useRef(null);
   const mainContentRef = useRef(null);
   const heroRef = useRef(null);
@@ -180,20 +205,7 @@ export function MusicPage({ searchQuery = '' }) {
   }, []);
 
   // Listen for stopAllAudio event (e.g., when entering AI focus mode)
-  useEffect(() => {
-    const handleStopAllAudio = () => {
-      if (audioRef.current && !audioRef.current.paused) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-        setIsPlaying(false);
-      }
-    };
-
-    window.addEventListener('stopAllAudio', handleStopAllAudio);
-    return () => {
-      window.removeEventListener('stopAllAudio', handleStopAllAudio);
-    };
-  }, []);
+  // stopAllAudio is now handled by MusicPlayerContext
 
   useEffect(() => {
     // Auto-select a playlist when switching to playlists view or when playlists load
@@ -206,7 +218,8 @@ export function MusicPage({ searchQuery = '' }) {
     }
   }, [viewMode, playlists, selectedPlaylist]);
 
-  // Keep refs in sync with latest state
+  // Keep refs in sync with latest state (playlistRef is managed by context now)
+  // But we still need a local ref for some operations
   useEffect(() => {
     playlistRef.current = playlist;
   }, [playlist]);
@@ -215,29 +228,7 @@ export function MusicPage({ searchQuery = '' }) {
     lengthsRef.current = lengths;
   }, [lengths]);
 
-  useEffect(() => {
-    audioRef.current = new Audio();
-    const onTime = () => {
-      if (!audioRef.current) return;
-      setProgress(audioRef.current.currentTime || 0);
-    };
-    const onLoaded = () => {
-      if (!audioRef.current) return;
-      setDuration(audioRef.current.duration || 0);
-    };
-    audioRef.current.addEventListener('timeupdate', onTime);
-    audioRef.current.addEventListener('loadedmetadata', onLoaded);
-    audioRef.current.addEventListener('loadeddata', onLoaded);
-    audioRef.current.addEventListener('durationchange', onLoaded);
-    return () => {
-      if (!audioRef.current) return;
-      audioRef.current.removeEventListener('timeupdate', onTime);
-      audioRef.current.removeEventListener('loadedmetadata', onLoaded);
-      audioRef.current.removeEventListener('loadeddata', onLoaded);
-      audioRef.current.removeEventListener('durationchange', onLoaded);
-      audioRef.current.pause();
-    };
-  }, []);
+  // Audio is now managed by MusicPlayerContext - no initialization needed here
 
   // Update refs every render so callbacks always point to latest implementations/state
   useEffect(() => {
@@ -245,22 +236,7 @@ export function MusicPage({ searchQuery = '' }) {
     playIndexRef.current = playIndex;
   });
 
-  // Set up ended event handler separately - uses ref to avoid dependency issues
-  useEffect(() => {
-    if (!audioRef.current) return;
-    const onEnded = () => {
-      console.log('Song ended, playing next...');
-      if (handleNextRef.current) {
-        handleNextRef.current();
-      }
-    };
-    audioRef.current.addEventListener('ended', onEnded);
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.removeEventListener('ended', onEnded);
-      }
-    };
-  }, []); // Empty deps - ref is updated separately
+  // Set up next handler for context - will be updated after handleNext is defined
 
   // Scroll detection for showing minimal hero
   useEffect(() => {
@@ -300,11 +276,7 @@ export function MusicPage({ searchQuery = '' }) {
     };
   }, [selectedArtist, selectedAlbum, selectedPlaylist]);
 
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-    }
-  }, [volume]);
+  // Volume is managed by context - no sync needed
 
   // Restore player state from session storage on mount
   useEffect(() => {
@@ -325,19 +297,16 @@ export function MusicPage({ searchQuery = '' }) {
           setSelectedPlaylist(state.selectedPlaylist);
         }
         
-        // Restore playlist and current index
+        // Restore playlist and current index using context
         if (state.playlist && state.playlist.length > 0) {
-          setPlaylist(state.playlist);
+          setPlaylistAndIndex(state.playlist, state.currentIndex >= 0 ? state.currentIndex : -1);
           playlistRef.current = state.playlist;
-          if (state.currentIndex >= 0) {
-            setCurrentIndex(state.currentIndex);
-          }
         }
       }
     } catch (err) {
       console.error('Failed to restore player state:', err);
     }
-  }, []); // Only run on mount
+  }, [setPlaylistAndIndex]); // Only run on mount
 
   // Save player state to session storage when it changes
   useEffect(() => {
@@ -364,8 +333,6 @@ export function MusicPage({ searchQuery = '' }) {
     if (!songList || idx < 0 || idx >= songList.length) return;
     // Update both ref and state for proper highlighting in shuffle mode
     playlistRef.current = songList;
-    setPlaylist(songList);
-    setCurrentIndex(idx);
     const track = songList[idx];
     
     // Debug logging
@@ -374,53 +341,33 @@ export function MusicPage({ searchQuery = '' }) {
     
     if (!track.path) {
       console.error('Track has no path!', track);
-      setIsPlaying(false);
       return;
     }
     
-    const src = `/api/music/stream?path=${encodeURIComponent(track.path)}`;
-    console.log('Audio src:', src);
+    // Use context to play song
+    setPlaylistAndIndex(songList, idx);
+    playSong(track, idx, songList);
     
-    const fallbackDuration = track.duration ?? lengthsRef.current[track.path] ?? 0;
-    setProgress(0);
-    setDuration(fallbackDuration);
-    if (audioRef.current) {
-      audioRef.current.src = src;
-      audioRef.current.currentTime = 0;
-      try {
-        await audioRef.current.play();
-        setIsPlaying(true);
-        
-        // Track play for analytics
-        try {
-          await musicAPI.trackPlay(track.path, track.duration);
-        } catch (err) {
-          console.error('Failed to track play:', err);
-          // Don't stop playback if tracking fails
-        }
-      } catch (e) {
-        console.error('Play error', e, 'for src:', src);
-        setIsPlaying(false);
-      }
+    // Track play for analytics
+    try {
+      await musicAPI.trackPlay(track.path, track.duration);
+    } catch (err) {
+      console.error('Failed to track play:', err);
+      // Don't stop playback if tracking fails
     }
   };
 
   const handlePlayPause = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play().catch((e) => console.error('Play error', e));
-      setIsPlaying(true);
-    }
+    togglePlayPause();
   };
 
   const handlePrev = () => {
     const list = playlistRef.current || playlist;
     if (!list.length) return;
     const nextIdx = currentIndex > 0 ? currentIndex - 1 : list.length - 1;
-    if (playIndexRef.current) playIndexRef.current(nextIdx, list);
+    if (playIndexRef.current) {
+      playIndexRef.current(nextIdx, list);
+    }
   };
 
   const sortSongs = (songs = []) =>
@@ -471,32 +418,54 @@ export function MusicPage({ searchQuery = '' }) {
     return { songs: albumsSeq[0].songs, idx: 0 };
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
+    console.log('[MusicPage] handleNext called, currentIndex:', currentIndex, 'playlist length:', playlist.length);
     const list = playlistRef.current || playlist;
-    if (!list.length) return;
+    if (!list.length) {
+      console.log('[MusicPage] No songs in playlist');
+      return;
+    }
     const nextIdx = currentIndex + 1;
     if (nextIdx < list.length) {
-      if (playIndexRef.current) playIndexRef.current(nextIdx, list);
+      console.log('[MusicPage] Playing next song in playlist, index:', nextIdx);
+      if (playIndexRef.current) {
+        playIndexRef.current(nextIdx, list);
+      } else {
+        console.error('[MusicPage] playIndexRef.current is not set!');
+      }
       return;
     }
     // End of current list
     // Check if we're playing from popular list (don't auto-advance to albums)
-    const isPlayingPopular = currentPopular.length > 0 && 
-                             list.length === currentPopular.length &&
-                             list[0]?.path === currentPopular[0]?.path;
+    const popular = selectedArtist ? popularMap[selectedArtist] || [] : [];
+    const isPlayingPopular = popular.length > 0 && 
+                             list.length === popular.length &&
+                             list[0]?.path === popular[0]?.path;
     
     if (viewMode !== 'playlists' && !isPlayingPopular) {
       // Only auto-advance to next album if not playing from popular list
       const currentPath = list[currentIndex]?.path;
       const next = getNextAlbumSong(currentPath);
       if (next && playIndexRef.current) {
+        console.log('[MusicPage] Auto-advancing to next album');
         playIndexRef.current(next.idx, next.songs);
         return;
       }
     }
     // Loop back to beginning of current list
-    if (playIndexRef.current) playIndexRef.current(0, list);
-  };
+    console.log('[MusicPage] Looping back to beginning');
+    if (playIndexRef.current) {
+      playIndexRef.current(0, list);
+    } else {
+      console.error('[MusicPage] playIndexRef.current is not set for loop!');
+    }
+  }, [playlist, currentIndex, viewMode, selectedArtist, popularMap]);
+
+  // Set up next handler for context after handleNext is defined
+  useEffect(() => {
+    console.log('[MusicPage] Setting next handler:', handleNext);
+    setNextHandler(handleNext);
+  }, [setNextHandler, handleNext]);
 
   const handleSeek = (e) => {
     e.stopPropagation();
@@ -509,7 +478,7 @@ export function MusicPage({ searchQuery = '' }) {
       return;
     }
     
-    const dur = audioRef.current.duration;
+    const dur = duration || audioRef.current.duration;
     console.log('Audio duration:', dur, 'readyState:', audioRef.current.readyState);
     
     if (!dur || isNaN(dur) || dur === 0) {
@@ -530,8 +499,7 @@ export function MusicPage({ searchQuery = '' }) {
     console.log('Seeking to:', newTime, 'seconds (', Math.round(pct * 100), '% of', dur, ')');
     
     try {
-      audioRef.current.currentTime = newTime;
-      setProgress(newTime);
+      seek(newTime);
       console.log('Seek successful');
     } catch (err) {
       console.error('Seek failed:', err);
@@ -541,14 +509,14 @@ export function MusicPage({ searchQuery = '' }) {
   const handleVolumeChange = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    setVolume(pct);
+    setContextVolume(pct);
   };
 
   const toggleMute = () => {
     if (volume > 0) {
-      setVolume(0);
+      setContextVolume(0);
     } else {
-      setVolume(1.0);
+      setContextVolume(1.0);
     }
   };
 
@@ -556,8 +524,8 @@ export function MusicPage({ searchQuery = '' }) {
     console.log('handleSongClick called with:', { songCount: songs.length, index: idx, firstSong: songs[0] });
     
     // Clear shuffle when manually clicking a song
-    setIsShuffled(false);
-    setShuffleQueue([]);
+    setContextIsShuffled(false);
+    setContextShuffleQueue([]);
     
     // Make sure we have valid songs and index
     if (!songs || !Array.isArray(songs) || idx < 0 || idx >= songs.length) {
@@ -567,7 +535,7 @@ export function MusicPage({ searchQuery = '' }) {
     
     // Stop current playback before starting new song
     if (audioRef.current && !audioRef.current.paused) {
-      audioRef.current.pause();
+      pause();
       console.log('Paused current song before switching');
     }
     
@@ -579,8 +547,8 @@ export function MusicPage({ searchQuery = '' }) {
   const handleShuffle = () => {
     if (isShuffled) {
       // Turn off shuffle
-      setIsShuffled(false);
-      setShuffleQueue([]);
+      setContextIsShuffled(false);
+      setContextShuffleQueue([]);
     } else {
       // Turn on shuffle - get all songs from current context
       let songsToShuffle = [];
@@ -609,8 +577,8 @@ export function MusicPage({ searchQuery = '' }) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
         
-        setIsShuffled(true);
-        setShuffleQueue(shuffled);
+        setContextIsShuffled(true);
+        setContextShuffleQueue(shuffled);
         
         // Start playing first song in shuffled queue
         if (playIndexRef.current) {
@@ -730,7 +698,9 @@ export function MusicPage({ searchQuery = '' }) {
     setSongToRemove(null);
   };
 
-  const currentPopular = selectedArtist ? popularMap[selectedArtist] || [] : [];
+  const currentPopular = useMemo(() => {
+    return selectedArtist ? popularMap[selectedArtist] || [] : [];
+  }, [selectedArtist, popularMap]);
 
   const fetchPopular = async (artistName) => {
     if (!artistName) return;
@@ -1217,6 +1187,11 @@ export function MusicPage({ searchQuery = '' }) {
               onClick={() => {
                 setViewMode('artists');
                 setSelectedPlaylist(null);
+                // Select first artist if available
+                if (filteredLibrary.length > 0) {
+                  setSelectedArtist(filteredLibrary[0].name);
+                  setSelectedAlbum(null);
+                }
               }}
             >
               Artists
@@ -1226,6 +1201,15 @@ export function MusicPage({ searchQuery = '' }) {
               onClick={() => {
                 setViewMode('albums');
                 setSelectedPlaylist(null);
+                // Select first album if available
+                if (allAlbums.length > 0) {
+                  const firstAlbum = allAlbums[0];
+                  setSelectedArtist(firstAlbum.artistName);
+                  setSelectedAlbum(firstAlbum.name);
+                } else {
+                  setSelectedArtist(null);
+                  setSelectedAlbum(null);
+                }
               }}
             >
               Albums
@@ -1236,6 +1220,10 @@ export function MusicPage({ searchQuery = '' }) {
                 setViewMode('playlists');
                 setSelectedArtist(null);
                 setSelectedAlbum(null);
+                // Select first playlist if available
+                if (playlists.length > 0) {
+                  setSelectedPlaylist(playlists[0].name);
+                }
               }}
             >
               Playlists

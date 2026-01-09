@@ -14,7 +14,7 @@ body {
 
 /* Top Bar */
 .top-bar {
-  background: #141420;
+  background: transparent;
   border-bottom: 1px solid #2a2a3a;
   padding: 12px 24px;
   display: flex;
@@ -169,7 +169,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: #141420;
+  background: transparent;
   border: 1px solid #2a2a3a;
   border-radius: 12px;
   padding: 12px;
@@ -414,7 +414,7 @@ body {
 
 .news-article {
   padding: 12px;
-  background: #1a1a2a;
+  background: transparent;
   border: 1px solid #2a2a3a;
   border-radius: 8px;
   transition: border-color 0.2s;
@@ -434,11 +434,12 @@ body {
 
 .news-article-image {
   flex-shrink: 0;
-  width: 120px;
-  height: 68px;
+  width: 200px;
+  height: 120px;
   overflow: hidden;
-  border-radius: 4px;
+  border-radius: 8px;
   background-color: rgba(42, 42, 58, 0.5);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .news-article-image img {
@@ -446,6 +447,11 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform 0.3s ease;
+}
+
+.news-article:hover .news-article-image img {
+  transform: scale(1.05);
 }
 
 .news-article-content {
@@ -1077,6 +1083,11 @@ body {
   background: transparent;
   border: none;
   color: #a0a0a0;
+}
+
+.settings-icon-button.active {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
   font-size: 1.2em;
   cursor: pointer;
   padding: 6px;
@@ -1113,7 +1124,6 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #1a1a2a;
 }
 
 /* Settings Modal */
@@ -1234,7 +1244,6 @@ body {
   justify-content: space-between;
   align-items: center;
   padding-bottom: 16px;
-  border-bottom: 2px solid #2a2a3a;
 }
 
 .settings-panel-header h3 {
@@ -1440,8 +1449,28 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1px;
-  border-bottom: 2px solid #2a2a3a;
   padding-bottom: 8px;
+}
+
+.config-section-title.collapsible {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.2s;
+}
+
+.config-section-title.collapsible:hover {
+  color: #c0c0d0;
+}
+
+.collapse-icon {
+  font-size: 0.9em;
+  display: inline-flex;
+  transition: transform 0.2s;
+  color: #3b82f6;
+  min-width: 16px;
 }
 
 .config-textarea {
@@ -2703,8 +2732,9 @@ body {
 }
 
 .filter-pill.active {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  border-color: #2563eb;
+  background: white;
+  color: black;
+  border-color: white;
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
 }
 
@@ -3910,8 +3940,6 @@ body {
 .news-summary-pane {
   overflow-y: auto;
   overflow-x: hidden;
-  padding-left: 10px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
   padding-left: 20px;
 }
 
@@ -3985,11 +4013,11 @@ body {
 
 /* Analytics Page */
 .analytics-page {
-  padding: 24px;
+  padding: 32px;
   width: 100%;
   height: 100vh;
   overflow-y: auto;
-  color: #e0e0e0;
+  background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
 }
 
 .analytics-header {
@@ -4000,26 +4028,33 @@ body {
 }
 
 .analytics-header h1 {
-  font-size: 2rem;
-  font-weight: 600;
+  font-size: 2.5rem;
+  font-weight: 700;
   color: #ffffff;
   margin: 0;
+  background: linear-gradient(135deg, #ffffff 0%, #a0a0ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .analytics-refresh {
-  padding: 8px 16px;
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 0.9em;
+  padding: 10px 20px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  color: #3b82f6;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
+  font-size: 0.95rem;
+  font-weight: 500;
 }
 
 .analytics-refresh:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
 .analytics-loading,
@@ -4042,11 +4077,43 @@ body {
 }
 
 .analytics-stat-card {
-  background: rgba(255, 255, 255, 0.03);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 24px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.analytics-stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.stat-icon {
+  font-size: 2.5rem;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.stat-content {
+  flex: 1;
+  text-align: left;
+}
+
+/* Analytics page stat-value styling - more specific selector */
+.analytics-stat-card .stat-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 4px;
+  line-height: 1;
 }
 
 .stat-label {
@@ -4057,11 +4124,13 @@ body {
 }
 
 .analytics-section {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 32px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 28px;
+  margin-bottom: 28px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .analytics-section h2 {
@@ -4079,24 +4148,41 @@ body {
 
 .chart-row {
   display: grid;
-  grid-template-columns: 40px 250px 1fr;
-  gap: 16px;
+  grid-template-columns: 50px 280px 1fr;
+  gap: 18px;
   align-items: center;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 8px;
-  transition: background 0.2s;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  transition: all 0.3s ease;
 }
 
 .chart-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+  border-color: rgba(59, 130, 246, 0.3);
+  transform: translateX(8px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
 }
 
 .chart-rank {
-  font-size: 1.2em;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.4);
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rank-number {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-radius: 12px;
+  color: #3b82f6;
 }
 
 .chart-info {
@@ -4128,14 +4214,33 @@ body {
 }
 
 .chart-bar {
-  height: 32px;
-  background: linear-gradient(90deg, #3b82f6, #2563eb);
-  border-radius: 6px;
+  height: 36px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  border-radius: 8px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  min-width: 80px;
-  transition: width 0.3s ease;
+  justify-content: flex-end;
+  padding: 0 14px;
+  min-width: 70px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.chart-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 .chart-bar.artist-bar {
@@ -4147,10 +4252,13 @@ body {
 }
 
 .chart-bar-label {
-  font-size: 0.85em;
-  font-weight: 600;
+  font-size: 0.875rem;
+  font-weight: 700;
   color: #ffffff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
+  position: relative;
+  z-index: 1;
 }
 
 @media (max-width: 1024px) {
@@ -4193,32 +4301,50 @@ body {
   gap: 16px;
 }
 
+.analytics-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .pagination-button {
-  padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 0.9em;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  color: #3b82f6;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
+  font-size: 1.1rem;
+  font-weight: 600;
 }
 
 .pagination-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.4);
-  color: #ffffff;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.3) 0%, rgba(139, 92, 246, 0.3) 100%);
+  border-color: rgba(59, 130, 246, 0.5);
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
 .pagination-button:disabled {
-  opacity: 0.3;
+  opacity: 0.2;
   cursor: not-allowed;
+  transform: none;
 }
 
 .pagination-info {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 0.9em;
-  min-width: 120px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.95rem;
+  font-weight: 500;
+  min-width: 60px;
   text-align: center;
 }
 
@@ -4745,6 +4871,480 @@ body {
   flex: 1;
   overflow: hidden;
   padding: 16px;
+}
+
+/* Alerts Page */
+.alerts-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 48px);
+  overflow: hidden;
+  background: #0a0a0f;
+}
+
+.alerts-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.alerts-header {
+  margin-bottom: 24px;
+}
+
+.alerts-header h2 {
+  margin: 0;
+  color: #e0e0e0;
+  font-size: 2em;
+}
+
+.alerts-section {
+  background: #1a1a2a;
+  border: 1px solid #2a2a3a;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.alerts-section h3 {
+  margin: 0 0 20px 0;
+  color: #ffffff;
+  font-size: 1.3em;
+  font-weight: 600;
+}
+
+/* Android-style Alarm Cards */
+.alarm-card {
+  background: #1e1e2e;
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.alarm-card.inactive {
+  opacity: 0.5;
+}
+
+.alarm-card-header {
+  margin-bottom: 20px;
+}
+
+.alarm-card-header h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 1.2em;
+  font-weight: 500;
+}
+
+.alarm-form-android {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.alarm-time-picker {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+  position: relative;
+}
+
+.alarm-time-input {
+  font-size: 3em;
+  font-weight: 300;
+  color: #ffffff;
+  background: transparent;
+  border: none;
+  text-align: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  width: auto;
+  min-width: 200px;
+  padding: 0;
+  position: relative;
+}
+
+.alarm-time-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  opacity: 0;
+}
+
+.alarm-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alarm-input-group label {
+  color: #a0a0a0;
+  font-size: 0.9em;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.alarm-text-input {
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 12px 16px;
+  color: #ffffff;
+  font-size: 1em;
+  transition: border-color 0.2s;
+}
+
+.alarm-text-input:focus {
+  outline: none;
+  border-bottom-color: #3b82f6;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.alarm-days-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.alarm-day-button {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #a0a0a0;
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.alarm-day-button:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.alarm-day-button.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.alarm-hint {
+  color: #808080;
+  font-size: 0.85em;
+  margin-top: 4px;
+}
+
+.alarm-create-button {
+  background: #3b82f6;
+  color: #ffffff;
+  border: none;
+  border-radius: 24px;
+  padding: 14px 32px;
+  font-size: 1em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: flex-end;
+  margin-top: 8px;
+}
+
+.alarm-create-button:hover:not(:disabled) {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.alarm-create-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.alarms-list-android {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Compact Alarm Card */
+.alarm-card-compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #1e1e2e;
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s;
+}
+
+.alarm-card-compact:hover {
+  background: #252535;
+}
+
+.alarm-card-compact.inactive {
+  opacity: 0.5;
+}
+
+.alarm-time-display-compact {
+  font-size: 1.8em;
+  font-weight: 300;
+  color: #ffffff;
+  min-width: 90px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.alarm-details-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.alarm-label-compact {
+  color: #ffffff;
+  font-size: 0.95em;
+  font-weight: 500;
+}
+
+.alarm-repeat-compact {
+  color: #a0a0a0;
+  font-size: 0.8em;
+}
+
+.alarm-actions-compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.alarm-delete-icon-compact {
+  background: transparent;
+  border: none;
+  color: #808080;
+  font-size: 1.1em;
+  cursor: pointer;
+  padding: 6px;
+  transition: color 0.2s;
+}
+
+.alarm-delete-icon-compact:hover {
+  color: #ff6b6b;
+}
+
+/* Android Switch Toggle - Compact */
+.android-switch-compact {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 24px;
+}
+
+.android-switch-compact input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.android-switch-slider-compact {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.2);
+  transition: 0.3s;
+  border-radius: 24px;
+}
+
+.android-switch-slider-compact:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.android-switch-compact input:checked + .android-switch-slider-compact {
+  background-color: #3b82f6;
+}
+
+.android-switch-compact input:checked + .android-switch-slider-compact:before {
+  transform: translateX(16px);
+}
+
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.status-badge.active {
+  background: rgba(22, 199, 130, 0.2);
+  color: #16c782;
+  border: 1px solid rgba(22, 199, 130, 0.3);
+}
+
+.status-badge.inactive {
+  background: rgba(128, 128, 128, 0.2);
+  color: #808080;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.status-badge.triggered {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.alerts-message {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 0.9em;
+}
+
+.alerts-message.error {
+  background: rgba(255, 0, 0, 0.1);
+  border: 1px solid rgba(255, 0, 0, 0.3);
+  color: #ff6b6b;
+}
+
+.alerts-message.success {
+  background: rgba(0, 255, 0, 0.1);
+  border: 1px solid rgba(0, 255, 0, 0.3);
+  color: #51cf66;
+}
+
+.alerts-empty {
+  text-align: center;
+  color: #808080;
+  padding: 40px;
+  font-size: 1.1em;
+}
+
+/* Alarm Popup Modal */
+.alarm-popup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.alarm-popup {
+  background: #1e1e2e;
+  border-radius: 24px;
+  padding: 40px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.3s;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.alarm-popup-icon {
+  font-size: 4em;
+  margin-bottom: 16px;
+  animation: alarmRing 0.5s ease-in-out infinite;
+}
+
+@keyframes alarmRing {
+  0%, 100% {
+    transform: rotate(0deg) scale(1);
+  }
+  25% {
+    transform: rotate(-10deg) scale(1.1);
+  }
+  75% {
+    transform: rotate(10deg) scale(1.1);
+  }
+}
+
+.alarm-popup-title {
+  font-size: 1.5em;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 12px;
+}
+
+.alarm-popup-message {
+  font-size: 1.1em;
+  color: #e0e0e0;
+  margin-bottom: 8px;
+}
+
+.alarm-popup-time {
+  font-size: 2em;
+  font-weight: 300;
+  color: #3b82f6;
+  margin-bottom: 24px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.alarm-popup-stop {
+  background: #3b82f6;
+  border: none;
+  color: #ffffff;
+  padding: 14px 48px;
+  border-radius: 24px;
+  font-size: 1.1em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.alarm-popup-stop:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
 /* Octopus Energy Widget */
