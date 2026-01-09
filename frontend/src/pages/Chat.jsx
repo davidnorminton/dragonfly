@@ -3,6 +3,8 @@ import { useChat } from '../hooks/useChat';
 import { chatAPI } from '../services/api';
 import { usePersonas } from '../hooks/usePersonas';
 import { useExpertTypes } from '../hooks/useExpertTypes';
+import { formatMessage } from '../utils/messageFormatter';
+import 'highlight.js/styles/github-dark.css';
 
 export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '' }) {
   const [mode, setMode] = useState('qa');
@@ -100,12 +102,6 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     return () => container.removeEventListener('scroll', handleScroll);
   }, [hasMore, isLoadingMore, loadMore]);
 
-  const escapeHtml = (text) => {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -447,7 +443,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                     <div className="chatgpt-message-content">
                       <div className="chatgpt-message-text">
                         {msg.role === 'assistant' ? (
-                          <div dangerouslySetInnerHTML={{ __html: escapeHtml(msg.message).replace(/\n/g, '<br>') }}></div>
+                          <div dangerouslySetInnerHTML={{ __html: formatMessage(msg.message) }}></div>
                         ) : (
                           <div>{msg.message}</div>
                         )}
