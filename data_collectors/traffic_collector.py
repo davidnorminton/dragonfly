@@ -21,9 +21,8 @@ class TrafficCollector(BaseCollector):
         self.api_key = None  # Will be loaded asynchronously
     
     async def _get_rapidapi_key(self) -> Optional[str]:
-        """Get RapidAPI key from database or config file."""
+        """Get RapidAPI key from database."""
         try:
-            # Try database first
             from config.api_key_loader import load_api_keys
             api_keys = await load_api_keys()
             rapidapi_config = api_keys.get("rapidapi", {})
@@ -33,22 +32,7 @@ class TrafficCollector(BaseCollector):
                 logger.info("Loaded RapidAPI key from database")
                 return api_key
             
-            # Fallback to file
-            api_keys_path = Path(__file__).parent.parent / "config" / "api_keys.json"
-            if api_keys_path.exists():
-                with open(api_keys_path, 'r') as f:
-                    api_keys_file = json.load(f)
-                    # Try waze or rapidapi key
-                    api_key = (
-                        api_keys_file.get("waze", {}).get("api_key") or
-                        api_keys_file.get("rapidapi", {}).get("api_key") or
-                        api_keys_file.get("waze", {}).get("rapidapi_key")
-                    )
-                    if api_key:
-                        logger.info("Loaded RapidAPI key from config file")
-                        return api_key
-            
-            logger.warning("RapidAPI key not found")
+            logger.warning("RapidAPI key not found in database")
             return None
         except Exception as e:
             logger.error(f"Error loading RapidAPI key: {e}")

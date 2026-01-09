@@ -9,10 +9,10 @@ from urllib.parse import urlparse
 
 from config.persona_loader import load_persona_config, get_current_persona_name
 from config.settings import settings
+from config.api_key_loader import load_api_keys
 import anthropic
 from anthropic import AsyncAnthropic
 import os
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -24,25 +24,26 @@ class ArticleSummarizer:
         self.timeout = 30.0
         self.max_content_length = 50000  # Limit content to avoid token limits
         self.async_client = None
-        self._load_api_key()
+        self._api_key_loaded = False
         
-    def _load_api_key(self):
-        """Load API key from config file or environment."""
+    async def _load_api_key(self):
+        """Load API key from database or environment."""
+        if self._api_key_loaded:
+            return
+            
         api_key = None
         try:
-            api_keys_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "api_keys.json")
-            if os.path.exists(api_keys_path):
-                with open(api_keys_path, 'r') as f:
-                    api_keys = json.load(f)
-                    api_key = api_keys.get("anthropic", {}).get("api_key")
+            api_keys_config = await load_api_keys()
+            api_key = api_keys_config.get("anthropic", {}).get("api_key")
         except Exception as e:
-            logger.warning(f"Could not load API key from config file: {e}")
+            logger.warning(f"Could not load API key from database: {e}")
         
         if not api_key:
             api_key = os.getenv("ANTHROPIC_API_KEY")
         
         if api_key:
             self.async_client = AsyncAnthropic(api_key=api_key)
+            self._api_key_loaded = True
         else:
             logger.warning("No Anthropic API key found for article summarization")
         
@@ -120,6 +121,8 @@ class ArticleSummarizer:
         """
         Summarize article content using the default AI model.
         """
+        await self._load_api_key()
+        
         try:
             if not self.async_client:
                 logger.error("Anthropic API client not initialized")

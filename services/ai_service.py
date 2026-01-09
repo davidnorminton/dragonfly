@@ -1,5 +1,4 @@
 """AI service for general questions using Anthropic Claude API."""
-import json
 import os
 from services.base_service import BaseService
 from typing import Dict, Any, Optional
@@ -7,6 +6,8 @@ import anthropic
 from anthropic import AsyncAnthropic
 from config.settings import settings
 from config.persona_loader import load_persona_config, get_current_persona_name
+from config.api_key_loader import load_api_keys
+import asyncio
 
 
 class AIService(BaseService):
@@ -17,34 +18,36 @@ class AIService(BaseService):
         self.client = None
         self.async_client = None
         self.persona_config = None
-        self._load_api_key()
-        # Persona config will be loaded async on first use
-        self.persona_config = None
+        # API key will be loaded async on first use
+        self._api_key_loaded = False
     
-    def _load_api_key(self):
-        """Load API key from config file or environment."""
+    async def _load_api_key(self):
+        """Load API key from database or environment."""
+        if self._api_key_loaded:
+            return
+            
         api_key = settings.ai_api_key
         
-        # Try to load from api_keys.json file
+        # Try to load from database
         if not api_key:
             try:
-                api_keys_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), settings.api_keys_file)
-                if os.path.exists(api_keys_path):
-                    with open(api_keys_path, 'r') as f:
-                        api_keys = json.load(f)
-                        api_key = api_keys.get("anthropic", {}).get("api_key")
-                        if api_key:
-                            self.logger.info("Loaded Anthropic API key from config file")
+                api_keys_config = await load_api_keys()
+                api_key = api_keys_config.get("anthropic", {}).get("api_key")
+                if api_key:
+                    self.logger.info("Loaded Anthropic API key from database")
             except Exception as e:
-                self.logger.warning(f"Could not load API key from config file: {e}")
+                self.logger.warning(f"Could not load API key from database: {e}")
         
         # Fallback to environment variable
         if not api_key:
             api_key = os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                self.logger.info("Loaded Anthropic API key from environment")
         
         if api_key:
             self.client = anthropic.Anthropic(api_key=api_key)
             self.async_client = AsyncAnthropic(api_key=api_key)
+            self._api_key_loaded = True
         else:
             self.logger.warning("No Anthropic API key found. AI service will return placeholder responses.")
     
@@ -83,9 +86,11 @@ class AIService(BaseService):
         Returns:
             Dict with 'answer' and other metadata
         """
+        await self._load_api_key()
+        
         if not self.async_client:
             return {
-                "answer": "AI service is not configured. Please add your Anthropic API key to config/api_keys.json",
+                "answer": "AI service is not configured. Please add your Anthropic API key in Settings.",
                 "question": question,
                 "service": "ai_service",
                 "error": "no_api_key"
@@ -139,6 +144,7 @@ class AIService(BaseService):
         Returns:
             - answer: str - The AI's response
         """
+        await self._load_api_key()
         await self._ensure_persona_config()
         self.validate_input(input_data, ["question"])
         
@@ -146,7 +152,7 @@ class AIService(BaseService):
         
         if not self.client:
             return {
-                "answer": "AI service is not configured. Please add your Anthropic API key to config/api_keys.json",
+                "answer": "AI service is not configured. Please add your Anthropic API key in Settings.",
                 "question": question,
                 "service": "ai_service",
                 "error": "no_api_key"
@@ -158,7 +164,7 @@ class AIService(BaseService):
             # Use Claude API (async client)
             if not self.async_client:
                 return {
-                    "answer": "AI service is not configured. Please add your Anthropic API key to config/api_keys.json",
+                    "answer": "AI service is not configured. Please add your Anthropic API key in Settings.",
                     "question": question,
                     "service": "ai_service",
                     "error": "no_api_key"
@@ -231,9 +237,9 @@ class AIService(BaseService):
                 "error": str(e)
             }
     
-    def stream_execute(self, input_data: Dict[str, Any]):
+    async def stream_execute(self, input_data: Dict[str, Any]):
         """
-        Execute AI service with streaming response (generator, not async generator).
+        Execute AI service with streaming response (async generator).
         
         Expected input:
             - question: str - The question to ask
@@ -241,12 +247,14 @@ class AIService(BaseService):
         Yields:
             - str - Chunks of the AI's response
         """
+        await self._load_api_key()
+        await self._ensure_persona_config()
         self.validate_input(input_data, ["question"])
         
         question = input_data["question"]
         
         if not self.client:
-            yield "AI service is not configured. Please add your Anthropic API key."
+            yield "AI service is not configured. Please add your Anthropic API key in Settings."
             return
         
         try:
@@ -311,12 +319,13 @@ class AIService(BaseService):
         Yields:
             - str - Chunks of the AI's response
         """
+        await self._load_api_key()
         self.validate_input(input_data, ["question"])
         
         question = input_data["question"]
         
         if not self.async_client:
-            yield "AI service is not configured. Please add your Anthropic API key."
+            yield "AI service is not configured. Please add your Anthropic API key in Settings."
             return
         
         try:

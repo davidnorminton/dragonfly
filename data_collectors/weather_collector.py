@@ -25,9 +25,8 @@ class WeatherCollector(BaseCollector):
         self.api_key = None
     
     async def _get_rapidapi_key(self) -> Optional[str]:
-        """Get RapidAPI key from database or config file."""
+        """Get RapidAPI key from database."""
         try:
-            # Try database first
             api_keys = await load_api_keys()
             rapidapi_config = api_keys.get("rapidapi", {})
             api_key = rapidapi_config.get("api_key")
@@ -35,17 +34,6 @@ class WeatherCollector(BaseCollector):
             if api_key:
                 logger.info("Loaded RapidAPI key from database")
                 return api_key
-            
-            # Fallback to file
-            api_keys_path = Path(__file__).parent.parent / "config" / "api_keys.json"
-            if api_keys_path.exists():
-                with open(api_keys_path, 'r') as f:
-                    api_keys_file = json.load(f)
-                    rapidapi_config = api_keys_file.get("rapidapi", {})
-                    api_key = rapidapi_config.get("api_key")
-                    if api_key:
-                        logger.info("Loaded RapidAPI key from config file")
-                        return api_key
             
             logger.warning("RapidAPI key not found")
             return None

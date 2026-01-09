@@ -1,5 +1,4 @@
 """RAG service for conversational chat with context and expert types."""
-import json
 import os
 from services.base_service import BaseService
 from typing import Dict, Any, Optional, List
@@ -8,6 +7,7 @@ from anthropic import AsyncAnthropic
 from config.settings import settings
 from config.persona_loader import load_persona_config, get_current_persona_name
 from config.expert_types_loader import get_expert_type
+from config.api_key_loader import load_api_keys
 from database.base import AsyncSessionLocal
 from database.models import ChatMessage
 from sqlalchemy import select, desc
@@ -21,34 +21,36 @@ class RAGService(BaseService):
         self.client = None
         self.async_client = None
         self.persona_config = None
-        self._load_api_key()
-        # Persona config will be loaded async on first use
-        self.persona_config = None
+        # API key will be loaded async on first use
+        self._api_key_loaded = False
     
-    def _load_api_key(self):
-        """Load API key from config file or environment."""
+    async def _load_api_key(self):
+        """Load API key from database or environment."""
+        if self._api_key_loaded:
+            return
+            
         api_key = settings.ai_api_key
         
-        # Try to load from api_keys.json file
+        # Try to load from database
         if not api_key:
             try:
-                api_keys_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), settings.api_keys_file)
-                if os.path.exists(api_keys_path):
-                    with open(api_keys_path, 'r') as f:
-                        api_keys = json.load(f)
-                        api_key = api_keys.get("anthropic", {}).get("api_key")
-                        if api_key:
-                            self.logger.info("Loaded Anthropic API key from config file")
+                api_keys_config = await load_api_keys()
+                api_key = api_keys_config.get("anthropic", {}).get("api_key")
+                if api_key:
+                    self.logger.info("Loaded Anthropic API key from database")
             except Exception as e:
-                self.logger.warning(f"Could not load API key from config file: {e}")
+                self.logger.warning(f"Could not load API key from database: {e}")
         
         # Fallback to environment variable
         if not api_key:
             api_key = os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                self.logger.info("Loaded Anthropic API key from environment")
         
         if api_key:
             self.client = anthropic.Anthropic(api_key=api_key)
             self.async_client = AsyncAnthropic(api_key=api_key)
+            self._api_key_loaded = True
         else:
             self.logger.warning("No Anthropic API key found. RAG service will return placeholder responses.")
     
@@ -157,6 +159,7 @@ This is essential for natural, focused conversation flow.
             - query: str - The original query
             - expert_type: str - The expert type used
         """
+        await self._load_api_key()
         await self._ensure_persona_config()
         self.validate_input(input_data, ["query"])
         
@@ -166,7 +169,7 @@ This is essential for natural, focused conversation flow.
         
         if not self.async_client:
             return {
-                "answer": "RAG service is not configured. Please add your Anthropic API key.",
+                "answer": "RAG service is not configured. Please add your Anthropic API key in Settings.",
                 "query": query,
                 "expert_type": expert_type,
                 "error": "no_api_key"
@@ -265,7 +268,7 @@ This is essential for natural, focused conversation flow.
         messages = input_data.get("messages", [])  # Pre-loaded conversation history
         
         if not self.client:
-            yield "RAG service is not configured. Please add your Anthropic API key."
+            yield "RAG service is not configured. Please add your Anthropic API key in Settings."
             return
         
         try:

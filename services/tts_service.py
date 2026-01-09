@@ -16,22 +16,22 @@ class TTSService:
     
     def __init__(self):
         self.fish_api_key = None
-        self._load_api_key()
+        self._api_key_loaded = False
     
-    def _load_api_key(self):
-        """Load Fish Audio API key from config file."""
+    async def _load_api_key(self):
+        """Load Fish Audio API key from database."""
+        if self._api_key_loaded:
+            return
+            
         try:
-            from config.settings import settings
-            import os
-            api_keys_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), settings.api_keys_file)
-            if os.path.exists(api_keys_path):
-                with open(api_keys_path, 'r') as f:
-                    api_keys = json.load(f)
-                    self.fish_api_key = api_keys.get("fish_audio", {}).get("api_key")
-                    if self.fish_api_key:
-                        logger.info("Fish Audio API key loaded")
-                    else:
-                        logger.warning("Fish Audio API key not found in config")
+            from config.api_key_loader import load_api_keys
+            api_keys_config = await load_api_keys()
+            self.fish_api_key = api_keys_config.get("fish_audio", {}).get("api_key")
+            if self.fish_api_key:
+                logger.info("Fish Audio API key loaded from database")
+                self._api_key_loaded = True
+            else:
+                logger.warning("Fish Audio API key not found in database")
         except Exception as e:
             logger.error(f"Error loading Fish Audio API key: {e}")
     
@@ -51,6 +51,8 @@ class TTSService:
         Returns:
             bytes: Audio data or None if error
         """
+        await self._load_api_key()
+        
         if not self.fish_api_key:
             logger.error("Fish Audio API key not configured")
             return None
@@ -103,6 +105,8 @@ class TTSService:
         Yields:
             bytes: Audio chunks as they are generated
         """
+        await self._load_api_key()
+        
         if not self.fish_api_key:
             logger.error("Fish Audio API key not configured")
             return
@@ -163,6 +167,8 @@ class TTSService:
         Returns:
             Tuple of (audio bytes or None, filepath or None if error)
         """
+        await self._load_api_key()
+        
         if not self.fish_api_key:
             logger.error("Fish Audio API key not configured")
             return (None, None)
