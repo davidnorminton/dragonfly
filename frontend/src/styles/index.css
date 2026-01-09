@@ -1987,13 +1987,14 @@ body {
   pointer-events: auto;
   position: absolute;
   top: 0;
-  right: 0;
+  left: 0;
   width: 50%;
   height: calc(100vh - 48px);
   z-index: 1;
   background: #0a0a0f;
   overflow-y: auto;
   visibility: visible !important;
+  transition: left 0.8s ease;
 }
 
 .app-shell.ai-focus .left-section {
