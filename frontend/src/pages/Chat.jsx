@@ -182,7 +182,19 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
         setIsWaiting(false);
         setPendingUserMessage(null);
         await reloadHistory();
-        // Reload session titles after new message
+        // Reload session title for current session (AI may have generated a new title)
+        try {
+          const titleData = await chatAPI.getSessionTitle(currentSessionId);
+          if (titleData.success && titleData.title) {
+            setSessionTitles(prev => ({
+              ...prev,
+              [currentSessionId]: titleData.title
+            }));
+          }
+        } catch (err) {
+          console.error('Error loading session title:', err);
+        }
+        // Also reload all session titles
         try {
           const sessions = await chatAPI.getHistory(100, 0, null, null, null);
           const uniqueSessions = new Set();

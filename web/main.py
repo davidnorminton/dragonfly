@@ -4147,7 +4147,7 @@ async def send_chat_message(request: Request):
                         )
                         message_id = assistant_msg.id
                         
-                        # Auto-generate title from first user message if session doesn't have one
+                        # Auto-generate title using AI from first conversation if session doesn't have one
                         async with AsyncSessionLocal() as session:
                             session_result = await session.execute(
                                 select(ChatSession).where(ChatSession.session_id == session_key)
@@ -4155,32 +4155,93 @@ async def send_chat_message(request: Request):
                             chat_session = session_result.scalar_one_or_none()
                             
                             if not chat_session or not chat_session.title:
-                                # Get first user message to use as title
-                                first_msg_result = await session.execute(
-                                    select(ChatMessage)
+                                # Check if this is the first assistant message in this conversation
+                                assistant_count_result = await session.execute(
+                                    select(func.count(ChatMessage.id))
                                     .where(ChatMessage.session_id == session_key)
-                                    .where(ChatMessage.role == "user")
-                                    .order_by(ChatMessage.created_at)
-                                    .limit(1)
+                                    .where(ChatMessage.role == "assistant")
                                 )
-                                first_msg = first_msg_result.scalar_one_or_none()
+                                assistant_count = assistant_count_result.scalar() or 0
                                 
-                                if first_msg:
-                                    # Use first 50 chars of first message as title
-                                    auto_title = first_msg.message[:50].strip()
-                                    if len(first_msg.message) > 50:
-                                        auto_title += "..."
-                                    
-                                    if chat_session:
-                                        chat_session.title = auto_title
-                                        chat_session.updated_at = datetime.now(timezone.utc)
-                                    else:
-                                        chat_session = ChatSession(
-                                            session_id=session_key,
-                                            title=auto_title
+                                # Only generate title on first assistant response
+                                if assistant_count == 1:
+                                    try:
+                                        # Get the first user message
+                                        first_user_result = await session.execute(
+                                            select(ChatMessage)
+                                            .where(ChatMessage.session_id == session_key)
+                                            .where(ChatMessage.role == "user")
+                                            .order_by(ChatMessage.created_at)
+                                            .limit(1)
                                         )
-                                        session.add(chat_session)
-                                    await session.commit()
+                                        first_user_msg = first_user_result.scalar_one_or_none()
+                                        
+                                        if first_user_msg:
+                                            # Generate title using AI based on the conversation
+                                            ai_service = AIService()
+                                            await ai_service.reload_persona_config()
+                                            
+                                            title_prompt = f"Based on this conversation, generate a concise title (maximum 25 characters, no quotes or punctuation at the end):\n\nUser: {first_user_msg.message}\nAssistant: {full_response[:200]}"
+                                            
+                                            title_result = await ai_service.execute_with_system_prompt(
+                                                question=title_prompt,
+                                                system_prompt="You are a helpful assistant that generates concise, descriptive titles for conversations. Return only the title text, no quotes, no punctuation at the end, maximum 25 characters.",
+                                                max_tokens=50
+                                            )
+                                            
+                                            auto_title = title_result.get("answer", "").strip()
+                                            # Remove quotes if present
+                                            auto_title = auto_title.strip('"\'')
+                                            # Limit to 25 characters
+                                            if len(auto_title) > 25:
+                                                auto_title = auto_title[:25].strip()
+                                            # Remove trailing punctuation
+                                            auto_title = auto_title.rstrip('.,!?;:')
+                                            
+                                            # Fallback to first user message if AI generation failed
+                                            if not auto_title or len(auto_title) < 3:
+                                                auto_title = first_user_msg.message[:25].strip()
+                                                if len(first_user_msg.message) > 25:
+                                                    auto_title += "..."
+                                            
+                                            if chat_session:
+                                                chat_session.title = auto_title
+                                                chat_session.updated_at = datetime.now(timezone.utc)
+                                            else:
+                                                chat_session = ChatSession(
+                                                    session_id=session_key,
+                                                    title=auto_title
+                                                )
+                                                session.add(chat_session)
+                                            await session.commit()
+                                            logger.info(f"Generated AI title for session {session_key}: {auto_title}")
+                                    except Exception as e:
+                                        logger.error(f"Error generating AI title, using fallback: {e}", exc_info=True)
+                                        # Fallback to first user message
+                                        first_msg_result = await session.execute(
+                                            select(ChatMessage)
+                                            .where(ChatMessage.session_id == session_key)
+                                            .where(ChatMessage.role == "user")
+                                            .order_by(ChatMessage.created_at)
+                                            .limit(1)
+                                        )
+                                        first_msg = first_msg_result.scalar_one_or_none()
+                                        
+                                        if first_msg:
+                                            auto_title = first_msg.message[:25].strip()
+                                            if len(first_msg.message) > 25:
+                                                auto_title += "..."
+                                            
+                                            if chat_session:
+                                                chat_session.title = auto_title
+                                                chat_session.updated_at = datetime.now(timezone.utc)
+                                            else:
+                                                chat_session = ChatSession(
+                                                    session_id=session_key,
+                                                    title=auto_title
+                                                )
+                                                session.add(chat_session)
+                                            await session.commit()
                     except Exception as e:
                         logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
                         assistant_msg = None
@@ -4243,7 +4304,7 @@ async def send_chat_message(request: Request):
                         )
                         message_id = assistant_msg.id
                         
-                        # Auto-generate title from first user message if session doesn't have one
+                        # Auto-generate title using AI from first conversation if session doesn't have one
                         async with AsyncSessionLocal() as session:
                             session_result = await session.execute(
                                 select(ChatSession).where(ChatSession.session_id == session_key)
@@ -4251,32 +4312,93 @@ async def send_chat_message(request: Request):
                             chat_session = session_result.scalar_one_or_none()
                             
                             if not chat_session or not chat_session.title:
-                                # Get first user message to use as title
-                                first_msg_result = await session.execute(
-                                    select(ChatMessage)
+                                # Check if this is the first assistant message in this conversation
+                                assistant_count_result = await session.execute(
+                                    select(func.count(ChatMessage.id))
                                     .where(ChatMessage.session_id == session_key)
-                                    .where(ChatMessage.role == "user")
-                                    .order_by(ChatMessage.created_at)
-                                    .limit(1)
+                                    .where(ChatMessage.role == "assistant")
                                 )
-                                first_msg = first_msg_result.scalar_one_or_none()
+                                assistant_count = assistant_count_result.scalar() or 0
                                 
-                                if first_msg:
-                                    # Use first 50 chars of first message as title
-                                    auto_title = first_msg.message[:50].strip()
-                                    if len(first_msg.message) > 50:
-                                        auto_title += "..."
-                                    
-                                    if chat_session:
-                                        chat_session.title = auto_title
-                                        chat_session.updated_at = datetime.now(timezone.utc)
-                                    else:
-                                        chat_session = ChatSession(
-                                            session_id=session_key,
-                                            title=auto_title
+                                # Only generate title on first assistant response
+                                if assistant_count == 1:
+                                    try:
+                                        # Get the first user message
+                                        first_user_result = await session.execute(
+                                            select(ChatMessage)
+                                            .where(ChatMessage.session_id == session_key)
+                                            .where(ChatMessage.role == "user")
+                                            .order_by(ChatMessage.created_at)
+                                            .limit(1)
                                         )
-                                        session.add(chat_session)
-                                    await session.commit()
+                                        first_user_msg = first_user_result.scalar_one_or_none()
+                                        
+                                        if first_user_msg:
+                                            # Generate title using AI based on the conversation
+                                            ai_service = AIService()
+                                            await ai_service.reload_persona_config()
+                                            
+                                            title_prompt = f"Based on this conversation, generate a concise title (maximum 25 characters, no quotes or punctuation at the end):\n\nUser: {first_user_msg.message}\nAssistant: {full_response[:200]}"
+                                            
+                                            title_result = await ai_service.execute_with_system_prompt(
+                                                question=title_prompt,
+                                                system_prompt="You are a helpful assistant that generates concise, descriptive titles for conversations. Return only the title text, no quotes, no punctuation at the end, maximum 25 characters.",
+                                                max_tokens=50
+                                            )
+                                            
+                                            auto_title = title_result.get("answer", "").strip()
+                                            # Remove quotes if present
+                                            auto_title = auto_title.strip('"\'')
+                                            # Limit to 25 characters
+                                            if len(auto_title) > 25:
+                                                auto_title = auto_title[:25].strip()
+                                            # Remove trailing punctuation
+                                            auto_title = auto_title.rstrip('.,!?;:')
+                                            
+                                            # Fallback to first user message if AI generation failed
+                                            if not auto_title or len(auto_title) < 3:
+                                                auto_title = first_user_msg.message[:25].strip()
+                                                if len(first_user_msg.message) > 25:
+                                                    auto_title += "..."
+                                            
+                                            if chat_session:
+                                                chat_session.title = auto_title
+                                                chat_session.updated_at = datetime.now(timezone.utc)
+                                            else:
+                                                chat_session = ChatSession(
+                                                    session_id=session_key,
+                                                    title=auto_title
+                                                )
+                                                session.add(chat_session)
+                                            await session.commit()
+                                            logger.info(f"Generated AI title for session {session_key}: {auto_title}")
+                                    except Exception as e:
+                                        logger.error(f"Error generating AI title, using fallback: {e}", exc_info=True)
+                                        # Fallback to first user message
+                                        first_msg_result = await session.execute(
+                                            select(ChatMessage)
+                                            .where(ChatMessage.session_id == session_key)
+                                            .where(ChatMessage.role == "user")
+                                            .order_by(ChatMessage.created_at)
+                                            .limit(1)
+                                        )
+                                        first_msg = first_msg_result.scalar_one_or_none()
+                                        
+                                        if first_msg:
+                                            auto_title = first_msg.message[:25].strip()
+                                            if len(first_msg.message) > 25:
+                                                auto_title += "..."
+                                            
+                                            if chat_session:
+                                                chat_session.title = auto_title
+                                                chat_session.updated_at = datetime.now(timezone.utc)
+                                            else:
+                                                chat_session = ChatSession(
+                                                    session_id=session_key,
+                                                    title=auto_title
+                                                )
+                                                session.add(chat_session)
+                                            await session.commit()
                     except Exception as e:
                         logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
                         assistant_msg = None
