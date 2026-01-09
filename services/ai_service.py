@@ -1,12 +1,15 @@
 """AI service for general questions using Anthropic Claude API."""
 import os
 from services.base_service import BaseService
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import anthropic
 from anthropic import AsyncAnthropic
 from config.settings import settings
 from config.persona_loader import load_persona_config, get_current_persona_name
 from config.api_key_loader import load_api_keys
+from database.base import AsyncSessionLocal
+from database.models import ChatMessage
+from sqlalchemy import select, desc
 import asyncio
 
 
@@ -72,6 +75,36 @@ class AIService(BaseService):
         """Ensure persona config is loaded."""
         if self.persona_config is None:
             await self._load_persona_config()
+    
+    async def _load_conversation_history(self, session_id: str, limit: int = 50) -> List[Dict[str, str]]:
+        """
+        Load conversation history for a session with prioritized recent messages.
+        Provides context for maintaining conversation continuity.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(ChatMessage)
+                    .where(ChatMessage.session_id == session_id)
+                    .order_by(desc(ChatMessage.created_at))
+                    .limit(limit)
+                )
+                messages = result.scalars().all()
+                
+                # Convert to list of message dicts, reverse to get chronological order
+                history = []
+                for msg in reversed(messages):
+                    if msg.role in ["user", "assistant"]:
+                        history.append({
+                            "role": msg.role,
+                            "content": msg.message
+                        })
+                
+                self.logger.debug(f"Loaded {len(history)} messages from conversation history for session {session_id}")
+                return history
+        except Exception as e:
+            self.logger.error(f"Error loading conversation history: {e}", exc_info=True)
+            return []
     
     async def execute_with_system_prompt(self, question: str, system_prompt: str, max_tokens: int = 1024) -> Dict[str, Any]:
         """
@@ -140,6 +173,8 @@ class AIService(BaseService):
         
         Expected input:
             - question: str - The question to ask
+            - session_id: str (optional) - Session ID to load conversation history
+            - messages: List[Dict] (optional) - Pre-loaded conversation history
         
         Returns:
             - answer: str - The AI's response
@@ -149,6 +184,8 @@ class AIService(BaseService):
         self.validate_input(input_data, ["question"])
         
         question = input_data["question"]
+        session_id = input_data.get("session_id")
+        conversation_history = input_data.get("messages", [])
         
         if not self.client:
             return {
@@ -170,6 +207,10 @@ class AIService(BaseService):
                     "error": "no_api_key"
                 }
             
+            # Load conversation history if session_id provided and no messages passed
+            if session_id and not conversation_history:
+                conversation_history = await self._load_conversation_history(session_id, limit=50)
+            
             # Get persona settings or use defaults
             persona_settings = {}
             system_prompt = None
@@ -186,26 +227,25 @@ class AIService(BaseService):
                 
                 # Get system prompt if present (Anthropic uses top-level system parameter, not message role)
                 system_prompt = anthropic_cfg.get("prompt_context")
-                
-                # Build messages array (only user/assistant roles, no system role)
-                messages = [{
-                    "role": "user",
-                    "content": question
-                }]
             else:
                 # Default behavior without persona
-                messages = [{
-                    "role": "user",
-                    "content": question
-                }]
                 persona_settings = {
                     "model": settings.ai_model,
                     "max_tokens": 1024
                 }
             
+            # Build messages array with conversation history + current question
+            messages = conversation_history.copy() if conversation_history else []
+            messages.append({
+                "role": "user",
+                "content": question
+            })
+            
             # Add system parameter if we have a system prompt
             if system_prompt:
                 persona_settings["system"] = system_prompt
+            
+            self.logger.debug(f"Sending {len(messages)} messages to Claude API (including {len(conversation_history)} from history)")
             
             message = await self.async_client.messages.create(
                 messages=messages,
@@ -260,6 +300,12 @@ class AIService(BaseService):
         try:
             self.logger.info(f"Processing AI question with streaming: {question}")
             
+            # Load conversation history if session_id provided
+            session_id = input_data.get("session_id")
+            conversation_history = input_data.get("messages", [])
+            if session_id and not conversation_history:
+                conversation_history = await self._load_conversation_history(session_id, limit=50)
+            
             # Get persona settings or use defaults
             persona_settings = {}
             system_prompt = None
@@ -276,26 +322,25 @@ class AIService(BaseService):
                 
                 # Get system prompt if present (Anthropic uses top-level system parameter, not message role)
                 system_prompt = anthropic_cfg.get("prompt_context")
-                
-                # Build messages array (only user/assistant roles, no system role)
-                messages = [{
-                    "role": "user",
-                    "content": question
-                }]
             else:
                 # Default behavior without persona
-                messages = [{
-                    "role": "user",
-                    "content": question
-                }]
                 persona_settings = {
                     "model": settings.ai_model,
                     "max_tokens": 1024
                 }
             
+            # Build messages array with conversation history + current question
+            messages = conversation_history.copy() if conversation_history else []
+            messages.append({
+                "role": "user",
+                "content": question
+            })
+            
             # Add system parameter if we have a system prompt
             if system_prompt:
                 persona_settings["system"] = system_prompt
+            
+            self.logger.debug(f"Sending {len(messages)} messages to Claude API (including {len(conversation_history)} from history)")
             
             # Stream response from Claude API (synchronous iterator)
             with self.client.messages.stream(
@@ -315,14 +360,19 @@ class AIService(BaseService):
         
         Expected input:
             - question: str - The question to ask
+            - session_id: str (optional) - Session ID to load conversation history
+            - messages: List[Dict] (optional) - Pre-loaded conversation history
         
         Yields:
             - str - Chunks of the AI's response
         """
         await self._load_api_key()
+        await self._ensure_persona_config()
         self.validate_input(input_data, ["question"])
         
         question = input_data["question"]
+        session_id = input_data.get("session_id")
+        conversation_history = input_data.get("messages", [])
         
         if not self.async_client:
             yield "AI service is not configured. Please add your Anthropic API key in Settings."
@@ -330,6 +380,10 @@ class AIService(BaseService):
         
         try:
             self.logger.info(f"Processing AI question with async streaming: {question}")
+            
+            # Load conversation history if session_id provided and no messages passed
+            if session_id and not conversation_history:
+                conversation_history = await self._load_conversation_history(session_id, limit=50)
             
             # Get persona settings or use defaults
             persona_settings = {}
@@ -347,24 +401,24 @@ class AIService(BaseService):
                 
                 # Get system prompt if present
                 system_prompt = anthropic_cfg.get("prompt_context")
-                
-                messages = [{
-                    "role": "user",
-                    "content": question
-                }]
             else:
-                messages = [{
-                    "role": "user",
-                    "content": question
-                }]
                 persona_settings = {
                     "model": settings.ai_model,
                     "max_tokens": 1024
                 }
             
+            # Build messages array with conversation history + current question
+            messages = conversation_history.copy() if conversation_history else []
+            messages.append({
+                "role": "user",
+                "content": question
+            })
+            
             # Add system parameter if we have a system prompt
             if system_prompt:
                 persona_settings["system"] = system_prompt
+            
+            self.logger.debug(f"Sending {len(messages)} messages to Claude API (including {len(conversation_history)} from history)")
             
             # Stream response from Claude API (async iterator)
             async with self.async_client.messages.stream(

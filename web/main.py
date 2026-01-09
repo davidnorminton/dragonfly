@@ -4113,7 +4113,15 @@ async def send_chat_message(request: Request):
         if stream and actual_service_name == "ai_service":
             ai_service = AIService()
             await ai_service.reload_persona_config()  # Ensure we have the latest persona
-            input_data = {"question": message}
+            
+            # Load conversation history for context
+            conversation_history = await ai_service._load_conversation_history(session_key, limit=50)
+            
+            input_data = {
+                "question": message,
+                "session_id": session_key,
+                "messages": conversation_history
+            }
             
             async def generate_response():
                 full_response = ""
