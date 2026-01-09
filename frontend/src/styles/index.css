@@ -4361,7 +4361,7 @@ body {
 /* Sidebar */
 .chatgpt-sidebar {
   width: 260px;
-  background: #1a1a2a;
+  background: transparent;
   display: flex;
   flex-direction: column;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
@@ -4622,7 +4622,7 @@ body {
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: #1a1a2a;
+  background: transparent;
 }
 
 .chatgpt-menu-btn {
@@ -4788,8 +4788,8 @@ body {
 /* Input Area */
 .chatgpt-input-container {
   padding: 24px;
-  background: #343541;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  border-top: none;
 }
 
 .chatgpt-input-wrapper {
@@ -4798,15 +4798,15 @@ body {
   gap: 12px;
   max-width: 768px;
   margin: 0 auto;
-  background: #40414f;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 24px;
   padding: 12px 16px;
   transition: border-color 0.2s;
 }
 
 .chatgpt-input-wrapper:focus-within {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(59, 130, 246, 0.6);
 }
 
 .chatgpt-input {
@@ -4814,7 +4814,7 @@ body {
   background: transparent;
   border: none;
   outline: none;
-  color: #ececf1;
+  color: #e0e0e0;
   font-size: 16px;
   line-height: 1.5;
 }
@@ -4827,6 +4827,30 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.chatgpt-input-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(59, 130, 246, 0.2);
+  border: none;
+  border-radius: 8px;
+  color: #3b82f6;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.chatgpt-input-actions button:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+
+.chatgpt-input-actions button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .chatgpt-input-icon {
@@ -4845,7 +4869,7 @@ body {
 
 .chatgpt-input-icon:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
-  color: #ececf1;
+  color: #e0e0e0;
 }
 
 .chatgpt-input-icon:disabled {
