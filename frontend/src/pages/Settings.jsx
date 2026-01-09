@@ -1616,17 +1616,17 @@ export function SettingsPage({ onNavigate }) {
               {success && <div className="settings-message success">{success}</div>}
               
               {loading && !tableData && (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                <div className="database-loading-message">
                   Loading tables...
                 </div>
               )}
               {!loading && databaseTables.length === 0 && (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                <div className="database-loading-message">
                   No tables found
                 </div>
               )}
               {!loading && databaseTables.length > 0 && (
-                <div className="database-tables-list" style={{ display: 'grid', gap: '12px', padding: '20px' }}>
+                <div className="database-tables-list">
                       {databaseTables.map((table) => (
                         <div key={table.name}>
                           <div
@@ -1640,27 +1640,17 @@ export function SettingsPage({ onNavigate }) {
                               }
                             }}
                             className={`database-table-card ${selectedTable === table.name ? 'active' : ''}`}
-                            style={{
-                              padding: '16px',
-                              background: selectedTable === table.name 
-                                ? 'rgba(59, 130, 246, 0.2)' 
-                                : 'rgba(255, 255, 255, 0.03)',
-                              border: `1px solid ${selectedTable === table.name ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`,
-                              borderRadius: '8px',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s'
-                            }}
                           >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div className="database-table-card-header">
                               <div>
-                                <div style={{ fontWeight: 600, color: '#fff', marginBottom: '4px' }}>
+                                <div className="database-table-name">
                                   {table.name}
                                 </div>
-                                <div style={{ fontSize: '0.85em', color: 'rgba(255,255,255,0.5)' }}>
+                                <div className="database-table-info">
                                   {table.row_count} rows • {table.columns.length} columns
                                 </div>
                               </div>
-                              <div style={{ fontSize: '0.9em', color: 'rgba(255,255,255,0.4)' }}>
+                              <div className="database-table-arrow">
                                 {selectedTable === table.name ? '▼' : '→'}
                               </div>
                             </div>
@@ -1668,23 +1658,16 @@ export function SettingsPage({ onNavigate }) {
                           
                           {/* Table Data View - Inline below the clicked table */}
                           {selectedTable === table.name && (
-                            <div style={{ 
-                              marginTop: '12px',
-                              padding: '16px',
-                              background: 'rgba(0,0,0,0.3)',
-                              borderRadius: '8px',
-                              border: '1px solid rgba(59, 130, 246, 0.3)',
-                              overflow: 'hidden'
-                            }}>
+                            <div className="database-table-data-container">
 
                               {loadingTableData && !tableData && (
-                                <div style={{ padding: '40px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                                <div className="database-loading-data">
                                   Loading data...
                                 </div>
                               )}
 
                               {!loadingTableData && !tableData && (
-                                <div style={{ padding: '40px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                                <div className="database-loading-data">
                                   {error ? `Error: ${error}` : 'No data available'}
                                 </div>
                               )}
@@ -1693,23 +1676,13 @@ export function SettingsPage({ onNavigate }) {
                                 <div className="database-table-view">
                         {/* Data Table */}
                         {tableData.data && tableData.data.length === 0 ? (
-                          <div style={{ padding: '40px', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                          <div className="database-loading-data">
                             No data in this table
                           </div>
                         ) : tableData.data && tableData.data.length > 0 ? (
                           <>
-                            <div style={{ 
-                              overflowX: 'auto', 
-                              marginBottom: '16px',
-                              maxWidth: '100%',
-                              WebkitOverflowScrolling: 'touch'
-                            }}>
-                              <table style={{ 
-                                width: '100%', 
-                                minWidth: '600px',
-                                borderCollapse: 'collapse', 
-                                fontSize: '0.9em' 
-                              }}>
+                            <div className="database-table-scroll-container">
+                              <table className="database-table">
                                 <thead>
                                   <tr style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
                                     {tableData.columns.map((col) => (
@@ -1739,19 +1712,13 @@ export function SettingsPage({ onNavigate }) {
                                     return (
                                       <tr
                                         key={idx}
-                                        style={{
-                                          borderBottom: '1px solid rgba(255,255,255,0.05)',
-                                          background: editingCell?.rowId === rowId ? 'rgba(59, 130, 246, 0.1)' : 'transparent'
-                                        }}
+                                        className={editingCell?.rowId === rowId ? 'editing' : ''}
                                       >
                                         {tableData.columns.map((col) => {
                                           const isEditing = editingCell?.rowId === rowId && editingCell?.column === col;
                                           const value = editedRowData[col] !== undefined ? editedRowData[col] : row[col];
                                           return (
-                                            <td
-                                              key={col}
-                                              style={{ padding: '8px 12px', color: 'rgba(255,255,255,0.8)' }}
-                                            >
+                                            <td key={col}>
                                               {isEditing ? (
                                                 <input
                                                   type="text"
@@ -1893,27 +1860,27 @@ export function SettingsPage({ onNavigate }) {
 
                             {/* Pagination */}
                             {tableData.pagination.total_pages > 1 && (
-                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '20px' }}>
-                                <button
-                                  onClick={() => setTablePage(p => Math.max(1, p - 1))}
-                                  disabled={tableData.pagination.page === 1}
-                                  className="save-button"
-                                  style={{ padding: '6px 12px', fontSize: '0.9em' }}
-                                >
-                                  ← Previous
-                                </button>
-                                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.9em' }}>
+                              <div className="database-pagination">
+                                <span className="database-pagination-info">
                                   Page {tableData.pagination.page} of {tableData.pagination.total_pages}
                                   {' '}({tableData.pagination.total_rows} total rows)
                                 </span>
-                                <button
-                                  onClick={() => setTablePage(p => Math.min(tableData.pagination.total_pages, p + 1))}
-                                  disabled={tableData.pagination.page === tableData.pagination.total_pages}
-                                  className="save-button"
-                                  style={{ padding: '6px 12px', fontSize: '0.9em' }}
-                                >
-                                  Next →
-                                </button>
+                                <div className="database-pagination-controls">
+                                  <button
+                                    onClick={() => setTablePage(p => Math.max(1, p - 1))}
+                                    disabled={tableData.pagination.page === 1}
+                                    className="save-button database-pagination-button"
+                                  >
+                                    ← Previous
+                                  </button>
+                                  <button
+                                    onClick={() => setTablePage(p => Math.min(tableData.pagination.total_pages, p + 1))}
+                                    disabled={tableData.pagination.page === tableData.pagination.total_pages}
+                                    className="save-button database-pagination-button"
+                                  >
+                                    Next →
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </>

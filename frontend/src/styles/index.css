@@ -5499,3 +5499,194 @@ body {
   height: 200px;
   position: relative;
 }
+
+/* Database Management */
+.database-loading-message {
+  padding: 20px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.database-loading-data {
+  padding: 40px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.database-tables-list {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+}
+
+.database-table-card {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.database-table-card.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.database-table-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.database-table-name {
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.database-table-info {
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.database-table-arrow {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.database-table-data-container {
+  margin-top: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  overflow: hidden;
+}
+
+.database-table-scroll-container {
+  overflow-x: auto;
+  margin-bottom: 16px;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.database-table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.database-table th {
+  background: rgba(59, 130, 246, 0.1);
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  border-bottom: 2px solid rgba(59, 130, 246, 0.3);
+  position: sticky;
+  top: 0;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.database-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.database-table tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.database-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.database-pagination-info {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.database-pagination-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.database-pagination-button {
+  padding: 6px 12px;
+  font-size: 0.9em;
+}
+
+.database-table tr.editing {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.database-table-cell-editable {
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.database-table-cell-editable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.database-table-cell-editable.non-editable {
+  cursor: default;
+}
+
+.database-table-cell-editable.non-editable:hover {
+  background: transparent;
+}
+
+.database-edit-input {
+  width: 100%;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.9em;
+}
+
+.database-edit-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.database-actions-cell {
+  padding: 8px;
+}
+
+.database-button-group {
+  display: flex;
+  gap: 4px;
+}
+
+.database-edit-button {
+  padding: 4px 8px;
+  font-size: 0.85em;
+  min-width: 50px;
+}
+
+.database-cancel-button {
+  padding: 4px 8px;
+  font-size: 0.85em;
+  min-width: 50px;
+  background: rgba(255, 255, 255, 0.1);
+}
