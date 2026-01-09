@@ -4695,61 +4695,65 @@ body {
 
 .chatgpt-message {
   display: flex;
-  gap: 24px;
-  padding: 20px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 32px 24px;
+  border-bottom: none;
 }
 
 .chatgpt-message.user {
-  background: #343541;
+  background: transparent;
+  justify-content: flex-end;
+  padding: 24px;
 }
 
 .chatgpt-message.assistant {
-  background: #444654;
+  background: transparent;
+  justify-content: center;
+  padding: 48px 24px;
 }
 
 .chatgpt-message-avatar {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  margin-left: 24px;
+  display: none;
 }
 
 .chatgpt-avatar-user {
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  background: #10a37f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-  color: white;
+  display: none;
 }
 
 .chatgpt-avatar-assistant {
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  background: #19c37d;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
+  display: none;
 }
 
 .chatgpt-message-content {
   flex: 1;
-  padding-right: 24px;
-  max-width: 768px;
+  max-width: 100%;
 }
 
-.chatgpt-message-text {
+.chatgpt-message.user .chatgpt-message-content {
+  max-width: fit-content;
+}
+
+.chatgpt-message.assistant .chatgpt-message-content {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.chatgpt-message.user .chatgpt-message-text {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 12px 20px;
+  border-radius: 24px;
   font-size: 16px;
-  line-height: 1.75;
-  color: #ececf1;
+  line-height: 1.5;
+  color: #e0e0e0;
   word-wrap: break-word;
+  display: inline-block;
+}
+
+.chatgpt-message.assistant .chatgpt-message-text {
+  font-size: 16px;
+  line-height: 1.8;
+  color: #e0e0e0;
+  word-wrap: break-word;
+  text-align: left;
 }
 
 .chatgpt-typing-indicator {
