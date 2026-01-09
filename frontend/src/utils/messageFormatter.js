@@ -102,7 +102,22 @@ export function formatMessage(text) {
       }
       
       const languageLabel = part.language !== 'plaintext' ? part.language : '';
-      return `<div class="code-block-wrapper">${languageLabel ? `<div class="code-block-language">${languageLabel}</div>` : ''}<pre><code class="hljs language-${part.language}">${highlightedCode}</code></pre></div>`;
+      const codeId = `code-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // Store original code content - use base64 encoding to avoid HTML attribute issues
+      const base64Code = btoa(unescape(encodeURIComponent(part.content)));
+      return `<div class="code-block-wrapper">
+        <div class="code-block-header">
+          ${languageLabel ? `<div class="code-block-language">${languageLabel}</div>` : '<div></div>'}
+          <button class="code-block-copy-btn" data-code-base64="${base64Code}" onclick="copyCodeBlock(this)" title="Copy code">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span class="copy-text">Copy</span>
+          </button>
+        </div>
+        <pre><code class="hljs language-${part.language}" id="${codeId}">${highlightedCode}</code></pre>
+      </div>`;
     } else {
       // Process text: handle inline code, escape HTML, convert newlines
       let processedText = part.content;

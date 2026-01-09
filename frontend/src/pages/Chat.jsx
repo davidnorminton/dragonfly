@@ -42,6 +42,60 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     console.log('[Chat] Session ID changed:', sessionId, 'currentSessionId:', currentSessionId, 'messages count:', messages.length);
   }, [sessionId, currentSessionId, messages.length]);
 
+  // Set up copy button functionality
+  useEffect(() => {
+    // Make copy function available globally for onclick handlers
+    window.copyCodeBlock = (button) => {
+      const base64Code = button.getAttribute('data-code-base64');
+      if (!base64Code) return;
+      
+      try {
+        // Decode base64 to get original code
+        const decodedCode = decodeURIComponent(escape(atob(base64Code)));
+        
+        // Copy to clipboard
+        navigator.clipboard.writeText(decodedCode).then(() => {
+          // Visual feedback
+          const copyText = button.querySelector('.copy-text');
+          const originalText = copyText.textContent;
+          copyText.textContent = 'Copied!';
+          button.classList.add('copied');
+          
+          setTimeout(() => {
+            copyText.textContent = originalText;
+            button.classList.remove('copied');
+          }, 2000);
+        }).catch(err => {
+          console.error('Failed to copy code:', err);
+          // Fallback for older browsers
+          const textarea = document.createElement('textarea');
+          textarea.value = decodedCode;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand('copy');
+            const copyText = button.querySelector('.copy-text');
+            copyText.textContent = 'Copied!';
+            setTimeout(() => {
+              copyText.textContent = 'Copy';
+            }, 2000);
+          } catch (e) {
+            console.error('Fallback copy failed:', e);
+          }
+          document.body.removeChild(textarea);
+        });
+      } catch (e) {
+        console.error('Failed to decode code:', e);
+      }
+    };
+    
+    return () => {
+      delete window.copyCodeBlock;
+    };
+  }, []);
+
   // Load chat sessions from API - but don't overwrite if we just added a new one
   const isAddingNewSessionRef = useRef(false);
   
