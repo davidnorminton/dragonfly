@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useChat } from '../hooks/useChat';
 import { chatAPI } from '../services/api';
 import { usePersonas } from '../hooks/usePersonas';
@@ -6,7 +6,7 @@ import { useExpertTypes } from '../hooks/useExpertTypes';
 import { formatMessage } from '../utils/messageFormatter';
 import 'highlight.js/styles/github-dark.css';
 
-export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '' }) {
+export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '', onSearchResultsChange }) {
   const [mode, setMode] = useState('qa');
   const [expertType, setExpertType] = useState('general');
   const [input, setInput] = useState('');
@@ -76,6 +76,47 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   // Load session presets from database when sessions are loaded
   // This is handled in the loadSessions useEffect below
   
+  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+  const inputRef = useRef(null);
+  const { currentPersona, currentTitle } = usePersonas();
+  const { expertTypes } = useExpertTypes();
+
+  // For chat page, use the base session ID directly (it starts with 'chat-')
+  // This allows all messages within a chat session to be linked together regardless of mode/expert type
+  // Only create a session ID if currentSessionId is set (user has selected/created a chat)
+  const sessionId = currentSessionId && currentSessionId.startsWith('chat-') ? currentSessionId : (currentSessionId ? `${currentSessionId}_${mode}_${expertType}` : null);
+
+  const { messages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory, addMessage } = useChat(sessionId, mode, currentPersona);
+  
+  // Get session display name helper function
+  const getSessionDisplayName = useCallback((sessionId) => {
+    // If we have a title, use it
+    if (sessionTitles[sessionId]) {
+      return sessionTitles[sessionId];
+    }
+    // For chat sessions, show session_id + timestamp as temp title
+    if (sessionId && sessionId.startsWith('chat-')) {
+      const timestamp = sessionId.replace('chat-', '');
+      const date = new Date(parseInt(timestamp));
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return sessionId || 'New Chat';
+  }, [sessionTitles]);
+
+  // Handle session selection
+  const handleSelectSession = useCallback((sessionId) => {
+    console.log('[Chat] Selecting session:', sessionId);
+    // Clear any pending/streaming messages when switching sessions
+    setPendingUserMessage(null);
+    setStreamingMessage(null);
+    // Stop editing if we were editing
+    setEditingSessionId(null);
+    // Switch to the selected session - this will trigger useChat to load its history
+    // Preset selection will be loaded by useEffect when currentSessionId changes
+    setCurrentSessionId(sessionId);
+  }, []);
+
   // Load preset selection for current session
   useEffect(() => {
     if (currentSessionId) {
@@ -94,18 +135,45 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
       setUseSystemContext(true);
     }
   }, [currentSessionId, sessionPresets]);
-  const messagesEndRef = useRef(null);
-  const chatContainerRef = useRef(null);
-  const inputRef = useRef(null);
-  const { currentPersona, currentTitle } = usePersonas();
-  const { expertTypes } = useExpertTypes();
 
-  // For chat page, use the base session ID directly (it starts with 'chat-')
-  // This allows all messages within a chat session to be linked together regardless of mode/expert type
-  // Only create a session ID if currentSessionId is set (user has selected/created a chat)
-  const sessionId = currentSessionId && currentSessionId.startsWith('chat-') ? currentSessionId : (currentSessionId ? `${currentSessionId}_${mode}_${expertType}` : null);
-
-  const { messages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory, addMessage } = useChat(sessionId, mode, currentPersona);
+  // Update search results for dropdown
+  useEffect(() => {
+    if (!onSearchResultsChange) return;
+    
+    if (!searchQuery.trim()) {
+      onSearchResultsChange([]);
+      return;
+    }
+    
+    const query = searchQuery.toLowerCase();
+    const filteredSessions = chatSessions.filter((session) => {
+      const title = sessionTitles[session] || getSessionDisplayName(session);
+      return title.toLowerCase().includes(query);
+    });
+    
+    const results = filteredSessions.slice(0, 10).map(session => {
+      const sessionPreset = sessionPresets[session];
+      let contextInfo = currentTitle || 'System persona';
+      
+      // If session has a preset, use preset name, otherwise use system persona
+      if (sessionPreset && !sessionPreset.useSystemContext && sessionPreset.presetId) {
+        const preset = promptPresets.find(p => p.id === sessionPreset.presetId);
+        if (preset) {
+          contextInfo = preset.name;
+        }
+      }
+      
+      return {
+        title: sessionTitles[session] || getSessionDisplayName(session),
+        subtitle: contextInfo,
+        onClick: () => {
+          handleSelectSession(session);
+        }
+      };
+    });
+    
+    onSearchResultsChange(results);
+  }, [searchQuery, chatSessions, sessionTitles, sessionPresets, promptPresets, currentTitle, onSearchResultsChange, getSessionDisplayName, handleSelectSession]);
   
   // Debug: log when sessionId changes
   useEffect(() => {
@@ -381,18 +449,6 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     });
   };
 
-  const handleSelectSession = (sessionId) => {
-    console.log('[Chat] Selecting session:', sessionId);
-    // Clear any pending/streaming messages when switching sessions
-    setPendingUserMessage(null);
-    setStreamingMessage(null);
-    // Stop editing if we were editing
-    setEditingSessionId(null);
-    // Switch to the selected session - this will trigger useChat to load its history
-    // Preset selection will be loaded by useEffect when currentSessionId changes
-    setCurrentSessionId(sessionId);
-  };
-
   const handleStartEditTitle = (sessionId, e) => {
     e.stopPropagation();
     setEditingSessionId(sessionId);
@@ -546,9 +602,11 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           return newPresets;
         });
         // Preset cleanup is handled by database deletion
-        // If it's the current session, switch to a new one
+        // If it's the current session, clear it without creating a new one
         if (sessionId === currentSessionId) {
-          handleNewChat();
+          setCurrentSessionId(null);
+          setPendingUserMessage(null);
+          setStreamingMessage(null);
         }
       } else {
         // Keep modal open and show error
@@ -717,20 +775,6 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
       return () => document.removeEventListener('click', handleClickOutside);
     }
   }, [openMenuId]);
-
-  const getSessionDisplayName = (sessionId) => {
-    // If we have a title, use it
-    if (sessionTitles[sessionId]) {
-      return sessionTitles[sessionId];
-    }
-    // For chat sessions, show session_id + timestamp as temp title
-    if (sessionId.startsWith('chat-')) {
-      const timestamp = sessionId.replace('chat-', '');
-      return `${sessionId} ${timestamp}`;
-    }
-    // Fallback: show first part of session ID
-    return sessionId.substring(0, 20) + '...';
-  };
 
   // Filter messages to only show those for the current session
   const filteredMessages = messages.filter(msg => {

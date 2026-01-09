@@ -1,10 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { usePersonas } from '../hooks/usePersonas';
 
-export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage = 'dashboard', onNavigate, onMusicSearch, onChatSearch }) {
+export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage = 'dashboard', onNavigate, onMusicSearch, onChatSearch, musicSearchResults, chatSearchResults }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef(null);
   const { currentTitle } = usePersonas();
+
+  // Close results when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Show results when there's a query and results
+  useEffect(() => {
+    const hasQuery = (activePage === 'music' || activePage === 'music-editor') ? searchQuery.trim() : chatSearchQuery.trim();
+    const hasResults = (activePage === 'music' || activePage === 'music-editor') 
+      ? (musicSearchResults && musicSearchResults.length > 0)
+      : (chatSearchResults && chatSearchResults.length > 0);
+    setShowResults(hasQuery && hasResults);
+  }, [searchQuery, chatSearchQuery, musicSearchResults, chatSearchResults, activePage]);
 
   return (
     <div className="top-bar">
@@ -76,7 +98,7 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
       </div>
       <div className="top-bar-center">
         {activePage === 'music' || activePage === 'music-editor' ? (
-          <div className="music-search-box">
+          <div className="music-search-box" ref={searchRef}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="search-icon">
               <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
             </svg>
@@ -88,11 +110,42 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
                 setSearchQuery(e.target.value);
                 if (onMusicSearch) onMusicSearch(e.target.value);
               }}
+              onFocus={() => {
+                if (musicSearchResults && musicSearchResults.length > 0 && searchQuery.trim()) {
+                  setShowResults(true);
+                }
+              }}
               className="music-search-input"
             />
+            {showResults && musicSearchResults && musicSearchResults.length > 0 && (
+              <div className="search-results-dropdown">
+                {musicSearchResults.slice(0, 10).map((result, idx) => (
+                  <div
+                    key={idx}
+                    className="search-result-item"
+                    onClick={() => {
+                      if (result.onClick) result.onClick();
+                      setShowResults(false);
+                      setSearchQuery('');
+                      if (onMusicSearch) onMusicSearch('');
+                    }}
+                  >
+                    {result.image ? (
+                      <img src={result.image} alt={result.title} className="search-result-image" onError={(e) => { e.target.style.display = 'none'; }} />
+                    ) : (
+                      result.icon && <span className="search-result-icon">{result.icon}</span>
+                    )}
+                    <div className="search-result-content">
+                      <div className="search-result-title">{result.title}</div>
+                      {result.subtitle && <div className="search-result-subtitle">{result.subtitle}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : activePage === 'chat' ? (
-          <div className="music-search-box">
+          <div className="music-search-box" ref={searchRef}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="search-icon">
               <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
             </svg>
@@ -104,8 +157,34 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
                 setChatSearchQuery(e.target.value);
                 if (onChatSearch) onChatSearch(e.target.value);
               }}
+              onFocus={() => {
+                if (chatSearchResults && chatSearchResults.length > 0 && chatSearchQuery.trim()) {
+                  setShowResults(true);
+                }
+              }}
               className="music-search-input"
             />
+            {showResults && chatSearchResults && chatSearchResults.length > 0 && (
+              <div className="search-results-dropdown">
+                {chatSearchResults.slice(0, 10).map((result, idx) => (
+                  <div
+                    key={idx}
+                    className="search-result-item search-result-item-chat"
+                    onClick={() => {
+                      if (result.onClick) result.onClick();
+                      setShowResults(false);
+                      setChatSearchQuery('');
+                      if (onChatSearch) onChatSearch('');
+                    }}
+                  >
+                    <div className="search-result-content">
+                      <div className="search-result-title">{result.title}</div>
+                      {result.subtitle && <div className="search-result-subtitle">{result.subtitle}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : null}
       </div>

@@ -40,6 +40,8 @@ function App() {
   const [showLeft, setShowLeft] = useState(true);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [musicSearchResults, setMusicSearchResults] = useState([]);
+  const [chatSearchResults, setChatSearchResults] = useState([]);
   const { selectPersona, currentTitle } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -495,6 +497,8 @@ function App() {
         onNavigate={(page) => setActivePage(page)}
         onMusicSearch={(query) => setMusicSearchQuery(query)}
         onChatSearch={(query) => setChatSearchQuery(query)}
+        musicSearchResults={musicSearchResults}
+        chatSearchResults={chatSearchResults}
       />
       {activePage === 'music' ? (
         <MusicPage 
@@ -502,6 +506,7 @@ function App() {
           audioQueue={audioQueue}
           onMicClick={toggleAiFocus}
           searchQuery={musicSearchQuery}
+          onSearchResultsChange={setMusicSearchResults}
         />
       ) : activePage === 'music-editor' ? (
         <MusicEditor />
@@ -512,6 +517,7 @@ function App() {
           sessionId={sessionId}
           onMicClick={toggleAiFocus}
           searchQuery={chatSearchQuery}
+          onSearchResultsChange={setChatSearchResults}
         />
       ) : activePage === 'news' ? (
         <NewsPage />

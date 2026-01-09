@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { musicAPI } from '../services/api';
 import { useMusicPlayer } from '../contexts/MusicPlayerContext';
 
-export function MusicPage({ searchQuery = '' }) {
+export function MusicPage({ searchQuery = '', onSearchResultsChange }) {
   const [library, setLibrary] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -115,6 +115,68 @@ export function MusicPage({ searchQuery = '' }) {
     }).filter(Boolean);
   }, [library, searchQuery]);
 
+  // Compute search results for dropdown
+  useEffect(() => {
+    if (!onSearchResultsChange) return;
+    
+    if (!searchQuery || !searchQuery.trim()) {
+      onSearchResultsChange([]);
+      return;
+    }
+    
+    const query = searchQuery.toLowerCase();
+    const results = [];
+    
+    // Add matching artists
+    library.forEach(artist => {
+      if (artist.name?.toLowerCase().includes(query)) {
+        const artistImg = getArtistImage(artist);
+        results.push({
+          title: artist.name,
+          subtitle: 'Artist',
+          image: artistImg ? `/api/music/stream?path=${encodeURIComponent(normalizeMusicPath(artistImg))}` : null,
+          onClick: () => {
+            // This will be handled by the page navigation
+            window.dispatchEvent(new CustomEvent('musicNavigate', { detail: { type: 'artist', name: artist.name } }));
+          }
+        });
+      }
+      
+      // Add matching albums
+      artist.albums?.forEach(album => {
+        if (album.name?.toLowerCase().includes(query)) {
+          const albumImg = album.image || album.cover_path || album.coverPath || album.image_path || album.imagePath;
+          results.push({
+            title: album.name,
+            subtitle: `Album by ${artist.name}`,
+            image: albumImg ? `/api/music/stream?path=${encodeURIComponent(normalizeMusicPath(albumImg))}` : null,
+            onClick: () => {
+              window.dispatchEvent(new CustomEvent('musicNavigate', { detail: { type: 'album', artist: artist.name, album: album.name } }));
+            }
+          });
+        }
+        
+        // Add matching songs (limit to first 5 per album)
+        album.songs?.slice(0, 5).forEach(song => {
+          if ((song.name?.toLowerCase().includes(query) || song.title?.toLowerCase().includes(query))) {
+            // For songs, use artist image
+            const artistImg = getArtistImage(artist);
+            results.push({
+              title: song.name || song.title,
+              subtitle: `${album.name} • ${artist.name}`,
+              image: artistImg ? `/api/music/stream?path=${encodeURIComponent(normalizeMusicPath(artistImg))}` : null,
+              onClick: () => {
+                window.dispatchEvent(new CustomEvent('musicNavigate', { detail: { type: 'song', artist: artist.name, album: album.name, song: song.name || song.title } }));
+              }
+            });
+          }
+        });
+      });
+    });
+    
+    onSearchResultsChange(results.slice(0, 10));
+  }, [searchQuery, library, onSearchResultsChange]);
+
   const currentArtist = useMemo(() => {
     if (!selectedArtist) return null;
     return filteredLibrary.find((a) => a.name === selectedArtist) || null;
@@ -134,6 +196,44 @@ export function MusicPage({ searchQuery = '' }) {
   useEffect(() => {
     sortedAlbumsRef.current = sortedAlbums;
   }, [sortedAlbums]);
+
+  // Listen for navigation events from search results
+  useEffect(() => {
+    const handleNavigate = (e) => {
+      const { type, name, artist, album, song } = e.detail;
+      if (type === 'artist') {
+        setSelectedArtist(name);
+        setSelectedAlbum(null);
+        setViewMode('artists');
+      } else if (type === 'album') {
+        setSelectedArtist(artist);
+        setSelectedAlbum(album);
+        setViewMode('albums');
+      } else if (type === 'song') {
+        // Find and play the song
+        const artistObj = library.find(a => a.name === artist);
+        if (artistObj) {
+          const albumObj = artistObj.albums?.find(a => a.name === album);
+          if (albumObj) {
+            const songObj = albumObj.songs?.find(s => (s.name || s.title) === song);
+            if (songObj && playIndexRef.current) {
+              setSelectedArtist(artist);
+              setSelectedAlbum(album);
+              setViewMode('albums');
+              const songs = sortSongs(albumObj.songs || []);
+              const songIdx = songs.findIndex(s => (s.name || s.title) === song);
+              if (songIdx >= 0) {
+                playIndexRef.current(songIdx, songs);
+              }
+            }
+          }
+        }
+      }
+    };
+    
+    window.addEventListener('musicNavigate', handleNavigate);
+    return () => window.removeEventListener('musicNavigate', handleNavigate);
+  }, [library]);
 
   const toggleArtist = (artist) => {
     setSelectedArtist(artist);
