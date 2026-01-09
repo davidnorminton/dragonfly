@@ -138,24 +138,6 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   // Note: reloadHistory is handled by useChat hook when sessionId changes
   // No need to call it here to avoid double-loading
 
-  // Combine messages: DB messages first, then pending user message, then streaming response
-  // Filter out duplicates by checking if pending message already exists in filteredMessages
-  const pendingExistsInHistory = pendingUserMessage && filteredMessages.some(
-    msg => msg.role === 'user' && 
-           msg.message === pendingUserMessage.message &&
-           Math.abs(new Date(msg.created_at) - new Date(pendingUserMessage.created_at)) < 5000
-  );
-  
-  const allMessages = [
-    ...filteredMessages,
-    ...(pendingUserMessage && !pendingExistsInHistory ? [pendingUserMessage] : []),
-    ...(streamingMessage ? [streamingMessage] : [])
-  ];
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [allMessages.length, streamingMessage?.message]);
-
   useEffect(() => {
     const container = chatContainerRef.current;
     if (!container) return;
@@ -364,6 +346,24 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     // For other sessions, match if session_id starts with currentSessionId
     return msg.session_id.startsWith(currentSessionId);
   });
+  
+  // Combine messages: DB messages first, then pending user message, then streaming response
+  // Filter out duplicates by checking if pending message already exists in filteredMessages
+  const pendingExistsInHistory = pendingUserMessage && filteredMessages.some(
+    msg => msg.role === 'user' && 
+           msg.message === pendingUserMessage.message &&
+           Math.abs(new Date(msg.created_at) - new Date(pendingUserMessage.created_at)) < 5000
+  );
+  
+  const allMessages = [
+    ...filteredMessages,
+    ...(pendingUserMessage && !pendingExistsInHistory ? [pendingUserMessage] : []),
+    ...(streamingMessage ? [streamingMessage] : [])
+  ];
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [allMessages.length, streamingMessage?.message]);
 
   useEffect(() => {
     // Focus input when component mounts or when empty
