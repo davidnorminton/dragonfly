@@ -5690,3 +5690,99 @@ body {
   min-width: 50px;
   background: rgba(255, 255, 255, 0.1);
 }
+
+/* Filler Words Section */
+.filler-words-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.filler-words-title {
+  color: #fff;
+  margin-bottom: 16px;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.filler-words-add-group {
+  margin-bottom: 20px;
+}
+
+.filler-words-add-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.filler-words-input {
+  flex: 1;
+}
+
+.filler-words-create-button {
+  min-width: 100px;
+}
+
+.filler-words-empty {
+  color: rgba(255, 255, 255, 0.5);
+  padding: 20px;
+  text-align: center;
+}
+
+.filler-word-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  transition: background 0.2s;
+}
+
+.filler-word-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.filler-word-info {
+  flex: 1;
+}
+
+.filler-word-text {
+  color: #fff;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.filler-word-filename {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.85em;
+}
+
+.filler-word-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.filler-word-play-button {
+  padding: 6px 12px;
+  font-size: 0.9em;
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: #4caf50;
+}
+
+.filler-word-play-button:hover {
+  background: rgba(76, 175, 80, 0.3);
+}
+
+.filler-word-delete-button {
+  padding: 6px 12px;
+  font-size: 0.9em;
+  background: rgba(244, 67, 54, 0.2);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  color: #f44336;
+}
+
+.filler-word-delete-button:hover {
+  background: rgba(244, 67, 54, 0.3);
+}
