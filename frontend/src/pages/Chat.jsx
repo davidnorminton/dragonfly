@@ -19,6 +19,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const [pinnedSessions, setPinnedSessions] = useState(new Set());
   // Initialize with a chat session ID if baseSessionId doesn't start with 'chat-'
   const [currentSessionId, setCurrentSessionId] = useState(() => {
@@ -338,7 +339,17 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
   const handleMenuClick = (sessionId, e) => {
     e.stopPropagation();
-    setOpenMenuId(openMenuId === sessionId ? null : sessionId);
+    if (openMenuId === sessionId) {
+      setOpenMenuId(null);
+    } else {
+      const button = e.currentTarget;
+      const rect = button.getBoundingClientRect();
+      setMenuPosition({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right
+      });
+      setOpenMenuId(sessionId);
+    }
   };
 
   const handleRename = (sessionId, e) => {
@@ -536,7 +547,14 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                       </svg>
                     </button>
                     {openMenuId === session && (
-                      <div className="chatgpt-chat-menu" onClick={(e) => e.stopPropagation()}>
+                      <div 
+                        className="chatgpt-chat-menu" 
+                        style={{
+                          top: `${menuPosition.top}px`,
+                          right: `${menuPosition.right}px`
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button className="chatgpt-chat-menu-item" onClick={(e) => handleRename(session, e)}>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>

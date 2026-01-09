@@ -4441,8 +4441,10 @@ body {
 .chatgpt-chats-section {
   flex: 1;
   overflow-y: auto;
+  overflow-x: visible;
   padding: 8px;
   margin-top: 8px;
+  position: relative;
 }
 
 .chatgpt-section-title {
@@ -4458,6 +4460,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  position: relative;
 }
 
 .chatgpt-chat-item {
@@ -4537,17 +4540,14 @@ body {
 }
 
 .chatgpt-chat-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 4px;
+  position: fixed;
   background: #2a2a2a;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   padding: 4px;
   min-width: 160px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
+  z-index: 10000;
 }
 
 .chatgpt-chat-menu-item {
