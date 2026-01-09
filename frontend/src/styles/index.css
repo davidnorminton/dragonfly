@@ -1983,18 +1983,18 @@ body {
 
 .app-shell.ai-focus .right-section {
   opacity: 1 !important;
-  transform: none !important;
+  transform: translateX(100%) !important;
   pointer-events: auto;
   position: absolute;
   top: 0;
-  left: 0;
+  right: 0;
   width: 50%;
   height: calc(100vh - 48px);
   z-index: 1;
   background: #0a0a0f;
   overflow-y: auto;
   visibility: visible !important;
-  transition: left 0.8s ease;
+  transition: transform 0.8s ease;
 }
 
 .app-shell.ai-focus .left-section {
@@ -5786,4 +5786,54 @@ body {
 
 .filler-word-delete-button:hover {
   background: rgba(244, 67, 54, 0.3);
+}
+
+/* Hide all pages when AI focus mode is active */
+.app-shell.ai-focus .music-page {
+  transform: translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.8s ease, opacity 0.75s ease;
+}
+
+.app-shell.ai-focus .chat-page {
+  transform: translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.8s ease, opacity 0.75s ease;
+}
+
+.app-shell.ai-focus .news-page {
+  transform: translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.8s ease, opacity 0.75s ease;
+}
+
+.app-shell.ai-focus .analytics-page {
+  transform: translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.8s ease, opacity 0.75s ease;
+}
+
+.app-shell.ai-focus .settings-page {
+  transform: translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.8s ease, opacity 0.75s ease;
+}
+
+.app-shell.ai-focus .alerts-page {
+  transform: translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.8s ease, opacity 0.75s ease;
+}
+
+.app-shell.ai-focus .music-editor {
+  transform: translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.8s ease, opacity 0.75s ease;
 }
