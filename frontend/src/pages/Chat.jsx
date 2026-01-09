@@ -21,12 +21,12 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [openMenuId, setOpenMenuId] = useState(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const [pinnedSessions, setPinnedSessions] = useState(new Set());
-  // Initialize with a chat session ID if baseSessionId doesn't start with 'chat-'
+  // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (baseSessionId && baseSessionId.startsWith('chat-')) {
       return baseSessionId;
     }
-    return `chat-${Date.now()}`;
+    return null; // Don't auto-create, wait for user to click "New chat"
   });
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -36,7 +36,8 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
   // For chat page, use the base session ID directly (it starts with 'chat-')
   // This allows all messages within a chat session to be linked together regardless of mode/expert type
-  const sessionId = currentSessionId && currentSessionId.startsWith('chat-') ? currentSessionId : `${currentSessionId || `chat-${Date.now()}`}_${mode}_${expertType}`;
+  // Only create a session ID if currentSessionId is set (user has selected/created a chat)
+  const sessionId = currentSessionId && currentSessionId.startsWith('chat-') ? currentSessionId : (currentSessionId ? `${currentSessionId}_${mode}_${expertType}` : null);
 
   const { messages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory } = useChat(sessionId, mode, currentPersona);
   
@@ -114,11 +115,14 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
         const data = await chatAPI.getSessions();
         if (data.success && data.sessions) {
           const sessionList = data.sessions.map(s => s.session_id);
-          // Ensure currentSessionId is in the list if it's a chat session
+          // Only add currentSessionId to list if it exists and is not already there
+          // Don't auto-create sessions - only add if user explicitly created one
           if (currentSessionId && currentSessionId.startsWith('chat-') && !sessionList.includes(currentSessionId)) {
             sessionList.unshift(currentSessionId); // Add to front
           }
           setChatSessions(sessionList);
+          
+          // Don't auto-select a session - let user choose or create new one
           
           // Load titles from sessions
           const titles = {};
@@ -158,6 +162,13 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
   const handleSend = async () => {
     if (!input.trim()) return;
+    
+    // If no session is selected, create a new one first
+    if (!currentSessionId) {
+      await handleNewChat();
+      // Wait a bit for the session to be set
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
 
     const userMessage = input;
     setInput('');
@@ -602,7 +613,16 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
         {/* Messages Area */}
         <div className="chatgpt-messages" ref={chatContainerRef}>
-          {loading && allMessages.length === 0 ? (
+          {!currentSessionId ? (
+            <div className="chatgpt-empty">
+              <div className="chatgpt-empty-icon">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+              </div>
+              <div className="chatgpt-empty-text">Click "New chat" to start a conversation</div>
+            </div>
+          ) : loading && allMessages.length === 0 ? (
             <div className="chatgpt-empty">Loading...</div>
           ) : allMessages.length === 0 ? (
             <div className="chatgpt-empty">

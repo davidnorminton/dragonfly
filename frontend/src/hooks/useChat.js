@@ -136,6 +136,17 @@ export function useChat(sessionId, mode, persona) {
 
   useEffect(() => {
     console.log('[useChat] useEffect triggered - sessionId:', sessionId, 'mode:', mode, 'persona:', persona);
+    
+    // If no sessionId, don't load anything
+    if (!sessionId) {
+      setMessages([]);
+      setLoading(false);
+      setHasMore(false);
+      setOffset(0);
+      offsetRef.current = 0;
+      return;
+    }
+    
     // Clear messages immediately when session changes
     setMessages([]);
     setLoading(true);
