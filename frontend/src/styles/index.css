@@ -4696,6 +4696,410 @@ body {
   background: #dc2626;
 }
 
+/* Context Modal */
+.context-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  backdrop-filter: blur(4px);
+}
+
+.context-modal {
+  background: #1a1a2a;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  position: relative;
+}
+
+.context-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.context-modal-header h3 {
+  color: #e0e0e0;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.context-modal-close {
+  background: transparent;
+  border: none;
+  color: #a0a0a0;
+  font-size: 28px;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+  line-height: 1;
+}
+
+.context-modal-close:hover {
+  color: #e0e0e0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.context-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.context-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.context-form-group label {
+  color: #a0a0a0;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.context-info-btn {
+  background: transparent;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: color 0.2s, background 0.2s;
+  flex-shrink: 0;
+}
+
+.context-info-btn:hover {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.context-info-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 8px;
+  background: #1a1a2a;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 280px;
+  max-width: 400px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 10001;
+  color: #e0e0e0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.context-info-tooltip p {
+  margin: 0 0 8px 0;
+}
+
+.context-info-tooltip p:last-child {
+  margin-bottom: 0;
+}
+
+.context-info-tooltip strong {
+  color: #60a5fa;
+}
+
+.context-info-tooltip ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.context-info-tooltip li {
+  margin: 4px 0;
+}
+
+.context-input,
+.context-textarea {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #e0e0e0;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.context-input:focus,
+.context-textarea:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.context-textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.context-improve-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 6px;
+  color: #3b82f6;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+  align-self: flex-start;
+}
+
+.context-improve-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #60a5fa;
+}
+
+.context-improve-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.context-improve-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.context-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.context-save-preset-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.context-btn-save-preset {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  background: rgba(59, 130, 246, 0.3);
+  color: #3b82f6;
+}
+
+.context-btn-save-preset:hover {
+  background: rgba(59, 130, 246, 0.5);
+  color: #60a5fa;
+}
+
+.context-btn-save-preset:active {
+  background: rgba(59, 130, 246, 0.4);
+}
+
+.context-presets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.context-presets-list > label {
+  color: #a0a0a0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.context-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #e0e0e0;
+  font-size: 14px;
+  user-select: none;
+}
+
+.context-radio-input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+.context-radio-text {
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.context-no-presets {
+  color: #666;
+  font-size: 14px;
+  text-align: center;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.context-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.context-preset-item {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.context-preset-item .context-radio-label {
+  flex: 1;
+  margin: 0;
+}
+
+.context-preset-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.context-preset-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.context-preset-name {
+  color: #e0e0e0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.context-preset-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.context-preset-edit,
+.context-preset-delete {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: #a0a0a0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.context-preset-edit:hover {
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.context-preset-delete:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.context-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.context-btn-cancel,
+.context-btn-save {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.context-btn-cancel {
+  background: rgba(255, 255, 255, 0.1);
+  color: #a0a0a0;
+}
+
+.context-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #e0e0e0;
+}
+
+.context-btn-save {
+  background: rgba(59, 130, 246, 0.3);
+  color: #3b82f6;
+}
+
+.context-btn-save:hover {
+  background: rgba(59, 130, 246, 0.5);
+  color: #60a5fa;
+}
+
+.context-btn-save:active {
+  background: rgba(59, 130, 246, 0.4);
+}
+
 .chatgpt-chat-title {
   flex: 1;
   overflow: hidden;
@@ -5101,6 +5505,34 @@ body {
   border-radius: 24px;
   padding: 12px 16px;
   transition: border-color 0.2s;
+}
+
+.chatgpt-context-btn {
+  background: transparent;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, transform 0.2s;
+  flex-shrink: 0;
+}
+
+.chatgpt-context-btn:hover {
+  color: #60a5fa;
+  transform: scale(1.1);
+}
+
+.chatgpt-context-btn:active {
+  transform: scale(0.95);
+}
+
+.chatgpt-context-btn.active {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.15);
+  border-radius: 6px;
 }
 
 .chatgpt-input-wrapper:focus-within {

@@ -23,6 +23,15 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [pinnedSessions, setPinnedSessions] = useState(new Set());
   const [deleteConfirmSession, setDeleteConfirmSession] = useState(null);
   const [generatingTitle, setGeneratingTitle] = useState(null);
+  const [showContextModal, setShowContextModal] = useState(false);
+  const [contextPreset, setContextPreset] = useState({ name: '', context: '', temperature: '', top_p: '' });
+  const [editingPresetId, setEditingPresetId] = useState(null);
+  const [promptPresets, setPromptPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState(null);
+  const [useSystemContext, setUseSystemContext] = useState(true);
+  const [improvingContext, setImprovingContext] = useState(false);
+  const [infoTooltip, setInfoTooltip] = useState(null);
+  const [sessionPresets, setSessionPresets] = useState({}); // Store preset per session: { sessionId: { presetId: number | null, useSystemContext: boolean } }
   const [deleteError, setDeleteError] = useState(null);
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
@@ -31,6 +40,60 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     }
     return null; // Don't auto-create, wait for user to click "New chat"
   });
+  
+  // Show indicator when a preset is active
+  const selectedPreset = promptPresets.find(p => p.id === selectedPresetId);
+  
+  // Persist preset selection per session
+  // Persist preset selection per session
+  const updateSessionPreset = async (sessionId, presetId, useSystem) => {
+    // Update local state immediately for UI responsiveness
+    setSessionPresets(prev => ({
+      ...prev,
+      [sessionId]: {
+        presetId: presetId,
+        useSystemContext: useSystem
+      }
+    }));
+    
+    // Save to database
+    try {
+      const dbPresetId = useSystem ? null : presetId;
+      await chatAPI.updateSessionPreset(sessionId, dbPresetId);
+    } catch (error) {
+      console.error('Error saving preset to database:', error);
+      // Revert local state on error
+      setSessionPresets(prev => {
+        const prevState = prev[sessionId];
+        if (prevState) {
+          return { ...prev, [sessionId]: prevState };
+        }
+        return prev;
+      });
+    }
+  };
+  
+  // Load session presets from database when sessions are loaded
+  // This is handled in the loadSessions useEffect below
+  
+  // Load preset selection for current session
+  useEffect(() => {
+    if (currentSessionId) {
+      const sessionPreset = sessionPresets[currentSessionId];
+      if (sessionPreset) {
+        setSelectedPresetId(sessionPreset.presetId);
+        setUseSystemContext(sessionPreset.useSystemContext);
+      } else {
+        // Default to system context for new sessions
+        setSelectedPresetId(null);
+        setUseSystemContext(true);
+      }
+    } else {
+      // No session selected
+      setSelectedPresetId(null);
+      setUseSystemContext(true);
+    }
+  }, [currentSessionId, sessionPresets]);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const inputRef = useRef(null);
@@ -42,7 +105,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   // Only create a session ID if currentSessionId is set (user has selected/created a chat)
   const sessionId = currentSessionId && currentSessionId.startsWith('chat-') ? currentSessionId : (currentSessionId ? `${currentSessionId}_${mode}_${expertType}` : null);
 
-  const { messages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory } = useChat(sessionId, mode, currentPersona);
+  const { messages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory, addMessage } = useChat(sessionId, mode, currentPersona);
   
   // Debug: log when sessionId changes
   useEffect(() => {
@@ -126,14 +189,33 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           }
           setChatSessions(sessionList);
           
-          // Load titles from sessions
+          // Load titles, pinned status, and presets from sessions
           const titles = {};
+          const pinned = new Set();
+          const presets = {};
           data.sessions.forEach(s => {
             if (s.title) {
               titles[s.session_id] = s.title;
             }
+            if (s.pinned) {
+              pinned.add(s.session_id);
+            }
+            // Load preset_id from database
+            if (s.preset_id !== null && s.preset_id !== undefined) {
+              presets[s.session_id] = {
+                presetId: s.preset_id,
+                useSystemContext: false
+              };
+            } else {
+              presets[s.session_id] = {
+                presetId: null,
+                useSystemContext: true
+              };
+            }
           });
           setSessionTitles(prev => ({ ...prev, ...titles }));
+          setPinnedSessions(pinned);
+          setSessionPresets(presets);
           
           hasLoadedSessionsRef.current = true;
         }
@@ -199,51 +281,33 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
         // Keep pendingUserMessage until history reloads to prevent jumping
       },
       async (fullResponse) => {
-        // Message complete - clear streaming and pending, then reload history
+        // Message complete - append the assistant message directly instead of reloading
         setStreamingMessage(null);
         setIsWaiting(false);
+        
+        // Create the assistant message object
+        const assistantMessage = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          message: fullResponse,
+          session_id: currentSessionId,
+          created_at: new Date().toISOString()
+        };
+        
+        // Add the assistant message directly to the messages array
+        addMessage(assistantMessage);
+        
+        // Clear pending message since we have the response
         setPendingUserMessage(null);
-        await reloadHistory();
-        // Reload session title for current session (AI may have generated a new title)
-        try {
-          const titleData = await chatAPI.getSessionTitle(currentSessionId);
-          if (titleData.success && titleData.title) {
-            setSessionTitles(prev => ({
-              ...prev,
-              [currentSessionId]: titleData.title
-            }));
+        
+        // Optionally reload history in background to sync with database (but don't clear UI)
+        setTimeout(async () => {
+          try {
+            await reloadHistory();
+          } catch (error) {
+            console.error('Error reloading history:', error);
           }
-        } catch (err) {
-          console.error('Error loading session title:', err);
-        }
-        // Also reload all session titles
-        try {
-          const sessions = await chatAPI.getHistory(100, 0, null, null, null);
-          const uniqueSessions = new Set();
-          if (sessions.messages) {
-            sessions.messages.forEach(msg => {
-              if (msg.session_id) {
-                const baseSession = msg.session_id.split('_')[0];
-                uniqueSessions.add(baseSession);
-              }
-            });
-          }
-          const sessionList = Array.from(uniqueSessions).slice(0, 20);
-          const titles = {};
-          for (const sessionId of sessionList) {
-            try {
-              const titleData = await chatAPI.getSessionTitle(sessionId);
-              if (titleData.success && titleData.title) {
-                titles[sessionId] = titleData.title;
-              }
-            } catch (err) {
-              // Ignore errors
-            }
-          }
-          setSessionTitles(titles);
-        } catch (err) {
-          // Ignore errors
-        }
+        }, 1000);
       },
       async (error) => {
         console.error('Error sending message:', error);
@@ -252,7 +316,8 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
         setPendingUserMessage(null);
       },
       mode,
-      expertType
+      expertType,
+      useSystemContext ? null : selectedPresetId // presetId (null if using system context)
     );
   };
 
@@ -324,6 +389,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     // Stop editing if we were editing
     setEditingSessionId(null);
     // Switch to the selected session - this will trigger useChat to load its history
+    // Preset selection will be loaded by useEffect when currentSessionId changes
     setCurrentSessionId(sessionId);
   };
 
@@ -378,18 +444,30 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     setEditingTitle(sessionTitles[sessionId] || getSessionDisplayName(sessionId));
   };
 
-  const handlePin = (sessionId, e) => {
+  const handlePin = async (sessionId, e) => {
     e.stopPropagation();
     setOpenMenuId(null);
-    setPinnedSessions(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(sessionId)) {
-        newSet.delete(sessionId);
+    const isPinned = pinnedSessions.has(sessionId);
+    const newPinnedState = !isPinned;
+    
+    try {
+      const result = await chatAPI.togglePin(sessionId, newPinnedState);
+      if (result && result.success) {
+        setPinnedSessions(prev => {
+          const newSet = new Set(prev);
+          if (newPinnedState) {
+            newSet.add(sessionId);
+          } else {
+            newSet.delete(sessionId);
+          }
+          return newSet;
+        });
       } else {
-        newSet.add(sessionId);
+        console.error('Failed to toggle pin:', result?.error);
       }
-      return newSet;
-    });
+    } catch (error) {
+      console.error('Error toggling pin:', error);
+    }
   };
 
   const handleGenerateTitle = async (sessionId, e) => {
@@ -436,9 +514,13 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     
     try {
       // Delete from backend
-      const result = await chatAPI.deleteSession(sessionId);
+      const response = await fetch(`/api/chat/sessions/${sessionId}`, {
+        method: 'DELETE'
+      });
       
-      if (result && result.success) {
+      const result = await response.json();
+      
+      if (response.ok && result && result.success) {
         // Close modal first
         setDeleteConfirmSession(null);
         setDeleteError(null);
@@ -457,13 +539,20 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           newSet.delete(sessionId);
           return newSet;
         });
+        // Remove preset selection for deleted session
+        setSessionPresets(prev => {
+          const newPresets = { ...prev };
+          delete newPresets[sessionId];
+          return newPresets;
+        });
+        // Preset cleanup is handled by database deletion
         // If it's the current session, switch to a new one
         if (sessionId === currentSessionId) {
           handleNewChat();
         }
       } else {
         // Keep modal open and show error
-        setDeleteError((result && result.error) || 'Failed to delete chat');
+        setDeleteError((result && result.error) || `Failed to delete chat: HTTP ${response.status}`);
       }
     } catch (error) {
       console.error('Error deleting chat:', error);
@@ -475,6 +564,147 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const cancelDelete = () => {
     setDeleteConfirmSession(null);
     setDeleteError(null);
+  };
+
+  // Load prompt presets
+  useEffect(() => {
+    const loadPresets = async () => {
+      try {
+        const response = await fetch('/api/prompt-presets');
+        const data = await response.json();
+        if (data.success) {
+          setPromptPresets(data.presets || []);
+        }
+      } catch (error) {
+        console.error('Error loading presets:', error);
+      }
+    };
+    loadPresets();
+  }, []);
+
+  const handleSavePreset = async () => {
+    if (!contextPreset.name.trim() || !contextPreset.context.trim()) {
+      alert('Please provide a name and context');
+      return;
+    }
+
+    try {
+      const url = editingPresetId 
+        ? `/api/prompt-presets/${editingPresetId}`
+        : '/api/prompt-presets';
+      const method = editingPresetId ? 'PUT' : 'POST';
+
+      const payload = {
+        name: contextPreset.name.trim(),
+        context: contextPreset.context.trim(),
+        temperature: contextPreset.temperature && contextPreset.temperature.trim() 
+          ? parseFloat(contextPreset.temperature) 
+          : null,
+        top_p: contextPreset.top_p && contextPreset.top_p.trim() 
+          ? parseFloat(contextPreset.top_p) 
+          : null
+      };
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (result.success) {
+        // Reload presets
+        const presetsResponse = await fetch('/api/prompt-presets');
+        const presetsData = await presetsResponse.json();
+        if (presetsData.success) {
+          setPromptPresets(presetsData.presets || []);
+          // If we just created/updated the selected preset, update selectedPresetId and select it
+          if (result.preset && result.preset.id && currentSessionId) {
+            setSelectedPresetId(result.preset.id);
+            setUseSystemContext(false);
+            updateSessionPreset(currentSessionId, result.preset.id, false);
+          }
+        }
+        // Reset form but keep modal open
+        setContextPreset({ name: '', context: '', temperature: '', top_p: '' });
+        setEditingPresetId(null);
+      } else {
+        alert(result.error || 'Failed to save preset');
+      }
+    } catch (error) {
+      console.error('Error saving preset:', error);
+      alert('Error saving preset: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  const handleDeletePreset = async (presetId) => {
+    if (!confirm('Delete this preset?')) return;
+
+    try {
+      const response = await fetch(`/api/prompt-presets/${presetId}`, {
+        method: 'DELETE'
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        // Reload presets
+        const presetsResponse = await fetch('/api/prompt-presets');
+        const presetsData = await presetsResponse.json();
+        if (presetsData.success) {
+          setPromptPresets(presetsData.presets || []);
+        }
+        if (selectedPresetId === presetId && currentSessionId) {
+          setSelectedPresetId(null);
+          setUseSystemContext(true);
+          updateSessionPreset(currentSessionId, null, true);
+        }
+      } else {
+        alert(result.error || 'Failed to delete preset');
+      }
+    } catch (error) {
+      console.error('Error deleting preset:', error);
+      alert('Error deleting preset: ' + error.message);
+    }
+  };
+
+  const handleImproveContext = async () => {
+    if (!contextPreset.name.trim() || !contextPreset.context.trim()) {
+      return;
+    }
+
+    setImprovingContext(true);
+    try {
+      const response = await fetch('/api/prompt-presets/improve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contextPreset.name.trim(),
+          context: contextPreset.context.trim()
+        })
+      });
+
+      const result = await response.json();
+      if (result.success && result.improved_context) {
+        setContextPreset({
+          ...contextPreset,
+          context: result.improved_context
+        });
+      } else {
+        const errorMsg = result.error || 'Failed to improve context';
+        console.error('Improve context error:', errorMsg);
+        alert(errorMsg);
+      }
+    } catch (error) {
+      console.error('Error improving context:', error);
+      alert('Error improving context: ' + (error.message || 'Unknown error'));
+    } finally {
+      setImprovingContext(false);
+    }
   };
 
   // Close menu when clicking outside
@@ -690,7 +920,12 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               <path d="M3 12h18M3 6h18M3 18h18"/>
             </svg>
           </button>
-          <div className="chatgpt-header-title">{currentTitle || 'AI Assistant'}</div>
+          <div className="chatgpt-header-title">
+            {useSystemContext 
+              ? (currentTitle || 'AI Assistant')
+              : (selectedPreset ? selectedPreset.name : 'AI Assistant')
+            }
+          </div>
         </div>
 
         {/* Messages Area */}
@@ -767,6 +1002,16 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
         {/* Input Area */}
         <div className="chatgpt-input-container">
           <div className="chatgpt-input-wrapper">
+            <button
+              className={`chatgpt-context-btn ${!useSystemContext && selectedPresetId ? 'active' : ''}`}
+              onClick={() => setShowContextModal(true)}
+              title={!useSystemContext && selectedPreset ? `Active preset: ${selectedPreset.name}` : useSystemContext ? "Using system context" : "Set custom context"}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2v4M12 18v4M4 12H2M6.314 6.314l-2.828-2.828M20.485 20.485l-2.828-2.828M17.686 6.314l2.828-2.828M3.515 20.485l2.828-2.828M22 12h-2M6.314 17.686l-2.828 2.828M20.485 3.515l-2.828 2.828"/>
+                <circle cx="12" cy="12" r="4"/>
+              </svg>
+            </button>
             <input
               ref={inputRef}
               type="text"
@@ -815,6 +1060,259 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               </button>
               <button className="delete-confirm-delete" onClick={confirmDelete}>
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context Preset Modal */}
+      {showContextModal && (
+        <div className="context-modal-overlay" onClick={() => {
+          setShowContextModal(false);
+          setInfoTooltip(null);
+        }}>
+          <div className="context-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="context-modal-header">
+              <h3>Custom Context & Settings</h3>
+              <button className="context-modal-close" onClick={() => {
+                setShowContextModal(false);
+                setInfoTooltip(null);
+              }}>×</button>
+            </div>
+            <div className="context-modal-body">
+              <div className="context-form-group">
+                <label>Preset Name</label>
+                <input
+                  type="text"
+                  className="context-input"
+                  placeholder="e.g., PhD Chemist"
+                  value={contextPreset.name}
+                  onChange={(e) => setContextPreset({ ...contextPreset, name: e.target.value })}
+                />
+              </div>
+              <div className="context-form-group">
+                <label>Custom Context</label>
+                <textarea
+                  className="context-textarea"
+                  placeholder="You are a phd level chemist etc..."
+                  rows="4"
+                  value={contextPreset.context}
+                  onChange={(e) => setContextPreset({ ...contextPreset, context: e.target.value })}
+                />
+                <button
+                  className="context-improve-btn"
+                  onClick={handleImproveContext}
+                  disabled={improvingContext || !contextPreset.name.trim() || !contextPreset.context.trim()}
+                  title="Use AI to improve the context"
+                >
+                  {improvingContext ? (
+                    <>
+                      <svg className="context-improve-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                      </svg>
+                      Improving...
+                    </>
+                  ) : (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2v4M12 18v4M4 12H2M6.314 6.314l-2.828-2.828M20.485 20.485l-2.828-2.828M17.686 6.314l2.828-2.828M3.515 20.485l2.828-2.828M22 12h-2M6.314 17.686l-2.828 2.828M20.485 3.515l-2.828 2.828"/>
+                        <circle cx="12" cy="12" r="4"/>
+                      </svg>
+                      Improve with AI
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="context-form-row">
+                <div className="context-form-group">
+                  <label>
+                    Temperature
+                    <button
+                      className="context-info-btn"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setInfoTooltip(infoTooltip === 'temperature' ? null : 'temperature');
+                      }}
+                      title="What is Temperature?"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 16v-4M12 8h.01"/>
+                      </svg>
+                    </button>
+                    {infoTooltip === 'temperature' && (
+                      <div className="context-info-tooltip">
+                        <p><strong>Temperature</strong> controls randomness in the AI's responses.</p>
+                        <ul>
+                          <li><strong>0.0</strong>: More deterministic, focused responses</li>
+                          <li><strong>0.7</strong>: Balanced creativity and consistency</li>
+                          <li><strong>1.0</strong>: More creative and varied responses</li>
+                        </ul>
+                        <p>Lower values make responses more predictable; higher values increase creativity.</p>
+                      </div>
+                    )}
+                  </label>
+                  <input
+                    type="number"
+                    className="context-input"
+                    placeholder="0.0 - 1.0"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={contextPreset.temperature}
+                    onChange={(e) => setContextPreset({ ...contextPreset, temperature: e.target.value })}
+                  />
+                </div>
+                <div className="context-form-group">
+                  <label>
+                    Top P
+                    <button
+                      className="context-info-btn"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setInfoTooltip(infoTooltip === 'top_p' ? null : 'top_p');
+                      }}
+                      title="What is Top P?"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 16v-4M12 8h.01"/>
+                      </svg>
+                    </button>
+                    {infoTooltip === 'top_p' && (
+                      <div className="context-info-tooltip">
+                        <p><strong>Top P</strong> (nucleus sampling) controls diversity by limiting token selection.</p>
+                        <ul>
+                          <li><strong>0.1</strong>: Only considers most likely tokens (narrow)</li>
+                          <li><strong>0.9</strong>: Considers a wider range of tokens (broad)</li>
+                          <li><strong>1.0</strong>: Considers all tokens (maximum diversity)</li>
+                        </ul>
+                        <p>Lower values produce more focused responses; higher values allow more diverse word choices.</p>
+                      </div>
+                    )}
+                  </label>
+                  <input
+                    type="number"
+                    className="context-input"
+                    placeholder="0.0 - 1.0"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={contextPreset.top_p}
+                    onChange={(e) => setContextPreset({ ...contextPreset, top_p: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="context-save-preset-section">
+                <button className="context-btn-save-preset" onClick={handleSavePreset}>
+                  {editingPresetId ? 'Update' : 'Save'} Preset
+                </button>
+              </div>
+              <div className="context-presets-list">
+                <label>Context Selection</label>
+                <div className="context-presets">
+                  <div className={`context-preset-item ${useSystemContext ? 'active' : ''}`}>
+                    <label className="context-radio-label">
+                      <input
+                        type="radio"
+                        name="context-selection"
+                        checked={useSystemContext}
+                        onChange={() => {
+                          setUseSystemContext(true);
+                          setSelectedPresetId(null);
+                          if (currentSessionId) {
+                            updateSessionPreset(currentSessionId, null, true);
+                          }
+                        }}
+                        className="context-radio-input"
+                      />
+                      <span className="context-preset-name">Use system context</span>
+                    </label>
+                  </div>
+                  {promptPresets.length === 0 ? (
+                    <p className="context-no-presets">No presets saved yet</p>
+                  ) : (
+                    promptPresets.map((preset) => (
+                      <div
+                        key={preset.id}
+                        className={`context-preset-item ${selectedPresetId === preset.id ? 'active' : ''}`}
+                        onClick={() => {
+                          setUseSystemContext(false);
+                          setSelectedPresetId(preset.id);
+                          if (currentSessionId) {
+                            updateSessionPreset(currentSessionId, preset.id, false);
+                          }
+                        }}
+                      >
+                        <label className="context-radio-label">
+                          <input
+                            type="radio"
+                            name="context-selection"
+                            checked={!useSystemContext && selectedPresetId === preset.id}
+                            onChange={() => {
+                              setUseSystemContext(false);
+                              setSelectedPresetId(preset.id);
+                              if (currentSessionId) {
+                                updateSessionPreset(currentSessionId, preset.id, false);
+                              }
+                            }}
+                            className="context-radio-input"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span className="context-preset-name">{preset.name}</span>
+                        </label>
+                        <div className="context-preset-actions">
+                          <button
+                            className="context-preset-edit"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingPresetId(preset.id);
+                              setUseSystemContext(false);
+                              setSelectedPresetId(preset.id);
+                              if (currentSessionId) {
+                                updateSessionPreset(currentSessionId, preset.id, false);
+                              }
+                              setContextPreset({
+                                name: preset.name,
+                                context: preset.context || '',
+                                temperature: preset.temperature?.toString() || '',
+                                top_p: preset.top_p?.toString() || ''
+                              });
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="context-preset-delete"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeletePreset(preset.id);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="context-modal-actions">
+              <button className="context-btn-cancel" onClick={() => {
+                setShowContextModal(false);
+                setContextPreset({ name: '', context: '', temperature: '', top_p: '' });
+                setEditingPresetId(null);
+                setInfoTooltip(null);
+              }}>
+                Cancel
+              </button>
+              <button className="context-btn-save" onClick={() => {
+                setShowContextModal(false);
+                setInfoTooltip(null);
+              }}>
+                Save
               </button>
             </div>
           </div>

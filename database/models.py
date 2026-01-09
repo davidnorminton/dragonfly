@@ -1,5 +1,5 @@
 """Database models."""
-from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Enum as SQLEnum, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Enum as SQLEnum, ForeignKey, Float, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -92,11 +92,29 @@ class ChatSession(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     session_id = Column(String, unique=True, index=True, nullable=False)
     title = Column(String, nullable=True)
+    pinned = Column(Boolean, default=False, nullable=False)
+    preset_id = Column(Integer, ForeignKey('prompt_presets.id'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     def __repr__(self):
         return f"<ChatSession {self.session_id} - {self.title}>"
+
+
+class PromptPreset(Base):
+    """Model for storing custom prompt presets with context, temperature, and top_p."""
+    __tablename__ = "prompt_presets"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, nullable=False, index=True)
+    context = Column(Text, nullable=False)  # Custom system prompt/context
+    temperature = Column(Float, nullable=True)  # Optional temperature override
+    top_p = Column(Float, nullable=True)  # Optional top_p override
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<PromptPreset {self.name}>"
 
 
 class MusicArtist(Base):

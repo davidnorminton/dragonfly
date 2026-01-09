@@ -1000,20 +1000,17 @@ export function MusicPage({ searchQuery = '' }) {
   }, [selectedArtist, selectedAlbum, currentArtist]);
 
   const handleHeroToggle = () => {
+    // If already playing, pause using context
     if (isPlaying) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      }
+      pause();
       return;
     }
-    if (playlist.length && currentIndex >= 0) {
-      audioRef.current
-        ?.play()
-        .then(() => setIsPlaying(true))
-        .catch((e) => console.error('Play error', e));
+    // If there's a current song, resume using context
+    if (playlist.length && currentIndex >= 0 && currentSong) {
+      resume();
       return;
     }
+    // Otherwise, start playing from the beginning
     // Choose songs from playlist, selected album, otherwise from the latest album
     if (viewMode === 'playlists' && currentPlaylist?.songs?.length) {
       if (playIndexRef.current) playIndexRef.current(0, currentPlaylist.songs);

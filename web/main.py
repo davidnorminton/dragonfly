@@ -25,7 +25,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset
 from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -4142,11 +4142,31 @@ async def send_chat_message(request: Request):
         expert_type = data.get("expert_type", "general")  # Expert type for conversational mode
         service_name = data.get("service_name")  # Deprecated, use mode instead
         stream = data.get("stream", True)
+        preset_id = data.get("preset_id")  # Optional prompt preset ID
         
-        logger.info(f"Chat request received: message='{message[:50] if message else None}', mode={mode}, stream={stream}")
+        logger.info(f"Chat request received: message='{message[:50] if message else None}', mode={mode}, stream={stream}, preset_id={preset_id}")
         
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
+        
+        # Load prompt preset if provided
+        custom_context = None
+        custom_temperature = None
+        custom_top_p = None
+        if preset_id:
+            try:
+                async with AsyncSessionLocal() as db_session:
+                    result = await db_session.execute(
+                        select(PromptPreset).where(PromptPreset.id == preset_id)
+                    )
+                    preset = result.scalar_one_or_none()
+                    if preset:
+                        custom_context = preset.context
+                        custom_temperature = preset.temperature
+                        custom_top_p = preset.top_p
+                        logger.info(f"Loaded preset '{preset.name}': context={custom_context[:50] if custom_context else None}, temp={custom_temperature}, top_p={custom_top_p}")
+            except Exception as e:
+                logger.warning(f"Failed to load preset {preset_id}: {e}")
         
         # Determine service based on mode
         if mode == "conversational":
@@ -4198,6 +4218,14 @@ async def send_chat_message(request: Request):
                 "messages": conversation_history
             }
             
+            # Apply preset overrides if provided
+            if custom_context:
+                input_data["system_prompt"] = custom_context
+            if custom_temperature is not None:
+                input_data["temperature"] = custom_temperature
+            if custom_top_p is not None:
+                input_data["top_p"] = custom_top_p
+            
             async def generate_response():
                 full_response = ""
                 message_id = None
@@ -4221,102 +4249,6 @@ async def send_chat_message(request: Request):
                             timeout=3,
                         )
                         message_id = assistant_msg.id
-                        
-                        # Auto-generate title using AI from first conversation if session doesn't have one
-                        async with AsyncSessionLocal() as session:
-                            session_result = await session.execute(
-                                select(ChatSession).where(ChatSession.session_id == session_key)
-                            )
-                            chat_session = session_result.scalar_one_or_none()
-                            
-                            if not chat_session or not chat_session.title:
-                                # Check if this is the first assistant message in this conversation
-                                assistant_count_result = await session.execute(
-                                    select(func.count(ChatMessage.id))
-                                    .where(ChatMessage.session_id == session_key)
-                                    .where(ChatMessage.role == "assistant")
-                                )
-                                assistant_count = assistant_count_result.scalar() or 0
-                                
-                                # Only generate title on first assistant response
-                                if assistant_count == 1:
-                                    try:
-                                        # Get the first user message
-                                        first_user_result = await session.execute(
-                                            select(ChatMessage)
-                                            .where(ChatMessage.session_id == session_key)
-                                            .where(ChatMessage.role == "user")
-                                            .order_by(ChatMessage.created_at)
-                                            .limit(1)
-                                        )
-                                        first_user_msg = first_user_result.scalar_one_or_none()
-                                        
-                                        if first_user_msg:
-                                            # Generate title using AI based on the conversation
-                                            title_ai_service = AIService()
-                                            await title_ai_service.reload_persona_config()
-                                            
-                                            title_prompt = f"Based on this conversation, generate a concise title (maximum 25 characters, no quotes or punctuation at the end):\n\nUser: {first_user_msg.message}\nAssistant: {full_response[:200]}"
-                                            
-                                            title_result = await title_ai_service.execute_with_system_prompt(
-                                                question=title_prompt,
-                                                system_prompt="You are a helpful assistant that generates concise, descriptive titles for conversations. Return only the title text, no quotes, no punctuation at the end, maximum 25 characters.",
-                                                max_tokens=50
-                                            )
-                                            
-                                            auto_title = title_result.get("answer", "").strip()
-                                            # Remove quotes if present
-                                            auto_title = auto_title.strip('"\'')
-                                            # Limit to 25 characters
-                                            if len(auto_title) > 25:
-                                                auto_title = auto_title[:25].strip()
-                                            # Remove trailing punctuation
-                                            auto_title = auto_title.rstrip('.,!?;:')
-                                            
-                                            # Fallback to first user message if AI generation failed
-                                            if not auto_title or len(auto_title) < 3:
-                                                auto_title = first_user_msg.message[:25].strip()
-                                                if len(first_user_msg.message) > 25:
-                                                    auto_title += "..."
-                                            
-                                            if chat_session:
-                                                chat_session.title = auto_title
-                                                chat_session.updated_at = datetime.now(timezone.utc)
-                                            else:
-                                                chat_session = ChatSession(
-                                                    session_id=session_key,
-                                                    title=auto_title
-                                                )
-                                                session.add(chat_session)
-                                            await session.commit()
-                                            logger.info(f"Generated AI title for session {session_key}: {auto_title}")
-                                    except Exception as e:
-                                        logger.error(f"Error generating AI title, using fallback: {e}", exc_info=True)
-                                        # Fallback to first user message
-                                        first_msg_result = await session.execute(
-                                            select(ChatMessage)
-                                            .where(ChatMessage.session_id == session_key)
-                                            .where(ChatMessage.role == "user")
-                                            .order_by(ChatMessage.created_at)
-                                            .limit(1)
-                                        )
-                                        first_msg = first_msg_result.scalar_one_or_none()
-                                        
-                                        if first_msg:
-                                            auto_title = first_msg.message[:25].strip()
-                                            if len(first_msg.message) > 25:
-                                                auto_title += "..."
-                                            
-                                            if chat_session:
-                                                chat_session.title = auto_title
-                                                chat_session.updated_at = datetime.now(timezone.utc)
-                                            else:
-                                                chat_session = ChatSession(
-                                                    session_id=session_key,
-                                                    title=auto_title
-                                                )
-                                                session.add(chat_session)
-                                            await session.commit()
                     except Exception as e:
                         logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
                         assistant_msg = None
@@ -4378,115 +4310,19 @@ async def send_chat_message(request: Request):
                             timeout=3,
                         )
                         message_id = assistant_msg.id
-                        
-                        # Auto-generate title using AI from first conversation if session doesn't have one
-                        async with AsyncSessionLocal() as session:
-                            session_result = await session.execute(
-                                select(ChatSession).where(ChatSession.session_id == session_key)
-                            )
-                            chat_session = session_result.scalar_one_or_none()
-                            
-                            if not chat_session or not chat_session.title:
-                                # Check if this is the first assistant message in this conversation
-                                assistant_count_result = await session.execute(
-                                    select(func.count(ChatMessage.id))
-                                    .where(ChatMessage.session_id == session_key)
-                                    .where(ChatMessage.role == "assistant")
-                                )
-                                assistant_count = assistant_count_result.scalar() or 0
-                                
-                                # Only generate title on first assistant response
-                                if assistant_count == 1:
-                                    try:
-                                        # Get the first user message
-                                        first_user_result = await session.execute(
-                                            select(ChatMessage)
-                                            .where(ChatMessage.session_id == session_key)
-                                            .where(ChatMessage.role == "user")
-                                            .order_by(ChatMessage.created_at)
-                                            .limit(1)
-                                        )
-                                        first_user_msg = first_user_result.scalar_one_or_none()
-                                        
-                                        if first_user_msg:
-                                            # Generate title using AI based on the conversation
-                                            title_ai_service = AIService()
-                                            await title_ai_service.reload_persona_config()
-                                            
-                                            title_prompt = f"Based on this conversation, generate a concise title (maximum 25 characters, no quotes or punctuation at the end):\n\nUser: {first_user_msg.message}\nAssistant: {full_response[:200]}"
-                                            
-                                            title_result = await title_ai_service.execute_with_system_prompt(
-                                                question=title_prompt,
-                                                system_prompt="You are a helpful assistant that generates concise, descriptive titles for conversations. Return only the title text, no quotes, no punctuation at the end, maximum 25 characters.",
-                                                max_tokens=50
-                                            )
-                                            
-                                            auto_title = title_result.get("answer", "").strip()
-                                            # Remove quotes if present
-                                            auto_title = auto_title.strip('"\'')
-                                            # Limit to 25 characters
-                                            if len(auto_title) > 25:
-                                                auto_title = auto_title[:25].strip()
-                                            # Remove trailing punctuation
-                                            auto_title = auto_title.rstrip('.,!?;:')
-                                            
-                                            # Fallback to first user message if AI generation failed
-                                            if not auto_title or len(auto_title) < 3:
-                                                auto_title = first_user_msg.message[:25].strip()
-                                                if len(first_user_msg.message) > 25:
-                                                    auto_title += "..."
-                                            
-                                            if chat_session:
-                                                chat_session.title = auto_title
-                                                chat_session.updated_at = datetime.now(timezone.utc)
-                                            else:
-                                                chat_session = ChatSession(
-                                                    session_id=session_key,
-                                                    title=auto_title
-                                                )
-                                                session.add(chat_session)
-                                            await session.commit()
-                                            logger.info(f"Generated AI title for session {session_key}: {auto_title}")
-                                    except Exception as e:
-                                        logger.error(f"Error generating AI title, using fallback: {e}", exc_info=True)
-                                        # Fallback to first user message
-                                        first_msg_result = await session.execute(
-                                            select(ChatMessage)
-                                            .where(ChatMessage.session_id == session_key)
-                                            .where(ChatMessage.role == "user")
-                                            .order_by(ChatMessage.created_at)
-                                            .limit(1)
-                                        )
-                                        first_msg = first_msg_result.scalar_one_or_none()
-                                        
-                                        if first_msg:
-                                            auto_title = first_msg.message[:25].strip()
-                                            if len(first_msg.message) > 25:
-                                                auto_title += "..."
-                                            
-                                            if chat_session:
-                                                chat_session.title = auto_title
-                                                chat_session.updated_at = datetime.now(timezone.utc)
-                                            else:
-                                                chat_session = ChatSession(
-                                                    session_id=session_key,
-                                                    title=auto_title
-                                                )
-                                                session.add(chat_session)
-                                            await session.commit()
                     except Exception as e:
                         logger.error(f"Failed to save assistant message, continuing without persistence: {e}")
                         assistant_msg = None
                     
                     # Save transcript
-                        try:
-                            persona_config = await load_persona_config(current_persona)
-                            model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
-                            # Get audio file path from message metadata if available
-                            audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
-                            save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_key, audio_file=audio_file_path, mode="conversational", expert_type=expert_type)
-                        except Exception as e:
-                            logger.warning(f"Failed to save transcript: {e}")
+                    try:
+                        persona_config = await load_persona_config(current_persona)
+                        model = persona_config.get("anthropic", {}).get("anthropic_model", settings.ai_model) if persona_config else settings.ai_model
+                        # Get audio file path from message metadata if available
+                        audio_file_path = assistant_msg.message_metadata.get("audio_file") if assistant_msg and assistant_msg.message_metadata else None
+                        save_transcript(question=message, answer=full_response, persona=current_persona, model=model, session_id=session_key, audio_file=audio_file_path, mode="conversational", expert_type=expert_type)
+                    except Exception as e:
+                        logger.warning(f"Failed to save transcript: {e}")
                     
                     yield f"data: {json.dumps({'chunk': '', 'done': True, 'message_id': message_id})}\n\n"
                 except Exception as e:
@@ -4557,7 +4393,7 @@ async def get_chat_sessions():
             result = await session.execute(
                 select(ChatSession)
                 .where(ChatSession.session_id.like('chat-%'))
-                .order_by(desc(ChatSession.updated_at))
+                .order_by(ChatSession.pinned.desc(), desc(ChatSession.updated_at))
             )
             sessions = result.scalars().all()
             
@@ -4567,6 +4403,8 @@ async def get_chat_sessions():
                     {
                         "session_id": s.session_id,
                         "title": s.title,
+                        "pinned": getattr(s, 'pinned', False),
+                        "preset_id": getattr(s, 'preset_id', None),
                         "created_at": s.created_at.isoformat() if s.created_at else None,
                         "updated_at": s.updated_at.isoformat() if s.updated_at else None
                     }
@@ -4644,6 +4482,273 @@ async def update_chat_session_title(session_id: str, request: Request):
     except Exception as e:
         logger.error(f"Error updating chat session title: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
+
+
+@app.put("/api/chat/sessions/{session_id}/preset")
+async def update_chat_session_preset(session_id: str, request: Request):
+    """Update the preset_id of a chat session."""
+    try:
+        data = await request.json()
+        preset_id = data.get("preset_id")  # Can be null to use system context
+        
+        async with AsyncSessionLocal() as db_session:
+            result = await db_session.execute(
+                select(ChatSession).where(ChatSession.session_id == session_id)
+            )
+            chat_session = result.scalar_one_or_none()
+            
+            if chat_session:
+                chat_session.preset_id = preset_id if preset_id else None
+                chat_session.updated_at = datetime.now(timezone.utc)
+            else:
+                # Create session if it doesn't exist
+                chat_session = ChatSession(
+                    session_id=session_id,
+                    preset_id=preset_id if preset_id else None
+                )
+                db_session.add(chat_session)
+            
+            await db_session.commit()
+            await db_session.refresh(chat_session)
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "preset_id": chat_session.preset_id
+            }
+    except Exception as e:
+        logger.error(f"Error updating chat session preset: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.put("/api/chat/sessions/{session_id}/pin")
+async def toggle_chat_session_pin(session_id: str, request: Request):
+    """Toggle the pinned status of a chat session."""
+    try:
+        data = await request.json()
+        pinned = data.get("pinned", False)
+        
+        async with AsyncSessionLocal() as db_session:
+            result = await db_session.execute(
+                select(ChatSession).where(ChatSession.session_id == session_id)
+            )
+            chat_session = result.scalar_one_or_none()
+            
+            if chat_session:
+                chat_session.pinned = pinned
+                chat_session.updated_at = datetime.now(timezone.utc)
+            else:
+                # Create session if it doesn't exist
+                chat_session = ChatSession(
+                    session_id=session_id,
+                    pinned=pinned
+                )
+                db_session.add(chat_session)
+            
+            await db_session.commit()
+            await db_session.refresh(chat_session)
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "pinned": chat_session.pinned
+            }
+    except Exception as e:
+        logger.error(f"Error toggling chat session pin: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.get("/api/prompt-presets")
+async def get_prompt_presets():
+    """Get all prompt presets."""
+    try:
+        async with AsyncSessionLocal() as db_session:
+            result = await db_session.execute(
+                select(PromptPreset).order_by(PromptPreset.created_at.desc())
+            )
+            presets = result.scalars().all()
+            return {
+                "success": True,
+                "presets": [
+                    {
+                        "id": p.id,
+                        "name": p.name,
+                        "context": p.context,
+                        "temperature": p.temperature,
+                        "top_p": p.top_p,
+                        "created_at": p.created_at.isoformat() if p.created_at else None,
+                        "updated_at": p.updated_at.isoformat() if p.updated_at else None
+                    }
+                    for p in presets
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error fetching prompt presets: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/prompt-presets")
+async def create_prompt_preset(request: Request):
+    """Create a new prompt preset."""
+    try:
+        data = await request.json()
+        async with AsyncSessionLocal() as db_session:
+            preset = PromptPreset(
+                name=data.get("name", "").strip(),
+                context=data.get("context", "").strip(),
+                temperature=data.get("temperature"),
+                top_p=data.get("top_p")
+            )
+            db_session.add(preset)
+            await db_session.commit()
+            await db_session.refresh(preset)
+            return {
+                "success": True,
+                "preset": {
+                    "id": preset.id,
+                    "name": preset.name,
+                    "context": preset.context,
+                    "temperature": preset.temperature,
+                    "top_p": preset.top_p
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error creating prompt preset: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/prompt-presets/improve")
+async def improve_prompt_preset(request: Request):
+    """Use AI to improve a prompt preset context."""
+    try:
+        data = await request.json()
+        name = data.get("name", "").strip()
+        context = data.get("context", "").strip()
+        
+        if not name or not context:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Name and context are required"})
+        
+        # Use AI service to improve the context
+        ai_service = AIService()
+        await ai_service.reload_persona_config()
+        
+        improvement_prompt = f"""You are an expert at crafting effective AI system prompts and persona definitions.
+
+The user wants to create a persona preset called "{name}" with the following initial context:
+
+{context}
+
+Please improve and refine this context to make it:
+1. More clear and specific
+2. Better structured for AI understanding
+3. More effective at guiding the AI's behavior
+4. Professional and well-written
+
+Return ONLY the improved context text, without any explanations, quotes, or additional commentary. The improved context should be ready to use as-is."""
+
+        try:
+            improved_context = await ai_service.execute_with_system_prompt(
+                question=improvement_prompt,
+                system_prompt="You are an expert at writing clear, effective AI prompts and persona definitions. Always return only the improved text without any additional commentary.",
+                max_tokens=1024
+            )
+            
+            # Check for errors in the response
+            if isinstance(improved_context, dict):
+                if improved_context.get("error"):
+                    error_msg = improved_context.get("answer", "Unknown error")
+                    logger.error(f"AI service error: {error_msg}")
+                    return JSONResponse(status_code=500, content={"success": False, "error": error_msg})
+                
+                improved_text = improved_context.get("answer", "")
+                if not improved_text:
+                    logger.warning("AI service returned empty answer")
+                    return JSONResponse(status_code=500, content={"success": False, "error": "AI service returned an empty response"})
+            else:
+                improved_text = str(improved_context)
+            
+            # Clean up the response (remove quotes if wrapped)
+            improved_text = improved_text.strip()
+            if improved_text.startswith('"') and improved_text.endswith('"'):
+                improved_text = improved_text[1:-1]
+            if improved_text.startswith("'") and improved_text.endswith("'"):
+                improved_text = improved_text[1:-1]
+            
+            # Ensure we have a valid improved text
+            if not improved_text:
+                improved_text = context  # Fallback to original if empty
+            
+            return {
+                "success": True,
+                "improved_context": improved_text
+            }
+        except Exception as e:
+            logger.error(f"Error calling AI service to improve context: {e}", exc_info=True)
+            error_message = str(e)
+            # Provide more user-friendly error messages
+            if "no_api_key" in error_message.lower() or "not configured" in error_message.lower():
+                error_message = "AI service is not configured. Please add your Anthropic API key in Settings."
+            return JSONResponse(status_code=500, content={"success": False, "error": f"Failed to improve context: {error_message}"})
+            
+    except Exception as e:
+        logger.error(f"Error improving prompt preset: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.put("/api/prompt-presets/{preset_id}")
+async def update_prompt_preset(preset_id: int, request: Request):
+    """Update an existing prompt preset."""
+    try:
+        data = await request.json()
+        async with AsyncSessionLocal() as db_session:
+            result = await db_session.execute(
+                select(PromptPreset).where(PromptPreset.id == preset_id)
+            )
+            preset = result.scalar_one_or_none()
+            if not preset:
+                return JSONResponse(status_code=404, content={"success": False, "error": "Preset not found"})
+            
+            preset.name = data.get("name", preset.name).strip()
+            preset.context = data.get("context", preset.context).strip()
+            preset.temperature = data.get("temperature")
+            preset.top_p = data.get("top_p")
+            
+            await db_session.commit()
+            await db_session.refresh(preset)
+            return {
+                "success": True,
+                "preset": {
+                    "id": preset.id,
+                    "name": preset.name,
+                    "context": preset.context,
+                    "temperature": preset.temperature,
+                    "top_p": preset.top_p
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error updating prompt preset: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.delete("/api/prompt-presets/{preset_id}")
+async def delete_prompt_preset(preset_id: int):
+    """Delete a prompt preset."""
+    try:
+        async with AsyncSessionLocal() as db_session:
+            result = await db_session.execute(
+                select(PromptPreset).where(PromptPreset.id == preset_id)
+            )
+            preset = result.scalar_one_or_none()
+            if not preset:
+                return JSONResponse(status_code=404, content={"success": False, "error": "Preset not found"})
+            
+            await db_session.delete(preset)
+            await db_session.commit()
+            return {"success": True}
+    except Exception as e:
+        logger.error(f"Error deleting prompt preset: {e}", exc_info=True)
+        await db_session.rollback()
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 @app.get("/api/chat/sessions/{session_id}/title")

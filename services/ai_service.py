@@ -407,6 +407,14 @@ class AIService(BaseService):
                     "max_tokens": 1024
                 }
             
+            # Override with preset values if provided
+            if input_data.get("system_prompt"):
+                system_prompt = input_data["system_prompt"]
+            if input_data.get("temperature") is not None:
+                persona_settings["temperature"] = input_data["temperature"]
+            if input_data.get("top_p") is not None:
+                persona_settings["top_p"] = input_data["top_p"]
+            
             # Build messages array with conversation history + current question
             messages = conversation_history.copy() if conversation_history else []
             messages.append({

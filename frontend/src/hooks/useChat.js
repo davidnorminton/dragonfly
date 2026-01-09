@@ -38,18 +38,36 @@ export function useChat(sessionId, mode, persona) {
   }, [sessionId, mode, persona]); // Removed offset from dependencies to prevent infinite loop
 
   const reloadHistory = useCallback(async () => {
+    if (!sessionId) {
+      console.log('[useChat] reloadHistory: No sessionId, skipping reload');
+      return; // Don't reload if no session
+    }
+    console.log('[useChat] reloadHistory: Reloading history for sessionId:', sessionId);
     setOffset(0);
     setHasMore(true);
-    setLoading(true);
+    // Don't set loading to true - keep current messages visible
     try {
       const data = await chatAPI.getHistory(50, 0, sessionId, mode, persona);
-      setMessages(data.messages || []);
-      setHasMore((data.messages?.length || 0) === 50);
+      console.log('[useChat] reloadHistory: Received', data?.messages?.length || 0, 'messages');
+      if (data && data.messages && data.messages.length > 0) {
+        // Only update if we got messages - merge with existing to avoid clearing
+        setMessages(prev => {
+          // If we have the same number or more messages, use the new data
+          // Otherwise keep existing and merge
+          const existingIds = new Set(prev.map(m => m.id));
+          const newMessages = data.messages.filter(m => !existingIds.has(m.id));
+          if (newMessages.length > 0 || prev.length === 0) {
+            return data.messages;
+          }
+          return prev;
+        });
+        setHasMore((data.messages?.length || 0) === 50);
+      } else {
+        console.warn('[useChat] reloadHistory: No messages in response, keeping current messages');
+      }
     } catch (error) {
-      console.error('Error loading chat history:', error);
+      console.error('[useChat] Error loading chat history:', error);
       // Don't clear messages on error - keep what we have
-    } finally {
-      setLoading(false);
     }
   }, [sessionId, mode, persona]);
 
@@ -84,9 +102,9 @@ export function useChat(sessionId, mode, persona) {
     }
   }, [isLoadingMore, hasMore, sessionId, mode, persona]);
 
-  const sendMessage = async (text, onChunk, onComplete, onError, mode = 'qa', expertType = 'general') => {
+  const sendMessage = async (text, onChunk, onComplete, onError, mode = 'qa', expertType = 'general', presetId = null) => {
     try {
-      const response = await chatAPI.sendMessage(text, sessionId, mode, expertType);
+      const response = await chatAPI.sendMessage(text, sessionId, mode, expertType, true, presetId);
       if (!response.ok) throw new Error('Failed to send message');
 
       const reader = response.body.getReader();
@@ -179,5 +197,9 @@ export function useChat(sessionId, mode, persona) {
     loadData();
   }, [sessionId, mode, persona]); // Inline load logic to avoid dependency issues
 
-  return { messages, loading, hasMore, isLoadingMore, loadHistory, loadMore, sendMessage, reloadHistory };
+  const addMessage = useCallback((message) => {
+    setMessages(prev => [...prev, message]);
+  }, []);
+
+  return { messages, loading, hasMore, isLoadingMore, loadHistory, loadMore, sendMessage, reloadHistory, addMessage };
 }

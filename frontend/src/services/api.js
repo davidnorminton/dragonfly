@@ -19,7 +19,7 @@ export const chatAPI = {
     if (persona) params.persona = persona;
     return api.get('/chat', { params }).then(res => res.data);
   },
-  sendMessage: async (message, sessionId, mode = 'qa', expertType = 'general', stream = true) => {
+  sendMessage: async (message, sessionId, mode = 'qa', expertType = 'general', stream = true, presetId = null) => {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -28,7 +28,8 @@ export const chatAPI = {
         session_id: sessionId, 
         mode,
         expert_type: expertType,
-        stream 
+        stream,
+        preset_id: presetId
       }),
     });
     return response;
@@ -38,6 +39,8 @@ export const chatAPI = {
   deleteSession: (sessionId) => api.delete(`/chat/sessions/${sessionId}`).then(res => res.data),
   getSessionTitle: (sessionId) => api.get(`/chat/sessions/${sessionId}/title`).then(res => res.data),
   updateSessionTitle: (sessionId, title) => api.put(`/chat/sessions/${sessionId}/title`, { title }).then(res => res.data),
+  togglePin: (sessionId, pinned) => api.put(`/chat/sessions/${sessionId}/pin`, { pinned }).then(res => res.data),
+  updateSessionPreset: (sessionId, presetId) => api.put(`/chat/sessions/${sessionId}/preset`, { preset_id: presetId }).then(res => res.data),
 };
 
 export const expertTypesAPI = {
