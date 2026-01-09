@@ -433,13 +433,36 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     const sessionId = deleteConfirmSession;
     setDeleteConfirmSession(null);
     
-    // Remove from sessions list
-    setChatSessions(prev => prev.filter(s => s !== sessionId));
-    // If it's the current session, switch to a new one
-    if (sessionId === currentSessionId) {
-      handleNewChat();
+    try {
+      // Delete from backend
+      const result = await chatAPI.deleteSession(sessionId);
+      
+      if (result.success) {
+        // Remove from sessions list
+        setChatSessions(prev => prev.filter(s => s !== sessionId));
+        // Remove from titles
+        setSessionTitles(prev => {
+          const newTitles = { ...prev };
+          delete newTitles[sessionId];
+          return newTitles;
+        });
+        // Remove from pinned sessions
+        setPinnedSessions(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(sessionId);
+          return newSet;
+        });
+        // If it's the current session, switch to a new one
+        if (sessionId === currentSessionId) {
+          handleNewChat();
+        }
+      } else {
+        alert(result.error || 'Failed to delete chat');
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+      alert('Error deleting chat: ' + error.message);
     }
-    // TODO: Add API call to delete from backend if needed
   };
 
   const cancelDelete = () => {

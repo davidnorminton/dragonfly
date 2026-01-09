@@ -35,6 +35,7 @@ export const chatAPI = {
   },
   getSessions: () => api.get('/chat/sessions').then(res => res.data),
   createSession: (sessionId) => api.post('/chat/sessions', { session_id: sessionId }).then(res => res.data),
+  deleteSession: (sessionId) => api.delete(`/chat/sessions/${sessionId}`).then(res => res.data),
   getSessionTitle: (sessionId) => api.get(`/chat/sessions/${sessionId}/title`).then(res => res.data),
   updateSessionTitle: (sessionId, title) => api.put(`/chat/sessions/${sessionId}/title`, { title }).then(res => res.data),
 };
