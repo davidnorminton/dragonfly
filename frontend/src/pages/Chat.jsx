@@ -23,6 +23,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [pinnedSessions, setPinnedSessions] = useState(new Set());
   const [deleteConfirmSession, setDeleteConfirmSession] = useState(null);
   const [generatingTitle, setGeneratingTitle] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (baseSessionId && baseSessionId.startsWith('chat-')) {
@@ -411,11 +412,11 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           [sessionId]: result.title
         }));
       } else {
-        alert(result.error || 'Failed to generate title');
+        console.error('Failed to generate title:', result.error);
+        // Error is handled silently or could show a toast notification
       }
     } catch (error) {
       console.error('Error generating title:', error);
-      alert('Error generating title: ' + error.message);
     } finally {
       setGeneratingTitle(null);
     }
@@ -431,13 +432,17 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     if (!deleteConfirmSession) return;
     
     const sessionId = deleteConfirmSession;
-    setDeleteConfirmSession(null);
+    setDeleteError(null);
     
     try {
       // Delete from backend
       const result = await chatAPI.deleteSession(sessionId);
       
-      if (result.success) {
+      if (result && result.success) {
+        // Close modal first
+        setDeleteConfirmSession(null);
+        setDeleteError(null);
+        
         // Remove from sessions list
         setChatSessions(prev => prev.filter(s => s !== sessionId));
         // Remove from titles
@@ -457,16 +462,19 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           handleNewChat();
         }
       } else {
-        alert(result.error || 'Failed to delete chat');
+        // Keep modal open and show error
+        setDeleteError((result && result.error) || 'Failed to delete chat');
       }
     } catch (error) {
       console.error('Error deleting chat:', error);
-      alert('Error deleting chat: ' + error.message);
+      // Keep modal open and show error
+      setDeleteError(error.message || 'Error deleting chat');
     }
   };
 
   const cancelDelete = () => {
     setDeleteConfirmSession(null);
+    setDeleteError(null);
   };
 
   // Close menu when clicking outside
@@ -801,6 +809,9 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                 {sessionTitles[deleteConfirmSession] || getSessionDisplayName(deleteConfirmSession)}
               </p>
               <p className="delete-confirm-warning">This action cannot be undone.</p>
+              {deleteError && (
+                <p className="delete-confirm-error">{deleteError}</p>
+              )}
             </div>
             <div className="delete-confirm-actions">
               <button className="delete-confirm-cancel" onClick={cancelDelete}>
