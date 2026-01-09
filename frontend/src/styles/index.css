@@ -4701,7 +4701,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: text;
 }
 
 .chatgpt-chat-title-edit {

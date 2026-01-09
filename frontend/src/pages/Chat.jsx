@@ -616,11 +616,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                       <button onClick={handleCancelEdit} className="chatgpt-title-cancel">✕</button>
                     </div>
                   ) : (
-                    <span 
-                      onDoubleClick={(e) => handleStartEditTitle(session, e)}
-                      title="Double-click to edit"
-                      className="chatgpt-chat-title"
-                    >
+                    <span className="chatgpt-chat-title">
                       {getSessionDisplayName(session)}
                     </span>
                   )}
