@@ -7,11 +7,15 @@ An always-listening home assistant with local AI processing, modular data collec
 - **Core Processing Unit**: Accepts data via WebSockets and manages job execution
 - **Services**: Modular service architecture for AI and RAG processing
 - **Data Collection**: Extensible module system for collecting weather, traffic, news, and more
-- **Database**: SQL database (SQLite by default, easily switchable to PostgreSQL)
+- **Database**: SQL database (SQLite by default, easily switchable to PostgreSQL) with interactive database viewer
 - **Web GUI**: Real-time web interface for monitoring and control
 - **Device Connectivity**: WebSocket-based communication with home devices
-- **AI Chat**: Interactive chat interface with multiple personas and conversational modes
+- **AI Chat**: Interactive chat interface with multiple personas, custom context presets, and conversation management
 - **Text-to-Speech**: Audio generation for AI responses using Fish Audio
+- **Music Library**: Full music library management with search, playlists, and analytics
+- **Search Functionality**: Unified search across music library and chat sessions with dropdown results
+- **Chat Management**: Pin important conversations, organize with custom context presets, and manage multiple chat sessions
+- **Custom Context Presets**: Create and manage custom AI context presets with adjustable temperature and top_p parameters
 
 ## Project Structure
 
@@ -484,9 +488,13 @@ Access the web interface at http://localhost:1337 after starting the server. The
 - Real-time system monitoring (CPU, RAM, Disk, Uptime)
 - Weather and traffic information
 - News feed
-- Interactive AI chat with multiple personas
+- Interactive AI chat with multiple personas and custom context presets
+- Music library with search, playlists, and playback controls
+- Unified search across music and chat with dropdown results
+- Chat session management (pin, rename, delete, organize)
 - Device management
 - Settings configuration
+- Database viewer for inspecting and editing database tables
 
 ### WebSocket API
 
@@ -555,6 +563,34 @@ curl -X POST http://localhost:1337/api/chat \
   }'
 ```
 
+## Recent Updates
+
+### Chat Enhancements
+- **Custom Context Presets**: Create custom AI context presets with adjustable temperature and top_p parameters. Each chat session can use a different preset or the default system context.
+- **Chat Pinning**: Pin important conversations to keep them at the top of the chat list. Pinned status is persisted in the database.
+- **Search Results**: Unified search dropdown showing results for both music library (artists, albums, songs) and chat sessions (with context/persona information).
+- **Improved Message Handling**: Smooth message loading without flickering, with proper context preservation across conversations.
+
+### Music Player
+- **Synchronized Controls**: Play/pause buttons across the interface are now synchronized, ensuring consistent state.
+- **Search Integration**: Search results include images for artists and albums, with quick navigation to selected items.
+
+### Database Viewer
+- **Interactive Table Viewer**: Browse and edit database tables directly from the Settings page. View table schemas, row counts, and paginated data.
+- **All Tables Visible**: All database tables are automatically discovered and displayed, including:
+  - Chat sessions and messages
+  - Prompt presets
+  - Music library (artists, albums, songs, playlists)
+  - Device connections and telemetry
+  - Collected data (weather, traffic, news)
+  - System configuration
+  - Octopus Energy data
+  - Alarms
+
+### Testing
+- **Comprehensive Test Suite**: Added integration tests for prompt presets CRUD operations and chat session management (pinning, preset selection).
+- **Test Infrastructure**: Improved test fixtures and async test client support.
+
 ## Architecture
 
 ### Core Components
@@ -563,7 +599,7 @@ curl -X POST http://localhost:1337/api/chat \
 2. **Job Manager**: Handles job queue and asynchronous execution
 3. **WebSocket Server**: Receives data and commands from clients
 4. **Services**: Execute specific tasks (AI, RAG, TTS, etc.)
-5. **Database**: Stores jobs, device connections, collected data, and chat messages
+5. **Database**: Stores jobs, device connections, collected data, chat messages, prompt presets, and more
 
 ### Service System
 
@@ -572,6 +608,19 @@ Services extend `BaseService` and implement the `execute()` method. They are reg
 ### Data Collectors
 
 Data collectors extend `BaseCollector` and implement the `collect()` method. They can be easily added to collect data from various sources.
+
+### Database Models
+
+The application uses SQLAlchemy with async support. Key models include:
+- **ChatSession**: Chat sessions with titles, pinning status, and preset associations
+- **ChatMessage**: Individual chat messages with role, content, and metadata
+- **PromptPreset**: Custom context presets with temperature and top_p parameters
+- **MusicArtist, MusicAlbum, MusicSong**: Music library structure
+- **DeviceConnection, DeviceTelemetry**: Device management and monitoring
+- **CollectedData**: Cached data from various collectors
+- **SystemConfig, ApiKeysConfig, LocationConfig, PersonaConfig**: System configuration
+- **Alarm**: Alarm scheduling and management
+- **OctopusEnergyConsumption, OctopusEnergyTariff**: Energy monitoring
 
 ## Development
 

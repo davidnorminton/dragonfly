@@ -8,18 +8,17 @@ from pathlib import Path
 from typing import AsyncGenerator, Generator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+import httpx
 
 # Import settings and database
 from config.settings import settings
 from database.base import Base, AsyncSessionLocal
 from database import models
+from web.main import app
 
 
-# Test database URL (PostgreSQL by default; override with TEST_DATABASE_URL env)
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://dragonfly:dragonfly@localhost:5432/dragonfly_test",
-)
+# Use SQLite in-memory database for tests
+TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
 @pytest.fixture(scope="session")
@@ -32,8 +31,8 @@ def event_loop():
 
 @pytest.fixture(scope="function")
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Create a test database session."""
-    # Create test engine
+    """Create a test database session using in-memory SQLite."""
+    # Create test engine with SQLite in-memory database
     test_engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
@@ -57,9 +56,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with TestSessionLocal() as session:
         yield session
     
-    # Cleanup
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    # Cleanup - SQLite in-memory database is automatically cleaned up
     await test_engine.dispose()
 
 
@@ -133,5 +130,14 @@ def mock_expert_type() -> dict:
         "system_prompt": "You are a test expert assistant.",
         "icon": "🧪"
     }
+
+
+@pytest.fixture(scope="function")
+async def test_client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Create an async test client for FastAPI."""
+    from httpx import ASGITransport
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
 
 
