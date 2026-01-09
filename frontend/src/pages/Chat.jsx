@@ -21,6 +21,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [openMenuId, setOpenMenuId] = useState(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const [pinnedSessions, setPinnedSessions] = useState(new Set());
+  const [deleteConfirmSession, setDeleteConfirmSession] = useState(null);
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (baseSessionId && baseSessionId.startsWith('chat-')) {
@@ -102,6 +103,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
   // Load chat sessions from API - but don't overwrite if we just added a new one
   const isAddingNewSessionRef = useRef(false);
+  const hasLoadedSessionsRef = useRef(false);
   
   useEffect(() => {
     const loadSessions = async () => {
@@ -122,8 +124,6 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           }
           setChatSessions(sessionList);
           
-          // Don't auto-select a session - let user choose or create new one
-          
           // Load titles from sessions
           const titles = {};
           data.sessions.forEach(s => {
@@ -132,15 +132,21 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
             }
           });
           setSessionTitles(prev => ({ ...prev, ...titles }));
+          
+          hasLoadedSessionsRef.current = true;
         }
       } catch (err) {
         console.error('Error loading sessions:', err);
       }
     };
-    // Debounce to avoid too many calls
-    const timeoutId = setTimeout(loadSessions, 500);
-    return () => clearTimeout(timeoutId);
-  }, [currentSessionId]); // Reload when currentSessionId changes to pick up new sessions
+    
+    // Only load sessions once on initial mount
+    // Don't reload when currentSessionId changes to prevent auto-creation
+    if (!hasLoadedSessionsRef.current) {
+      const timeoutId = setTimeout(loadSessions, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, []); // Empty dependency array - only run once on mount
 
   // Note: reloadHistory is handled by useChat hook when sessionId changes
   // No need to call it here to avoid double-loading
@@ -384,18 +390,29 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     });
   };
 
-  const handleDelete = async (sessionId, e) => {
+  const handleDelete = (sessionId, e) => {
     e.stopPropagation();
     setOpenMenuId(null);
-    if (confirm('Are you sure you want to delete this chat?')) {
-      // Remove from sessions list
-      setChatSessions(prev => prev.filter(s => s !== sessionId));
-      // If it's the current session, switch to a new one
-      if (sessionId === currentSessionId) {
-        handleNewChat();
-      }
-      // TODO: Add API call to delete from backend if needed
+    setDeleteConfirmSession(sessionId);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmSession) return;
+    
+    const sessionId = deleteConfirmSession;
+    setDeleteConfirmSession(null);
+    
+    // Remove from sessions list
+    setChatSessions(prev => prev.filter(s => s !== sessionId));
+    // If it's the current session, switch to a new one
+    if (sessionId === currentSessionId) {
+      handleNewChat();
     }
+    // TODO: Add API call to delete from backend if needed
+  };
+
+  const cancelDelete = () => {
+    setDeleteConfirmSession(null);
   };
 
   // Close menu when clicking outside
@@ -709,6 +726,32 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmSession && (
+        <div className="delete-confirm-overlay" onClick={cancelDelete}>
+          <div className="delete-confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="delete-confirm-header">
+              <h3>Delete Chat</h3>
+            </div>
+            <div className="delete-confirm-body">
+              <p>Are you sure you want to delete this chat?</p>
+              <p className="delete-confirm-session-name">
+                {sessionTitles[deleteConfirmSession] || getSessionDisplayName(deleteConfirmSession)}
+              </p>
+              <p className="delete-confirm-warning">This action cannot be undone.</p>
+            </div>
+            <div className="delete-confirm-actions">
+              <button className="delete-confirm-cancel" onClick={cancelDelete}>
+                Cancel
+              </button>
+              <button className="delete-confirm-delete" onClick={confirmDelete}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
