@@ -273,3 +273,65 @@ async def create_persona_config(persona_name: str, config: Dict[str, Any], sessi
             except:
                 pass
         return False
+
+
+async def delete_persona_config(persona_name: str, session: Optional[AsyncSession] = None) -> bool:
+    """Delete a persona configuration from database.
+    
+    Args:
+        persona_name: Name of the persona to delete.
+        session: Optional database session. If None, creates a new one.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    from database.base import AsyncSessionLocal
+    from database.models import PersonaConfig
+    from sqlalchemy import delete as sql_delete
+    
+    try:
+        # Don't allow deleting 'default' persona
+        if persona_name == 'default':
+            logger.warning("Cannot delete default persona")
+            return False
+        
+        if session:
+            db_session = session
+            should_close = False
+        else:
+            db_session = AsyncSessionLocal()
+            should_close = True
+        
+        try:
+            # Check if persona is currently active
+            result = await db_session.execute(
+                select(PersonaConfig).where(
+                    PersonaConfig.name == persona_name,
+                    PersonaConfig.is_active == "true"
+                )
+            )
+            if result.scalar_one_or_none():
+                logger.warning(f"Cannot delete active persona {persona_name}")
+                return False
+            
+            # Delete the persona
+            await db_session.execute(
+                sql_delete(PersonaConfig).where(PersonaConfig.name == persona_name)
+            )
+            
+            if not session:  # Only commit if we created the session
+                await db_session.commit()
+            
+            logger.info(f"Deleted persona config: {persona_name}")
+            return True
+        finally:
+            if should_close:
+                await db_session.close()
+    except Exception as e:
+        logger.error(f"Error deleting persona config {persona_name}: {e}", exc_info=True)
+        if not session:
+            try:
+                await db_session.rollback()
+            except:
+                pass
+        return False

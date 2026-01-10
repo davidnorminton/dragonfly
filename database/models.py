@@ -118,6 +118,20 @@ class PromptPreset(Base):
         return f"<PromptPreset {self.name}>"
 
 
+class AIModelCache(Base):
+    """Model for caching AI model lists from providers."""
+    __tablename__ = "ai_model_cache"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    provider = Column(String, nullable=False, unique=True, index=True)  # anthropic, openai, etc.
+    models = Column(JSON, nullable=False)  # List of available models
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<AIModelCache {self.provider}>"
+
+
 class MusicArtist(Base):
     """Artist table."""
     __tablename__ = "music_artists"

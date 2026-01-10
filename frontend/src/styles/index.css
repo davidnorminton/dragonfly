@@ -5916,7 +5916,8 @@ body {
 }
 
 .chatgpt-message.user .chatgpt-message-content {
-  max-width: fit-content;
+  max-width: 50%;
+  margin-left: auto;
 }
 
 .chatgpt-message.assistant .chatgpt-message-content {
@@ -5933,6 +5934,7 @@ body {
   color: #e0e0e0;
   word-wrap: break-word;
   display: inline-block;
+  max-width: 100%;
 }
 
 .chatgpt-message.assistant .chatgpt-message-text {

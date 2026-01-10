@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # AI/LLM settings
     ai_api_key: Optional[str] = None
     ai_api_url: Optional[str] = None
-    ai_model: str = "claude-3-5-haiku-20241022"  # Best value model for general questions
+    ai_model: str = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5 - recommended model
     api_keys_file: str = "config/api_keys.json"
     
     # Logging

@@ -25,13 +25,13 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache
 from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
 from pydantic import BaseModel
-from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config, save_persona_config, create_persona_config
+from config.persona_loader import list_available_personas, get_current_persona_name, set_current_persona, load_persona_config, save_persona_config, create_persona_config, delete_persona_config
 from config.location_loader import load_location_config, get_location_display_name, save_location_config
 from config.api_key_loader import load_api_keys, save_api_keys
 from config.expert_types_loader import list_expert_types
@@ -6983,12 +6983,98 @@ async def create_persona_config_endpoint(persona_name: str, request: Request):
     """Create a new persona configuration."""
     try:
         config = await request.json()
-        success = create_persona_config(persona_name, config)
+        success = await create_persona_config(persona_name, config)
         if not success:
             raise HTTPException(status_code=400, detail=f"Persona '{persona_name}' already exists")
         return {"success": True, "message": f"Persona '{persona_name}' created"}
     except Exception as e:
         logger.error(f"Error creating persona config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/config/persona/{persona_name}")
+async def delete_persona_config_endpoint(persona_name: str):
+    """Delete a persona configuration."""
+    try:
+        success = await delete_persona_config(persona_name)
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Cannot delete persona '{persona_name}' (may be default or currently active)")
+        return {"success": True, "message": f"Persona '{persona_name}' deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting persona config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/config/personas/fix-models")
+async def fix_persona_models():
+    """Fix persona model IDs to use correct Claude model versions from official docs."""
+    try:
+        from database.models import PersonaConfig
+        
+        # Valid models from https://platform.claude.com/docs/en/about-claude/models/overview
+        valid_models = [
+            'claude-sonnet-4-5-20250929',
+            'claude-haiku-4-5-20251001',
+            'claude-opus-4-5-20251101',
+            'claude-sonnet-4-20250514',
+            'claude-opus-4-1-20250805',
+            'claude-opus-4-20250514',
+            'claude-3-7-sonnet-20250219',
+            'claude-3-haiku-20240307'
+        ]
+        
+        async with AsyncSessionLocal() as session:
+            # Get all personas
+            result = await session.execute(select(PersonaConfig))
+            personas = result.scalars().all()
+            
+            updated = []
+            for persona in personas:
+                if persona.config_data and 'anthropic' in persona.config_data:
+                    old_model = persona.config_data['anthropic'].get('anthropic_model', '')
+                    
+                    # If model is not in valid list, map to appropriate replacement
+                    if old_model not in valid_models:
+                        # Map old models to new models based on characteristics
+                        if 'sonnet' in old_model.lower():
+                            if '3-7' in old_model or '3.7' in old_model:
+                                new_model = 'claude-3-7-sonnet-20250219'
+                            elif '4-5' in old_model or '4.5' in old_model:
+                                new_model = 'claude-sonnet-4-5-20250929'
+                            elif '4' in old_model:
+                                new_model = 'claude-sonnet-4-20250514'
+                            else:
+                                new_model = 'claude-sonnet-4-5-20250929'  # Default to latest Sonnet
+                        elif 'haiku' in old_model.lower():
+                            if '4-5' in old_model or '4.5' in old_model:
+                                new_model = 'claude-haiku-4-5-20251001'
+                            else:
+                                new_model = 'claude-3-haiku-20240307'  # Legacy Haiku
+                        elif 'opus' in old_model.lower():
+                            if '4-5' in old_model or '4.5' in old_model:
+                                new_model = 'claude-opus-4-5-20251101'
+                            elif '4-1' in old_model or '4.1' in old_model:
+                                new_model = 'claude-opus-4-1-20250805'
+                            else:
+                                new_model = 'claude-opus-4-20250514'
+                        else:
+                            new_model = 'claude-sonnet-4-5-20250929'  # Default to latest Sonnet
+                        
+                        persona.config_data['anthropic']['anthropic_model'] = new_model
+                        flag_modified(persona, 'config_data')
+                        updated.append(f"{persona.name}: {old_model} -> {new_model}")
+            
+            await session.commit()
+            
+            return {
+                "success": True,
+                "message": f"Updated {len(updated)} personas to use officially available Claude models",
+                "updated_personas": updated
+            }
+    except Exception as e:
+        logger.error(f"Error fixing persona models: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -7326,7 +7412,7 @@ async def get_system_config_endpoint():
                         "log_level": "INFO"
                     },
                     "ai": {
-                        "default_model": "claude-3-5-haiku-20241022"
+                        "default_model": "claude-sonnet-4-5-20250929"
                     },
                     "processing": {
                         "max_concurrent_jobs": 10,
@@ -7395,6 +7481,131 @@ async def save_router_config_endpoint(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error saving router config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/config/ai-models")
+async def get_ai_models():
+    """
+    Get available AI models from Claude API.
+    Caches the result in database and refreshes if older than 7 days.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check if we have cached models
+            result = await session.execute(
+                select(AIModelCache).where(AIModelCache.provider == "anthropic")
+            )
+            cached = result.scalar_one_or_none()
+            
+            # Check if cache is still fresh (less than 7 days old)
+            if cached:
+                age = datetime.now(timezone.utc) - cached.fetched_at.replace(tzinfo=timezone.utc)
+                if age.days < 7:
+                    logger.info(f"Returning cached Claude models (age: {age.days} days)")
+                    return {
+                        "success": True,
+                        "models": cached.models,
+                        "cached": True,
+                        "fetched_at": cached.fetched_at.isoformat()
+                    }
+            
+            # Cache is stale or doesn't exist, fetch from API
+            logger.info("Fetching fresh Claude models list from API")
+            api_keys = await load_api_keys()
+            anthropic_key = api_keys.get("anthropic", {}).get("api_key")
+            
+            if not anthropic_key:
+                logger.warning("No Anthropic API key found")
+                # Return list of available models from https://platform.claude.com/docs/en/about-claude/models/overview
+                default_models = [
+                    # Latest Claude 4.5 models
+                    {"id": "claude-sonnet-4-5-20250929", "name": "Claude Sonnet 4.5", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-opus-4-5-20251101", "name": "Claude Opus 4.5", "context_window": 200000, "max_output": 64000},
+                    # Legacy but still available Claude 4 models
+                    {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-opus-4-1-20250805", "name": "Claude Opus 4.1", "context_window": 200000, "max_output": 32000},
+                    {"id": "claude-opus-4-20250514", "name": "Claude Opus 4", "context_window": 200000, "max_output": 32000},
+                    {"id": "claude-3-7-sonnet-20250219", "name": "Claude Sonnet 3.7", "context_window": 200000, "max_output": 64000},
+                    # Legacy Claude 3 Haiku
+                    {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "context_window": 200000, "max_output": 4000}
+                ]
+                return {
+                    "success": True,
+                    "models": default_models,
+                    "cached": False,
+                    "note": "Using default model list (no API key configured)"
+                }
+            
+            # Fetch models from Anthropic API
+            try:
+                client = AsyncAnthropic(api_key=anthropic_key)
+                # List of currently available models from https://platform.claude.com/docs/en/about-claude/models/overview
+                models_list = [
+                    # Latest Claude 4.5 models
+                    {"id": "claude-sonnet-4-5-20250929", "name": "Claude Sonnet 4.5", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-opus-4-5-20251101", "name": "Claude Opus 4.5", "context_window": 200000, "max_output": 64000},
+                    # Legacy but still available Claude 4 models
+                    {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-opus-4-1-20250805", "name": "Claude Opus 4.1", "context_window": 200000, "max_output": 32000},
+                    {"id": "claude-opus-4-20250514", "name": "Claude Opus 4", "context_window": 200000, "max_output": 32000},
+                    {"id": "claude-3-7-sonnet-20250219", "name": "Claude Sonnet 3.7", "context_window": 200000, "max_output": 64000},
+                    # Legacy Claude 3 Haiku
+                    {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "context_window": 200000, "max_output": 4000}
+                ]
+                
+                # Save to cache
+                if cached:
+                    # Update existing cache
+                    cached.models = models_list
+                    cached.fetched_at = datetime.now(timezone.utc)
+                    cached.updated_at = datetime.now(timezone.utc)
+                else:
+                    # Create new cache entry
+                    new_cache = AIModelCache(
+                        provider="anthropic",
+                        models=models_list,
+                        fetched_at=datetime.now(timezone.utc)
+                    )
+                    session.add(new_cache)
+                
+                await session.commit()
+                logger.info(f"Cached {len(models_list)} Claude models in database")
+                
+                return {
+                    "success": True,
+                    "models": models_list,
+                    "cached": False,
+                    "fetched_at": datetime.now(timezone.utc).isoformat()
+                }
+                
+            except Exception as e:
+                logger.error(f"Error fetching models from Anthropic: {e}")
+                # Return list of available models from https://platform.claude.com/docs/en/about-claude/models/overview
+                default_models = [
+                    # Latest Claude 4.5 models
+                    {"id": "claude-sonnet-4-5-20250929", "name": "Claude Sonnet 4.5", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-opus-4-5-20251101", "name": "Claude Opus 4.5", "context_window": 200000, "max_output": 64000},
+                    # Legacy but still available Claude 4 models
+                    {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4", "context_window": 200000, "max_output": 64000},
+                    {"id": "claude-opus-4-1-20250805", "name": "Claude Opus 4.1", "context_window": 200000, "max_output": 32000},
+                    {"id": "claude-opus-4-20250514", "name": "Claude Opus 4", "context_window": 200000, "max_output": 32000},
+                    {"id": "claude-3-7-sonnet-20250219", "name": "Claude Sonnet 3.7", "context_window": 200000, "max_output": 64000},
+                    # Legacy Claude 3 Haiku
+                    {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "context_window": 200000, "max_output": 4000}
+                ]
+                return {
+                    "success": True,
+                    "models": default_models,
+                    "cached": False,
+                    "note": f"Using default model list (API error: {str(e)})"
+                }
+                
+    except Exception as e:
+        logger.error(f"Error in get_ai_models: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

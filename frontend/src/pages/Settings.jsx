@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { configAPI, systemAPI, routerAPI, musicAPI, personaAPI, databaseAPI } from '../services/api';
 import { useRouterConfig } from '../hooks/useRouterConfig';
+import { useAIModels } from '../hooks/useAIModels';
 import { FolderPicker, FilePicker } from '../components/FolderPicker';
 import { ConversionProgressModal } from '../components/ConversionProgressModal';
 import { CoverArtModal } from '../components/CoverArtModal';
@@ -13,6 +14,17 @@ export function SettingsPage({ onNavigate }) {
   const [personaFields, setPersonaFields] = useState({});
   const [newPersonaName, setNewPersonaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [newPersonaFields, setNewPersonaFields] = useState({
+    title: '',
+    model: 'claude-sonnet-4-5-20250929',
+    context: '# === System message ===\nYou are an AI assistant.\n\nCRITICAL: Your responses must consist solely of natural, spoken words and basic punctuation. Do NOT use any markdown formatting.\n\n# === Response guidelines ===\n- Be clear and concise\n- Use plain text only\n- Avoid formatting symbols',
+    temperature: 0.6,
+    top_p: 0.9,
+    max_tokens: 650,
+    voice_id: '',
+    voice_engine: 's1'
+  });
+  const { models: aiModels, loading: modelsLoading } = useAIModels();
   const [locationConfig, setLocationConfig] = useState('');
   const [apiKeysConfig, setApiKeysConfig] = useState('');
   const [apiKeysFields, setApiKeysFields] = useState({});
@@ -360,6 +372,32 @@ export function SettingsPage({ onNavigate }) {
     }
   };
 
+  const deletePersonaConfig = async () => {
+    if (!selectedPersona) return;
+    
+    if (!confirm(`Are you sure you want to delete the persona "${selectedPersona}"? This action cannot be undone.`)) {
+      return;
+    }
+    
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      await configAPI.deletePersona(selectedPersona);
+      setSuccess(`Deleted ${selectedPersona} successfully`);
+      setSelectedPersona(null);
+      setPersonaConfig('');
+      setPersonaFields({});
+      await loadPersonas();
+    } catch (err) {
+      console.error('Error deleting persona:', err);
+      setError(err.response?.data?.detail || err.message || 'Failed to delete persona.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const createNewPersona = async () => {
     if (!newPersonaName.trim()) {
       setError('Persona name is required');
@@ -371,19 +409,15 @@ export function SettingsPage({ onNavigate }) {
     setSuccess(null);
 
     try {
-      // Create a default persona config based on the structure
-      const defaultConfig = {
-        "title": newPersonaName.charAt(0).toUpperCase() + newPersonaName.slice(1),
+      // Create persona config from form fields
+      const personaConfig = {
+        "title": newPersonaFields.title || newPersonaName.charAt(0).toUpperCase() + newPersonaName.slice(1),
         "anthropic": {
-          "anthropic_model": "claude-3-5-haiku-20241022",
-          "prompt_context": "# === System message ===\nYou are an AI assistant.\n\nCRITICAL: Your responses must consist solely of natural, spoken words and basic punctuation. Do NOT use any markdown formatting.\n\n# === Response guidelines ===\n- Be clear and concise\n- Use plain text only\n- Avoid formatting symbols",
-          "temperature": 0.6,
-          "top_p": 0.9,
-          "max_tokens": 650
-        },
-        "fish_audio": {
-          "voice_id": "f19179ec09af4963bb6c4f7359af8d1e",
-          "voice_engine": "s1"
+          "anthropic_model": newPersonaFields.model,
+          "prompt_context": newPersonaFields.context,
+          "temperature": parseFloat(newPersonaFields.temperature),
+          "top_p": parseFloat(newPersonaFields.top_p),
+          "max_tokens": parseInt(newPersonaFields.max_tokens)
         },
         "filler": {
           "answer_question": "let_me_check_my_data_stores.mp3",
@@ -392,9 +426,27 @@ export function SettingsPage({ onNavigate }) {
         }
       };
 
-      await configAPI.createPersona(newPersonaName, defaultConfig);
+      // Add Fish Audio config only if voice_id is provided
+      if (newPersonaFields.voice_id && newPersonaFields.voice_id.trim()) {
+        personaConfig.fish_audio = {
+          "voice_id": newPersonaFields.voice_id.trim(),
+          "voice_engine": newPersonaFields.voice_engine || "s1"
+        };
+      }
+
+      await configAPI.createPersona(newPersonaName, personaConfig);
       setSuccess(`Created persona ${newPersonaName} successfully`);
       setNewPersonaName('');
+      setNewPersonaFields({
+        title: '',
+        model: 'claude-sonnet-4-5-20250929',
+        context: '# === System message ===\nYou are an AI assistant.\n\nCRITICAL: Your responses must consist solely of natural, spoken words and basic punctuation. Do NOT use any markdown formatting.\n\n# === Response guidelines ===\n- Be clear and concise\n- Use plain text only\n- Avoid formatting symbols',
+        temperature: 0.6,
+        top_p: 0.9,
+        max_tokens: 650,
+        voice_id: '',
+        voice_engine: 's1'
+      });
       setIsCreating(false);
       await loadPersonas();
       await loadPersonaConfig(newPersonaName);
@@ -645,6 +697,12 @@ export function SettingsPage({ onNavigate }) {
             Music
           </button>
           <button
+            className={activeTab === 'videos' ? 'active' : ''}
+            onClick={() => setActiveTab('videos')}
+          >
+            Videos
+          </button>
+          <button
             className={activeTab === 'router' ? 'active' : ''}
             onClick={() => setActiveTab('router')}
           >
@@ -796,21 +854,178 @@ export function SettingsPage({ onNavigate }) {
               </div>
 
               {isCreating && (
-                <div className="create-persona-form">
-                  <input
-                    type="text"
-                    placeholder="Persona name (e.g., my_ai)"
-                    value={newPersonaName}
-                    onChange={(e) => setNewPersonaName(e.target.value)}
-                    className="persona-name-input"
-                  />
-                  <button
-                    onClick={createNewPersona}
-                    disabled={saving || !newPersonaName.trim()}
-                    className="save-button"
-                  >
-                    {saving ? 'Creating...' : 'Create Persona'}
-                  </button>
+                <div style={{ 
+                  background: 'rgba(255,255,255,0.03)', 
+                  border: '1px solid rgba(255,255,255,0.1)', 
+                  borderRadius: '8px', 
+                  padding: '24px', 
+                  marginBottom: '24px',
+                  maxWidth: '1200px'
+                }}>
+                  <h4 style={{ color: '#fff', marginBottom: '24px', fontSize: '1.2em', fontWeight: 600 }}>Create New Persona</h4>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                    <div className="form-group">
+                      <label>Persona Name (lowercase, underscores for spaces)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g., my_assistant"
+                        value={newPersonaName}
+                        onChange={(e) => setNewPersonaName(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
+                      />
+                      <span className="form-help">Internal name for the persona file</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Display Title</label>
+                      <input
+                        type="text"
+                        placeholder="e.g., My Assistant"
+                        value={newPersonaFields.title}
+                        onChange={(e) => setNewPersonaFields(prev => ({ ...prev, title: e.target.value }))}
+                      />
+                      <span className="form-help">Display name shown in the UI (optional)</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                    <div className="form-group">
+                      <label>AI Model</label>
+                      <select
+                        value={newPersonaFields.model}
+                        onChange={(e) => setNewPersonaFields(prev => ({ ...prev, model: e.target.value }))}
+                        disabled={modelsLoading}
+                      >
+                        {modelsLoading ? (
+                          <option>Loading models...</option>
+                        ) : (
+                          aiModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.name}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      {aiModels.length > 0 && aiModels.find(m => m.id === newPersonaFields.model) && (
+                        <span className="form-help">
+                          {aiModels.find(m => m.id === newPersonaFields.model).context_window 
+                            ? `Context: ${aiModels.find(m => m.id === newPersonaFields.model).context_window.toLocaleString()} tokens`
+                            : ''
+                          }
+                        </span>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label>Temperature</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="2"
+                        value={newPersonaFields.temperature}
+                        onChange={(e) => setNewPersonaFields(prev => ({ ...prev, temperature: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Top P</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="1"
+                        value={newPersonaFields.top_p}
+                        onChange={(e) => setNewPersonaFields(prev => ({ ...prev, top_p: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Max Tokens</label>
+                      <input
+                        type="number"
+                        value={newPersonaFields.max_tokens}
+                        onChange={(e) => setNewPersonaFields(prev => ({ ...prev, max_tokens: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '24px' }}>
+                    <label>System Prompt / Context</label>
+                    <textarea
+                      value={newPersonaFields.context}
+                      onChange={(e) => setNewPersonaFields(prev => ({ ...prev, context: e.target.value }))}
+                      className="config-textarea"
+                      rows={6}
+                      placeholder="Enter the system prompt that defines this persona's behavior..."
+                      style={{ width: '100%', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <div style={{ 
+                    marginTop: '24px', 
+                    paddingTop: '24px', 
+                    borderTop: '1px solid rgba(255,255,255,0.1)' 
+                  }}>
+                    <h5 style={{ color: '#fff', marginBottom: '16px', fontSize: '1em', fontWeight: 600 }}>
+                      Voice Configuration (Optional)
+                    </h5>
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
+                      <div className="form-group">
+                        <label>Fish Audio Voice ID</label>
+                        <input
+                          type="text"
+                          value={newPersonaFields.voice_id}
+                          onChange={(e) => setNewPersonaFields(prev => ({ ...prev, voice_id: e.target.value }))}
+                          placeholder="Optional - leave empty for text-only"
+                        />
+                        <span className="form-help">Optional: Fish Audio voice ID for text-to-speech</span>
+                      </div>
+                      <div className="form-group">
+                        <label>Voice Engine</label>
+                        <input
+                          type="text"
+                          value={newPersonaFields.voice_engine}
+                          onChange={(e) => setNewPersonaFields(prev => ({ ...prev, voice_engine: e.target.value }))}
+                          placeholder="s1"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '12px', 
+                    marginTop: '24px',
+                    paddingTop: '24px',
+                    borderTop: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <button
+                      onClick={createNewPersona}
+                      disabled={saving || !newPersonaName.trim()}
+                      className="save-button"
+                      style={{ minWidth: '150px' }}
+                    >
+                      {saving ? 'Creating...' : 'Create Persona'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsCreating(false);
+                        setNewPersonaName('');
+                        setNewPersonaFields({
+                          title: '',
+                          model: 'claude-sonnet-4-5-20250929',
+                          context: '# === System message ===\nYou are an AI assistant.\n\nCRITICAL: Your responses must consist solely of natural, spoken words and basic punctuation. Do NOT use any markdown formatting.\n\n# === Response guidelines ===\n- Be clear and concise\n- Use plain text only\n- Avoid formatting symbols',
+                          temperature: 0.6,
+                          top_p: 0.9,
+                          max_tokens: 650,
+                          voice_id: '',
+                          voice_engine: 's1'
+                        });
+                      }}
+                      className="save-button"
+                      style={{ background: 'rgba(255,255,255,0.1)', minWidth: '100px' }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -840,13 +1055,27 @@ export function SettingsPage({ onNavigate }) {
                 <div className="config-editor">
                   <div className="config-editor-header">
                     <span>Editing: {selectedPersona}.config</span>
-                    <button
-                      onClick={savePersonaConfig}
-                      disabled={saving || loading}
-                      className="save-button"
-                    >
-                      {saving ? 'Saving...' : 'Save'}
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={savePersonaConfig}
+                        disabled={saving || loading}
+                        className="save-button"
+                      >
+                        {saving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button
+                        onClick={deletePersonaConfig}
+                        disabled={saving || loading || selectedPersona === 'default'}
+                        className="save-button"
+                        style={{ 
+                          background: selectedPersona === 'default' ? '#666' : '#dc3545',
+                          cursor: selectedPersona === 'default' ? 'not-allowed' : 'pointer'
+                        }}
+                        title={selectedPersona === 'default' ? 'Cannot delete default persona' : 'Delete this persona'}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                   {loading ? (
                     <div className="loading">Loading config...</div>
@@ -880,11 +1109,21 @@ export function SettingsPage({ onNavigate }) {
                           <div className="form-grid">
                             <div className="form-group">
                               <label>Model</label>
-                              <input
-                                type="text"
+                              <select
                                 value={personaFields.anthropic.anthropic_model || ''}
                                 onChange={(e) => updatePersonaField('anthropic.anthropic_model', e.target.value)}
-                              />
+                                disabled={modelsLoading}
+                              >
+                                {modelsLoading ? (
+                                  <option>Loading models...</option>
+                                ) : (
+                                  aiModels.map((model) => (
+                                    <option key={model.id} value={model.id}>
+                                      {model.name}
+                                    </option>
+                                  ))
+                                )}
+                              </select>
                             </div>
                             <div className="form-group">
                               <label>Temperature</label>
@@ -1488,6 +1727,60 @@ export function SettingsPage({ onNavigate }) {
             </div>
           )}
 
+          {activeTab === 'videos' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>Video Configuration</h3>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={saveSystemConfig}
+                    disabled={saving}
+                    className="save-button"
+                  >
+                    {saving ? 'Saving...' : 'Save Config'}
+                  </button>
+                </div>
+              </div>
+              
+              <div className="config-form-container">
+                {/* Video Directory Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Video Library Path</h4>
+                  <FolderPicker
+                    value={systemFields.paths?.video_directory || ''}
+                    onChange={(value) => updateSystemField('paths.video_directory', value)}
+                    placeholder="/Users/username/Videos"
+                    label="Video Directory"
+                    helpText="Path to your video library folder. Save config before scanning."
+                  />
+                </div>
+
+                {/* Library Scanning Section (Placeholder) */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Library Management</h4>
+                  <p className="settings-help">
+                    Scan your video directory to index and organize your video library.
+                  </p>
+                  <div className="form-group" style={{ marginTop: '12px' }}>
+                    <button
+                      onClick={() => {
+                        // Placeholder for video scan functionality
+                        setSuccess('Video scan functionality coming soon!');
+                      }}
+                      disabled={!systemFields.paths?.video_directory}
+                      className="save-button"
+                      style={{ 
+                        background: !systemFields.paths?.video_directory ? '#666' : '#3b82f6'
+                      }}
+                    >
+                      🎬 Scan Video Library
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'system' && (
             <div className="settings-panel">
               <div className="settings-panel-header">
@@ -1649,7 +1942,7 @@ export function SettingsPage({ onNavigate }) {
                         type="text"
                         value={systemFields.ai?.default_model || ''}
                         onChange={(e) => updateSystemField('ai.default_model', e.target.value)}
-                        placeholder="claude-3-5-haiku-20241022"
+                        placeholder="claude-sonnet-4-5-20250929"
                       />
                     </div>
                     <div className="form-group">

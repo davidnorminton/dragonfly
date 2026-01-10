@@ -205,12 +205,14 @@ export const configAPI = {
   getPersonaConfig: (personaName) => api.get(`/config/persona/${personaName}`).then(res => res.data),
   savePersonaConfig: (personaName, config) => api.put(`/config/persona/${personaName}`, config).then(res => res.data),
   createPersona: (personaName, config) => api.post(`/config/persona/${personaName}`, config).then(res => res.data),
+  deletePersona: (personaName) => api.delete(`/config/persona/${personaName}`).then(res => res.data),
   getLocationConfig: () => api.get('/config/location').then(res => res.data),
   saveLocationConfig: (config) => api.put('/config/location', config).then(res => res.data),
   getApiKeysConfig: () => api.get('/config/api_keys').then(res => res.data),
   saveApiKeysConfig: (config) => api.put('/config/api_keys', config).then(res => res.data),
   getSystemConfig: () => api.get('/config/system').then(res => res.data),
   saveSystemConfig: (config) => api.put('/config/system', config).then(res => res.data),
+  getAIModels: () => api.get('/config/ai-models').then(res => res.data),
 };
 
 export const deviceAPI = {

@@ -145,13 +145,13 @@ Summary:"""
             # Use the default persona settings or fallback to defaults
             if persona_config and "anthropic" in persona_config:
                 anthropic_config = persona_config["anthropic"]
-                model = anthropic_config.get("anthropic_model", "claude-3-5-haiku-20241022")
+                model = anthropic_config.get("anthropic_model", "claude-sonnet-4-5-20250929")
                 system_prompt = anthropic_config.get("prompt_context", "")
                 temperature = anthropic_config.get("temperature", 0.6)
                 top_p = anthropic_config.get("top_p", 0.9)
                 max_tokens = anthropic_config.get("max_tokens", 512)
             else:
-                model = "claude-3-5-haiku-20241022"
+                model = "claude-sonnet-4-5-20250929"
                 system_prompt = None
                 temperature = 0.3
                 top_p = 0.8
