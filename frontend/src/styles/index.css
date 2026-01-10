@@ -7154,11 +7154,11 @@ body {
 }
 
 .database-table-scroll-container {
-  overflow-x: auto;
-  margin-bottom: 16px;
+  overflow: auto;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
   flex: 1;
+  min-height: 0;
 }
 
 .database-table {
@@ -7199,9 +7199,10 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 16px;
-  padding-top: 16px;
+  padding: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
 }
 
 .database-pagination-info {

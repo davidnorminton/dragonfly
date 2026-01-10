@@ -2252,7 +2252,7 @@ export function SettingsPage({ onNavigate }) {
                               )}
 
                               {tableData && (
-                                <div className="database-table-view">
+                                <>
                         {/* Data Table */}
                         {tableData.data && tableData.data.length === 0 ? (
                           <div className="database-loading-data">
@@ -2498,7 +2498,7 @@ export function SettingsPage({ onNavigate }) {
                             )}
                           </>
                         ) : null}
-                                </div>
+                                </>
                               )}
                       </div>
                     )}
