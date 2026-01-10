@@ -7023,7 +7023,7 @@ body {
 /* Database Viewer - Two Column Layout */
 .database-viewer-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 30% 1fr;
   gap: 20px;
   padding: 20px;
   height: calc(100vh - 220px);
