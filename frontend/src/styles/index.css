@@ -12,6 +12,34 @@ body {
   overflow: hidden;
 }
 
+/* Global Scrollbar Styles - Thin and Dark */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a3a #0a0a0f;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #0a0a0f;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4a;
+}
+
+*::-webkit-scrollbar-corner {
+  background: #0a0a0f;
+}
+
 /* Top Bar */
 .top-bar {
   background: transparent;
