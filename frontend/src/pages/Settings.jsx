@@ -2272,13 +2272,13 @@ export function SettingsPage({ onNavigate }) {
                                           textAlign: 'left',
                                           color: '#fff',
                                           fontWeight: 600,
-                                          background: 'rgba(255,255,255,0.05)'
+                                          background: '#1a1a2a'
                                         }}
                                       >
                                         {col}
                                       </th>
                                     ))}
-                                    <th style={{ padding: '12px', width: '100px' }}></th>
+                                    <th style={{ padding: '12px', width: '100px', background: '#1a1a2a' }}></th>
                                   </tr>
                                 </thead>
                                 <tbody>
