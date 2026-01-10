@@ -207,7 +207,6 @@ function CastAndCrew({ movieTitle, movieYear }) {
     <div className="cast-crew-section">
       {loading && (
         <div className="cast-crew-loading">
-          <div className="section-label">Cast & Crew</div>
           <div className="loading-indicator">
             <div className="spinner"></div>
             <span>Loading cast and crew...</span>
@@ -217,7 +216,6 @@ function CastAndCrew({ movieTitle, movieYear }) {
       
       {error && !loading && (
         <div className="cast-crew-error">
-          <div className="section-label">Cast & Crew</div>
           <div className="error-indicator">
             <span>{error}</span>
             <button 
@@ -228,12 +226,6 @@ function CastAndCrew({ movieTitle, movieYear }) {
             </button>
           </div>
         </div>
-      )}
-      
-      {!loading && !error && castCrew && (
-        <>
-          <div className="section-label">Cast & Crew</div>
-        </>
       )}
 
       {!loading && !error && castCrew && (
@@ -283,56 +275,101 @@ function CastAndCrew({ movieTitle, movieYear }) {
         <div className="crew-section">
           <div className="crew-role-label">Crew</div>
           <div className="crew-horizontal">
-            {castCrew.director && castCrew.director !== 'Unknown' && (
-              <div className="crew-item">
-                <div className="crew-role">Director</div>
-                <div className="crew-name-btn">
-                  <span className="crew-name">{castCrew.director}</span>
+            {castCrew.director && castCrew.director?.name && castCrew.director.name !== 'Unknown' && (
+              <div className="crew-card">
+                <div className="crew-image-wrapper">
+                  {castCrew.director.profile_path ? (
+                    <img 
+                      src={castCrew.director.profile_path} 
+                      alt={castCrew.director.name}
+                      className="crew-image"
+                    />
+                  ) : (
+                    <div className="crew-image-placeholder">
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                      </svg>
+                    </div>
+                  )}
                   <button 
-                    className="filmography-btn-small"
-                    onClick={() => handlePersonClick(castCrew.director, 'director')}
-                    title={`View ${castCrew.director}'s filmography`}
+                    className="filmography-btn-overlay"
+                    onClick={() => handlePersonClick(castCrew.director.name, 'director')}
+                    title={`View ${castCrew.director.name}'s filmography`}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
                     </svg>
                   </button>
                 </div>
-              </div>
-            )}
-
-            {castCrew.writer && castCrew.writer !== 'Unknown' && (
-              <div className="crew-item">
-                <div className="crew-role">Writer</div>
-                <div className="crew-name-btn">
-                  <span className="crew-name">{castCrew.writer}</span>
-                  <button 
-                    className="filmography-btn-small"
-                    onClick={() => handlePersonClick(castCrew.writer, 'writer')}
-                    title={`View ${castCrew.writer}'s filmography`}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                    </svg>
-                  </button>
+                <div className="crew-info">
+                  <div className="crew-name">{castCrew.director.name}</div>
+                  <div className="crew-role">Director</div>
                 </div>
               </div>
             )}
 
-            {castCrew.producer && castCrew.producer !== 'Unknown' && (
-              <div className="crew-item">
-                <div className="crew-role">Producer</div>
-                <div className="crew-name-btn">
-                  <span className="crew-name">{castCrew.producer}</span>
+            {castCrew.writer && castCrew.writer?.name && castCrew.writer.name !== 'Unknown' && (
+              <div className="crew-card">
+                <div className="crew-image-wrapper">
+                  {castCrew.writer.profile_path ? (
+                    <img 
+                      src={castCrew.writer.profile_path} 
+                      alt={castCrew.writer.name}
+                      className="crew-image"
+                    />
+                  ) : (
+                    <div className="crew-image-placeholder">
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                      </svg>
+                    </div>
+                  )}
                   <button 
-                    className="filmography-btn-small"
-                    onClick={() => handlePersonClick(castCrew.producer, 'producer')}
-                    title={`View ${castCrew.producer}'s filmography`}
+                    className="filmography-btn-overlay"
+                    onClick={() => handlePersonClick(castCrew.writer.name, 'writer')}
+                    title={`View ${castCrew.writer.name}'s filmography`}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
                     </svg>
                   </button>
+                </div>
+                <div className="crew-info">
+                  <div className="crew-name">{castCrew.writer.name}</div>
+                  <div className="crew-role">Writer</div>
+                </div>
+              </div>
+            )}
+
+            {castCrew.producer && castCrew.producer?.name && castCrew.producer.name !== 'Unknown' && (
+              <div className="crew-card">
+                <div className="crew-image-wrapper">
+                  {castCrew.producer.profile_path ? (
+                    <img 
+                      src={castCrew.producer.profile_path} 
+                      alt={castCrew.producer.name}
+                      className="crew-image"
+                    />
+                  ) : (
+                    <div className="crew-image-placeholder">
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                      </svg>
+                    </div>
+                  )}
+                  <button 
+                    className="filmography-btn-overlay"
+                    onClick={() => handlePersonClick(castCrew.producer.name, 'producer')}
+                    title={`View ${castCrew.producer.name}'s filmography`}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="crew-info">
+                  <div className="crew-name">{castCrew.producer.name}</div>
+                  <div className="crew-role">Producer</div>
                 </div>
               </div>
             )}

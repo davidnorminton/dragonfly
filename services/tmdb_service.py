@@ -285,26 +285,35 @@ class TMDBService:
                     "profile_path": self._get_profile_url(person.get("profile_path"))
                 })
             
-            # Extract crew - find director, writer, producer
+            # Extract crew - find director, writer, producer with images
             crew = data.get("crew", [])
             director = None
             writer = None
             producer = None
-            
+
             for person in crew:
                 job = person.get("job", "")
                 if job == "Director" and not director:
-                    director = person.get("name")
+                    director = {
+                        "name": person.get("name"),
+                        "profile_path": self._get_profile_url(person.get("profile_path"))
+                    }
                 elif job in ["Screenplay", "Writer"] and not writer:
-                    writer = person.get("name")
+                    writer = {
+                        "name": person.get("name"),
+                        "profile_path": self._get_profile_url(person.get("profile_path"))
+                    }
                 elif job in ["Producer", "Executive Producer"] and not producer:
-                    producer = person.get("name")
-            
+                    producer = {
+                        "name": person.get("name"),
+                        "profile_path": self._get_profile_url(person.get("profile_path"))
+                    }
+
             return {
                 "cast": cast,
-                "director": director or "Unknown",
-                "writer": writer or "Unknown",
-                "producer": producer or "Unknown"
+                "director": director or {"name": "Unknown", "profile_path": None},
+                "writer": writer or {"name": "Unknown", "profile_path": None},
+                "producer": producer or {"name": "Unknown", "profile_path": None}
             }
             
         except Exception as e:

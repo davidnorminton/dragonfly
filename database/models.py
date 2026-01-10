@@ -238,7 +238,7 @@ class VideoPlaybackProgress(Base):
 class ActorFilmography(Base):
     """Actor filmography data from TMDB."""
     __tablename__ = 'actor_filmography'
-    
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     actor_name = Column(String, nullable=False, index=True)
     tmdb_person_id = Column(Integer, index=True)  # TMDB person ID
@@ -249,6 +249,25 @@ class ActorFilmography(Base):
 
     def __repr__(self):
         return f"<ActorFilmography {self.actor_name}>"
+
+
+class MovieCastCrew(Base):
+    """Movie cast and crew data from TMDB."""
+    __tablename__ = 'movie_cast_crew'
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    movie_title = Column(String, nullable=False, index=True)
+    movie_year = Column(Integer, index=True)
+    tmdb_id = Column(Integer, index=True)  # TMDB movie ID
+    cast = Column(JSON)  # List of cast members with name, character, profile_path
+    director = Column(JSON)  # Object with name, profile_path
+    writer = Column(JSON)  # Object with name, profile_path
+    producer = Column(JSON)  # Object with name, profile_path
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<MovieCastCrew {self.movie_title} ({self.movie_year})>"
 
 
 class MusicArtist(Base):

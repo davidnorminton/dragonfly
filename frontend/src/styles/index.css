@@ -7383,7 +7383,7 @@ body {
   color: rgba(255, 255, 255, 0.85);
   line-height: 1.9;
   font-size: 16px;
-  margin: 0 auto;
+  text-align: left;
   max-width: 650px;
 }
 
@@ -7620,46 +7620,69 @@ body {
 /* Crew Horizontal */
 .crew-horizontal {
   display: flex;
-  gap: 24px;
+  gap: 20px;
   flex-wrap: wrap;
 }
 
-.crew-item {
+.crew-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 200px;
+  align-items: center;
+  width: 140px;
+  cursor: pointer;
+  transition: transform 0.2s ease;
 }
 
-.crew-role {
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+.crew-card:hover {
+  transform: translateY(-4px);
 }
 
-.crew-name-btn {
+.crew-image-wrapper {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.crew-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.crew-image-placeholder {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.2), rgba(26, 115, 232, 0.2));
+  color: rgba(255, 255, 255, 0.3);
 }
 
-.crew-name-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
+.crew-info {
+  text-align: center;
+  width: 100%;
 }
 
 .crew-name {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+.crew-role {
+  font-size: 11px;
   font-weight: 500;
-  flex: 1;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .filmography-btn-small {

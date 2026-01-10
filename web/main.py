@@ -25,7 +25,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, ActorFilmography, SystemConfig, ApiKeysConfig
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, ActorFilmography, MovieCastCrew, SystemConfig, ApiKeysConfig
 from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -5526,84 +5526,124 @@ async def get_next_episode(episode_id: int):
 
 @app.post("/api/video/cast-crew")
 async def get_cast_crew(request: Request):
-    """Get cast and crew information for a movie from TMDB."""
+    """Get cast and crew information for a movie - checks database first, then TMDB."""
     data = await request.json()
     movie_title = data.get("title", "")
     movie_year = data.get("year", "")
-    
+
     if not movie_title:
         raise HTTPException(status_code=400, detail="Movie title is required")
-    
+
     logging.info(f"🎬 Getting cast/crew for: {movie_title} ({movie_year})")
-    
+
     try:
-        # Get TMDB API key from database
         async with AsyncSessionLocal() as session:
-            result = await session.execute(
+            # First, check if we have this in the database
+            logging.info(f"🔍 Checking database for cast/crew...")
+            query = select(MovieCastCrew).where(
+                MovieCastCrew.movie_title == movie_title
+            )
+            if movie_year:
+                query = query.where(MovieCastCrew.movie_year == movie_year)
+            
+            result = await session.execute(query)
+            existing_cast_crew = result.scalar_one_or_none()
+
+            if existing_cast_crew:
+                logging.info(f"✅ Found cast/crew in database")
+                return {
+                    "cast": existing_cast_crew.cast or [],
+                    "director": existing_cast_crew.director or {"name": "Unknown", "profile_path": None},
+                    "writer": existing_cast_crew.writer or {"name": "Unknown", "profile_path": None},
+                    "producer": existing_cast_crew.producer or {"name": "Unknown", "profile_path": None},
+                    "from_cache": True
+                }
+
+            # Not in database, fetch from TMDB
+            logging.info(f"💾 Not in database, fetching from TMDB...")
+            
+            # Get TMDB API key
+            config_result = await session.execute(
                 select(ApiKeysConfig).where(ApiKeysConfig.service_name == "tmdb")
             )
-            config = result.scalar_one_or_none()
-            
+            config = config_result.scalar_one_or_none()
+
             if not config or not config.api_key:
                 logging.error("TMDB API key not configured")
                 raise HTTPException(status_code=500, detail="TMDB API key not configured")
-            
+
             tmdb_api_key = config.api_key
-        
-        # Initialize TMDB service
-        from services.tmdb_service import TMDBService
-        tmdb = TMDBService(tmdb_api_key)
-        
-        # Search for the movie to get its TMDB ID
-        logging.info(f"🔍 Searching TMDB for: {movie_title} ({movie_year})")
-        movie_data = tmdb.search_movie(movie_title, movie_year)
-        
-        if not movie_data or not movie_data.get("tmdb_id"):
-            logging.warning(f"⚠️ Movie not found in TMDB: {movie_title}")
-            return {
-                "cast": [],
-                "director": "Unknown",
-                "writer": "Unknown",
-                "producer": "Unknown",
-                "error": "Movie not found in TMDB"
+
+            # Initialize TMDB service
+            from services.tmdb_service import TMDBService
+            tmdb = TMDBService(tmdb_api_key)
+
+            # Search for the movie to get its TMDB ID
+            logging.info(f"🔍 Searching TMDB for: {movie_title} ({movie_year})")
+            movie_data = tmdb.search_movie(movie_title, movie_year)
+
+            if not movie_data or not movie_data.get("tmdb_id"):
+                logging.warning(f"⚠️ Movie not found in TMDB: {movie_title}")
+                return {
+                    "cast": [],
+                    "director": "Unknown",
+                    "writer": "Unknown",
+                    "producer": "Unknown",
+                    "error": "Movie not found in TMDB"
+                }
+
+            movie_id = movie_data["tmdb_id"]
+            logging.info(f"✅ Found movie with TMDB ID: {movie_id}")
+
+            # Get credits from TMDB
+            credits = tmdb.get_movie_credits(movie_id)
+
+            if not credits:
+                logging.warning(f"⚠️ No credits found for movie ID: {movie_id}")
+                return {
+                    "cast": [],
+                    "director": "Unknown",
+                    "writer": "Unknown",
+                    "producer": "Unknown",
+                    "error": "No credits available"
+                }
+
+            # Format cast with names and images for the UI
+            cast_list = [
+                {
+                    "name": person["name"],
+                    "character": person.get("character", ""),
+                    "profile_path": person.get("profile_path")
+                }
+                for person in credits.get("cast", [])
+            ]
+
+            response_data = {
+                "cast": cast_list,
+                "director": credits.get("director", "Unknown"),
+                "writer": credits.get("writer", "Unknown"),
+                "producer": credits.get("producer", "Unknown"),
+                "from_cache": False
             }
-        
-        movie_id = movie_data["tmdb_id"]
-        logging.info(f"✅ Found movie with TMDB ID: {movie_id}")
-        
-        # Get credits from TMDB
-        credits = tmdb.get_movie_credits(movie_id)
-        
-        if not credits:
-            logging.warning(f"⚠️ No credits found for movie ID: {movie_id}")
-            return {
-                "cast": [],
-                "director": "Unknown",
-                "writer": "Unknown",
-                "producer": "Unknown",
-                "error": "No credits available"
-            }
-        
-        # Format cast with names and images for the UI
-        cast_list = [
-            {
-                "name": person["name"],
-                "character": person.get("character", ""),
-                "profile_path": person.get("profile_path")
-            }
-            for person in credits.get("cast", [])
-        ]
-        
-        result = {
-            "cast": cast_list,
-            "director": credits.get("director", "Unknown"),
-            "writer": credits.get("writer", "Unknown"),
-            "producer": credits.get("producer", "Unknown")
-        }
-        
-        logging.info(f"✅ Successfully retrieved cast/crew: {len(cast_list)} actors, director: {result['director']}")
-        return result
-        
+
+            # Save to database for next time
+            logging.info(f"💾 Saving cast/crew to database...")
+            new_cast_crew = MovieCastCrew(
+                movie_title=movie_title,
+                movie_year=movie_year,
+                tmdb_id=movie_id,
+                cast=cast_list,
+                director=response_data["director"],
+                writer=response_data["writer"],
+                producer=response_data["producer"]
+            )
+            session.add(new_cast_crew)
+            await session.commit()
+            logging.info(f"✅ Saved cast/crew to database")
+
+            logging.info(f"✅ Successfully retrieved cast/crew: {len(cast_list)} actors, director: {response_data['director']}")
+            return response_data
+
     except HTTPException:
         raise
     except Exception as e:
