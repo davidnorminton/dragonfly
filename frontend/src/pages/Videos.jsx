@@ -512,36 +512,39 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
     if (!searchQuery || !searchQuery.trim()) return library.movies;
     const query = searchQuery.toLowerCase();
     
-    // First, filter by title, description, year, genres
-    const baseFiltered = library.movies.filter(movie => {
-      // Search in title, description, year
-      if (movie.title?.toLowerCase().includes(query)) return true;
-      if (movie.description?.toLowerCase().includes(query)) return true;
-      if (movie.year?.toString().includes(query)) return true;
-      
-      // Search in genres
+    // Priority 1: Movies matching by title
+    const titleMatches = library.movies.filter(movie =>
+      movie.title?.toLowerCase().includes(query)
+    );
+    
+    // Priority 4: Movies matching by genre
+    const genreMatches = library.movies.filter(movie => {
       if (movie.extra_metadata?.genres) {
         const genres = Array.isArray(movie.extra_metadata.genres) 
           ? movie.extra_metadata.genres 
           : [];
-        if (genres.some(genre => genre.toLowerCase().includes(query))) return true;
+        return genres.some(genre => genre.toLowerCase().includes(query));
       }
-      
       return false;
     });
     
-    // Then, add movies from actor search results
+    // Priority 5: Movies matching by actor
     const actorMovieTitles = new Set(actorSearchResults.map(m => `${m.title}-${m.year}`));
-    const actorMovies = library.movies.filter(movie => 
+    const actorMatches = library.movies.filter(movie => 
       actorMovieTitles.has(`${movie.title}-${movie.year}`)
     );
     
-    // Combine and deduplicate
-    const allMovies = [...baseFiltered];
-    actorMovies.forEach(actorMovie => {
-      if (!allMovies.find(m => m.id === actorMovie.id)) {
-        allMovies.push(actorMovie);
-      }
+    // Combine with priority order and deduplicate
+    const seen = new Set();
+    const allMovies = [];
+    
+    [titleMatches, genreMatches, actorMatches].forEach(group => {
+      group.forEach(movie => {
+        if (!seen.has(movie.id)) {
+          seen.add(movie.id);
+          allMovies.push(movie);
+        }
+      });
     });
     
     return allMovies;
@@ -550,22 +553,37 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
   const filteredTVShows = useMemo(() => {
     if (!searchQuery || !searchQuery.trim()) return library.tvShows;
     const query = searchQuery.toLowerCase();
-    return library.tvShows.filter(show => {
-      // Search in title, description, year
-      if (show.title?.toLowerCase().includes(query)) return true;
-      if (show.description?.toLowerCase().includes(query)) return true;
-      if (show.year?.toString().includes(query)) return true;
-      
-      // Search in genres
+    
+    // Priority 2: TV shows matching by title
+    const titleMatches = library.tvShows.filter(show =>
+      show.title?.toLowerCase().includes(query)
+    );
+    
+    // Priority 4: TV shows matching by genre (same priority as movie genres)
+    const genreMatches = library.tvShows.filter(show => {
       if (show.extra_metadata?.genres) {
         const genres = Array.isArray(show.extra_metadata.genres) 
           ? show.extra_metadata.genres 
           : [];
-        if (genres.some(genre => genre.toLowerCase().includes(query))) return true;
+        return genres.some(genre => genre.toLowerCase().includes(query));
       }
-      
       return false;
     });
+    
+    // Combine with priority order and deduplicate
+    const seen = new Set();
+    const allShows = [];
+    
+    [titleMatches, genreMatches].forEach(group => {
+      group.forEach(show => {
+        if (!seen.has(show.id)) {
+          seen.add(show.id);
+          allShows.push(show);
+        }
+      });
+    });
+    
+    return allShows;
   }, [library.tvShows, searchQuery]);
 
   // Filter episodes across all TV shows
