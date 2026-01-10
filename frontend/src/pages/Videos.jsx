@@ -4,29 +4,32 @@ import { VideoPlayer } from '../components/VideoPlayer';
 import { useChromecast } from '../hooks/useChromecast';
 
 // Cast and Crew Component
-function CastAndCrew({ movieTitle, movieYear }) {
+function CastAndCrew({ movieTitle, movieYear, showTitle, showYear, isMovie = true }) {
   const [castCrew, setCastCrew] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [filmography, setFilmography] = useState(null);
   const [loadingFilmography, setLoadingFilmography] = useState(false);
 
-  // Reset and auto-load cast/crew when movie changes
+  const title = isMovie ? movieTitle : showTitle;
+  const year = isMovie ? movieYear : showYear;
+
+  // Reset and auto-load cast/crew when movie/show changes
   useEffect(() => {
-    console.log('🎬 [Cast & Crew] Movie changed, auto-loading cast & crew');
+    console.log(`🎬 [Cast & Crew] ${isMovie ? 'Movie' : 'TV Show'} changed, auto-loading cast & crew`);
     setCastCrew(null);
     setError(null);
     setFilmography(null);
     
     // Auto-load cast & crew
-    if (movieTitle && movieYear) {
+    if (title && year) {
       loadCastCrew();
     }
-  }, [movieTitle, movieYear]);
+  }, [title, year, isMovie]);
 
   const loadCastCrew = async () => {
     console.log('🎬 [Cast & Crew] Generate button clicked');
-    console.log('🎬 [Cast & Crew] Movie:', movieTitle, 'Year:', movieYear);
+    console.log(`🎬 [Cast & Crew] ${isMovie ? 'Movie' : 'TV Show'}:`, title, 'Year:', year);
     
     setLoading(true);
     setCastCrew(null);
@@ -34,7 +37,9 @@ function CastAndCrew({ movieTitle, movieYear }) {
     
     try {
       console.log('🎬 [Cast & Crew] Fetching cast and crew data...');
-      const data = await videoAPI.getCastCrew(movieTitle, movieYear);
+      const data = isMovie 
+        ? await videoAPI.getCastCrew(title, year)
+        : await videoAPI.getTVCastCrew(title, year);
       console.log('🎬 [Cast & Crew] Received data:', data);
       
       // Log each cast member to see if they have profile_path
@@ -271,41 +276,52 @@ function CastAndCrew({ movieTitle, movieYear }) {
           </div>
         )}
 
-        {/* Crew (Director, Writer, Producer) */}
+        {/* Crew (Director/Creator, Writer, Producer) */}
         <div className="crew-section">
           <div className="crew-role-label">Crew</div>
           <div className="crew-horizontal">
-            {castCrew.director && castCrew.director?.name && castCrew.director.name !== 'Unknown' && (
-              <div className="crew-card">
-                <div className="crew-image-wrapper">
-                  {castCrew.director.profile_path ? (
-                    <img 
-                      src={castCrew.director.profile_path} 
-                      alt={castCrew.director.name}
-                      className="crew-image"
-                    />
-                  ) : (
-                    <div className="crew-image-placeholder">
-                      <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                      </svg>
+            {/* Director (for movies) or Creator (for TV shows) */}
+            {((isMovie && castCrew.director) || (!isMovie && castCrew.creator)) && (
+              (() => {
+                const person = isMovie ? castCrew.director : castCrew.creator;
+                const roleText = isMovie ? 'Director' : 'Creator';
+                const roleKey = isMovie ? 'director' : 'creator';
+                
+                if (!person || !person.name || person.name === 'Unknown') return null;
+                
+                return (
+                  <div className="crew-card">
+                    <div className="crew-image-wrapper">
+                      {person.profile_path ? (
+                        <img 
+                          src={person.profile_path} 
+                          alt={person.name}
+                          className="crew-image"
+                        />
+                      ) : (
+                        <div className="crew-image-placeholder">
+                          <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                          </svg>
+                        </div>
+                      )}
+                      <button 
+                        className="filmography-btn-overlay"
+                        onClick={() => handlePersonClick(person.name, roleKey)}
+                        title={`View ${person.name}'s filmography`}
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                        </svg>
+                      </button>
                     </div>
-                  )}
-                  <button 
-                    className="filmography-btn-overlay"
-                    onClick={() => handlePersonClick(castCrew.director.name, 'director')}
-                    title={`View ${castCrew.director.name}'s filmography`}
-                  >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                    </svg>
-                  </button>
-                </div>
-                <div className="crew-info">
-                  <div className="crew-name">{castCrew.director.name}</div>
-                  <div className="crew-role">Director</div>
-                </div>
-              </div>
+                    <div className="crew-info">
+                      <div className="crew-name">{person.name}</div>
+                      <div className="crew-role">{roleText}</div>
+                    </div>
+                  </div>
+                );
+              })()
             )}
 
             {castCrew.writer && castCrew.writer?.name && castCrew.writer.name !== 'Unknown' && (
@@ -1000,21 +1016,22 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
 
               {/* TV Show - Seasons Grid */}
               {selectedShow && !selectedSeason && (
-                <div className="album-section">
-                  <div className="album-section-title">
-                    Seasons
+                <>
+                  <div className="album-section">
+                    <div className="album-section-title">
+                      Seasons
+                      {selectedShow.description && (
+                        <button
+                          onClick={() => setSelectedSeason(null)}
+                          style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#4a9eff', cursor: 'pointer', fontSize: '14px' }}
+                        >
+                          ← Back to Show
+                        </button>
+                      )}
+                    </div>
                     {selectedShow.description && (
-                      <button 
-                        onClick={() => setSelectedSeason(null)}
-                        style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#4a9eff', cursor: 'pointer', fontSize: '14px' }}
-                      >
-                        ← Back to Show
-                      </button>
+                      <div className="video-description" style={{ marginBottom: '24px' }}>{selectedShow.description}</div>
                     )}
-                  </div>
-                  {selectedShow.description && (
-                    <div className="video-description" style={{ marginBottom: '24px' }}>{selectedShow.description}</div>
-                  )}
                   <div className="album-grid">
                     {currentShow?.seasons?.map((season) => (
                       <div
@@ -1040,7 +1057,15 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                       </div>
                     ))}
                   </div>
-                </div>
+                  </div>
+                  
+                  {/* TV Show Cast & Crew */}
+                  <CastAndCrew
+                    showTitle={selectedShow.title}
+                    showYear={selectedShow.year}
+                    isMovie={false}
+                  />
+                </>
               )}
 
               {/* TV Show - Episodes List */}

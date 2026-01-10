@@ -319,6 +319,69 @@ class TMDBService:
         except Exception as e:
             logger.error(f"Error getting TMDB movie credits for ID {movie_id}: {e}")
             return None
+
+    def get_tv_credits(self, show_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get cast and crew credits for a TV show.
+        
+        Args:
+            show_id: TMDB TV show ID
+            
+        Returns:
+            Dictionary with cast and crew lists or None if error
+        """
+        try:
+            response = self.session.get(
+                f"{TMDB_API_BASE_URL}/tv/{show_id}/credits",
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Extract main cast (limit to top 6)
+            cast = []
+            for person in data.get("cast", [])[:6]:
+                cast.append({
+                    "name": person.get("name"),
+                    "character": person.get("character"),
+                    "profile_path": self._get_profile_url(person.get("profile_path"))
+                })
+            
+            # Extract crew - TV shows use "Creator" instead of "Director"
+            crew = data.get("crew", [])
+            creator = None
+            writer = None
+            producer = None
+
+            for person in crew:
+                job = person.get("job", "")
+                if not creator and job in ["Creator", "Executive Producer"]:
+                    creator = {
+                        "name": person.get("name"),
+                        "profile_path": self._get_profile_url(person.get("profile_path"))
+                    }
+                elif not writer and job in ["Writer", "Screenplay"]:
+                    writer = {
+                        "name": person.get("name"),
+                        "profile_path": self._get_profile_url(person.get("profile_path"))
+                    }
+                elif not producer and job == "Producer":
+                    producer = {
+                        "name": person.get("name"),
+                        "profile_path": self._get_profile_url(person.get("profile_path"))
+                    }
+
+            return {
+                "cast": cast,
+                "creator": creator or {"name": "Unknown", "profile_path": None},
+                "writer": writer or {"name": "Unknown", "profile_path": None},
+                "producer": producer or {"name": "Unknown", "profile_path": None}
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting TMDB TV show credits for ID {show_id}: {e}")
+            return None
     
     def _get_profile_url(self, profile_path: Optional[str], size: str = "w185") -> Optional[str]:
         """

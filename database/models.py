@@ -270,6 +270,25 @@ class MovieCastCrew(Base):
         return f"<MovieCastCrew {self.movie_title} ({self.movie_year})>"
 
 
+class TVShowCastCrew(Base):
+    """TV show cast and crew data from TMDB."""
+    __tablename__ = 'tv_show_cast_crew'
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    show_title = Column(String, nullable=False, index=True)
+    show_year = Column(Integer, index=True)
+    tmdb_id = Column(Integer, index=True)  # TMDB TV show ID
+    cast = Column(JSON)  # List of cast members with name, character, profile_path
+    creator = Column(JSON)  # Object with name, profile_path
+    writer = Column(JSON)  # Object with name, profile_path
+    producer = Column(JSON)  # Object with name, profile_path
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<TVShowCastCrew {self.show_title} ({self.show_year})>"
+
+
 class MusicArtist(Base):
     """Artist table."""
     __tablename__ = "music_artists"

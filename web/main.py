@@ -25,7 +25,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, ActorFilmography, MovieCastCrew, SystemConfig, ApiKeysConfig
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig
 from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -5653,6 +5653,137 @@ async def get_cast_crew(request: Request):
             "director": "Unknown",
             "writer": "Unknown",
             "producer": "Unknown",
+            "error": str(e)
+        }
+
+
+@app.post("/api/video/tv-cast-crew")
+async def get_tv_cast_crew(request: Request):
+    """Get cast and crew information for a TV show - checks database first, then TMDB."""
+    data = await request.json()
+    show_title = data.get("title", "")
+    show_year = data.get("year", "")
+
+    if not show_title:
+        raise HTTPException(status_code=400, detail="TV show title is required")
+
+    logging.info(f"📺 Getting cast/crew for TV show: {show_title} ({show_year})")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            # First, check if we have this in the database
+            logging.info(f"🔍 Checking database for TV show cast/crew...")
+            query = select(TVShowCastCrew).where(
+                TVShowCastCrew.show_title == show_title
+            )
+            if show_year:
+                query = query.where(TVShowCastCrew.show_year == show_year)
+            
+            result = await session.execute(query)
+            existing_cast_crew = result.scalar_one_or_none()
+
+            if existing_cast_crew:
+                logging.info(f"✅ Found TV show cast/crew in database")
+                return {
+                    "cast": existing_cast_crew.cast or [],
+                    "creator": existing_cast_crew.creator or {"name": "Unknown", "profile_path": None},
+                    "writer": existing_cast_crew.writer or {"name": "Unknown", "profile_path": None},
+                    "producer": existing_cast_crew.producer or {"name": "Unknown", "profile_path": None},
+                    "from_cache": True
+                }
+
+            # Not in database, fetch from TMDB
+            logging.info(f"💾 Not in database, fetching from TMDB...")
+            
+            # Get TMDB API key
+            config_result = await session.execute(
+                select(ApiKeysConfig).where(ApiKeysConfig.service_name == "tmdb")
+            )
+            config = config_result.scalar_one_or_none()
+
+            if not config or not config.api_key:
+                logging.error("TMDB API key not configured")
+                return {
+                    "cast": [],
+                    "creator": {"name": "Unknown", "profile_path": None},
+                    "writer": {"name": "Unknown", "profile_path": None},
+                    "producer": {"name": "Unknown", "profile_path": None},
+                    "error": "TMDB API key not configured"
+                }
+
+            tmdb_api_key = config.api_key
+
+            # Initialize TMDB service
+            from services.tmdb_service import TMDBService
+            tmdb = TMDBService(tmdb_api_key)
+
+            # Search for the TV show to get its TMDB ID
+            logging.info(f"🔍 Searching TMDB for TV show: {show_title} ({show_year})")
+            show_data = tmdb.search_tv_show(show_title, show_year)
+
+            if not show_data or not show_data.get("tmdb_id"):
+                logging.warning(f"⚠️ TV show not found in TMDB: {show_title}")
+                return {
+                    "cast": [],
+                    "creator": {"name": "Unknown", "profile_path": None},
+                    "writer": {"name": "Unknown", "profile_path": None},
+                    "producer": {"name": "Unknown", "profile_path": None},
+                    "error": "TV show not found in TMDB"
+                }
+
+            show_id = show_data["tmdb_id"]
+            logging.info(f"✅ Found TV show with TMDB ID: {show_id}")
+
+            # Get credits from TMDB
+            credits = tmdb.get_tv_credits(show_id)
+
+            if not credits:
+                logging.warning(f"⚠️ No credits found for TV show ID: {show_id}")
+                return {
+                    "cast": [],
+                    "creator": {"name": "Unknown", "profile_path": None},
+                    "writer": {"name": "Unknown", "profile_path": None},
+                    "producer": {"name": "Unknown", "profile_path": None},
+                    "error": "No credits available"
+                }
+
+            # Format response
+            cast_list = credits.get("cast", [])
+            response_data = {
+                "cast": cast_list,
+                "creator": credits.get("creator", {"name": "Unknown", "profile_path": None}),
+                "writer": credits.get("writer", {"name": "Unknown", "profile_path": None}),
+                "producer": credits.get("producer", {"name": "Unknown", "profile_path": None}),
+                "from_cache": False
+            }
+
+            # Save to database for next time
+            logging.info(f"💾 Saving TV show cast/crew to database...")
+            new_cast_crew = TVShowCastCrew(
+                show_title=show_title,
+                show_year=show_year,
+                tmdb_id=show_id,
+                cast=cast_list,
+                creator=response_data["creator"],
+                writer=response_data["writer"],
+                producer=response_data["producer"]
+            )
+            session.add(new_cast_crew)
+            await session.commit()
+            logging.info(f"✅ Saved TV show cast/crew to database")
+
+            logging.info(f"✅ Successfully retrieved TV show cast/crew: {len(cast_list)} actors")
+            return response_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"❌ Error getting TV show cast/crew: {e}", exc_info=True)
+        return {
+            "cast": [],
+            "creator": {"name": "Unknown", "profile_path": None},
+            "writer": {"name": "Unknown", "profile_path": None},
+            "producer": {"name": "Unknown", "profile_path": None},
             "error": str(e)
         }
 

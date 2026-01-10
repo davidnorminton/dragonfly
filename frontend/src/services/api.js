@@ -177,6 +177,16 @@ export const videoAPI = {
     const response = await fetch(`/api/video/search-by-actor/${encodeURIComponent(actorName)}`);
     if (!response.ok) throw new Error('Failed to search by actor');
     return response.json();
+  },
+
+  async getTVCastCrew(title, year) {
+    const response = await fetch('/api/video/tv-cast-crew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, year })
+    });
+    if (!response.ok) throw new Error('Failed to get TV show cast and crew');
+    return response.json();
   }
 };
 
