@@ -2263,7 +2263,7 @@ export function SettingsPage({ onNavigate }) {
                             <div className="database-table-scroll-container">
                               <table className="database-table">
                                 <thead>
-                                  <tr style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
+                                  <tr style={{ borderBottom: '2px solid rgb(32 32 41)' }}>
                                     {tableData.columns.map((col) => (
                                       <th
                                         key={col}
