@@ -32,6 +32,7 @@ export function OctopusEnergy() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [days, setDays] = useState(7);
+  const [activeChart, setActiveChart] = useState(0); // 0 = consumption over time, 1 = daily consumption
 
   useEffect(() => {
     const fetchData = async () => {
@@ -265,36 +266,63 @@ export function OctopusEnergy() {
           )}
         </div>
         
-        {consumptionChartData && (
+        {(consumptionChartData || dailyConsumptionData) && (
           <div className="octopus-energy-chart">
             <div className="octopus-energy-chart-header">
-              <div className="stat-box-label">Consumption Over Time</div>
-              <select 
-                value={days} 
-                onChange={(e) => setDays(Number(e.target.value))}
-                className="octopus-energy-days-select"
-              >
-                <option value={1}>Last 24 hours</option>
-                <option value={3}>Last 3 days</option>
-                <option value={7}>Last 7 days</option>
-                <option value={14}>Last 14 days</option>
-                <option value={30}>Last 30 days</option>
-              </select>
+              {consumptionChartData && dailyConsumptionData && (
+                <button
+                  className="octopus-energy-nav-arrow octopus-energy-nav-left"
+                  onClick={() => setActiveChart((prev) => (prev === 0 ? 1 : 0))}
+                  title="Previous chart"
+                  aria-label="Previous chart"
+                >
+                  ‹
+                </button>
+              )}
+              {!consumptionChartData && !dailyConsumptionData && <div></div>}
+              <div className="octopus-energy-chart-title">
+                {activeChart === 0 ? 'Consumption Over Time' : 'Consumption Per Day'}
+                {activeChart === 0 && consumptionChartData && (
+                  <select 
+                    value={days} 
+                    onChange={(e) => setDays(Number(e.target.value))}
+                    className="octopus-energy-days-select"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <option value={1}>Last 24 hours</option>
+                    <option value={3}>Last 3 days</option>
+                    <option value={7}>Last 7 days</option>
+                    <option value={14}>Last 14 days</option>
+                    <option value={30}>Last 30 days</option>
+                  </select>
+                )}
+              </div>
+              {consumptionChartData && dailyConsumptionData && (
+                <button
+                  className="octopus-energy-nav-arrow octopus-energy-nav-right"
+                  onClick={() => setActiveChart((prev) => (prev === 0 ? 1 : 0))}
+                  title="Next chart"
+                  aria-label="Next chart"
+                >
+                  ›
+                </button>
+              )}
+              {!consumptionChartData && !dailyConsumptionData && <div></div>}
             </div>
             <div className="octopus-energy-chart-container">
-              <Line data={consumptionChartData} options={chartOptions} />
+              {activeChart === 0 && consumptionChartData && (
+                <Line data={consumptionChartData} options={chartOptions} />
+              )}
+              {activeChart === 1 && dailyConsumptionData && (
+                <Bar data={dailyConsumptionData} options={dailyChartOptions} />
+              )}
             </div>
-          </div>
-        )}
-        
-        {dailyConsumptionData && (
-          <div className="octopus-energy-chart">
-            <div className="octopus-energy-chart-header">
-              <div className="stat-box-label">Consumption Per Day</div>
-            </div>
-            <div className="octopus-energy-chart-container">
-              <Bar data={dailyConsumptionData} options={dailyChartOptions} />
-            </div>
+            {consumptionChartData && dailyConsumptionData && (
+              <div className="octopus-energy-chart-indicator">
+                <span className={activeChart === 0 ? 'active' : ''}></span>
+                <span className={activeChart === 1 ? 'active' : ''}></span>
+              </div>
+            )}
           </div>
         )}
         

@@ -321,21 +321,60 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const handleSend = async () => {
     if (!input.trim()) return;
     
-    // If no session is selected, create a new one first
-    if (!currentSessionId) {
-      await handleNewChat();
-      // Wait a bit for the session to be set
-      await new Promise(resolve => setTimeout(resolve, 100));
+    // If no session is selected, create a new one first (without clearing messages)
+    let sessionToUse = currentSessionId;
+    if (!sessionToUse) {
+      // Create session inline without calling handleNewChat (which clears messages)
+      const newSessionId = `chat-${Date.now()}`;
+      const tempTitle = `Chat ${new Date().toLocaleString()}`;
+      
+      // Set flag to prevent session list reload from overwriting
+      isAddingNewSessionRef.current = true;
+      
+      // Add the new session to the list immediately
+      setChatSessions(prev => {
+        const updated = [newSessionId, ...prev.filter(s => s !== newSessionId)];
+        return updated.slice(0, 20);
+      });
+      
+      // Set the temp title immediately
+      setSessionTitles(prev => ({
+        ...prev,
+        [newSessionId]: tempTitle
+      }));
+      
+      // Set the new session ID - this will trigger useChat to load (but messages will be empty initially)
+      setCurrentSessionId(newSessionId);
+      sessionToUse = newSessionId;
+      
+      // Try to create session in database (but don't wait for it)
+      chatAPI.createSession(newSessionId).then(result => {
+        if (result.success && result.title) {
+          setSessionTitles(prev => ({
+            ...prev,
+            [newSessionId]: result.title
+          }));
+        }
+        isAddingNewSessionRef.current = false;
+      }).catch(err => {
+        console.error('Error creating session:', err);
+        isAddingNewSessionRef.current = false;
+      });
+      
+      // Wait a bit for the session to be set and useChat to initialize
+      await new Promise(resolve => setTimeout(resolve, 150));
     }
 
     const userMessage = input;
     setInput('');
     
+    // Store tempUserMessage in a variable accessible to callbacks
     const tempUserMessage = {
       id: `temp-user-${Date.now()}`,
       role: 'user',
       message: userMessage,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      session_id: sessionToUse
     };
     setPendingUserMessage(tempUserMessage);
     setIsWaiting(true);
@@ -358,14 +397,19 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           id: `assistant-${Date.now()}`,
           role: 'assistant',
           message: fullResponse,
-          session_id: currentSessionId,
+          session_id: sessionToUse,
           created_at: new Date().toISOString()
         };
+        
+        // First, add the user message to the messages array (from pending)
+        if (tempUserMessage) {
+          addMessage(tempUserMessage);
+        }
         
         // Add the assistant message directly to the messages array
         addMessage(assistantMessage);
         
-        // Clear pending message since we have the response
+        // Clear pending message since we've added it to the messages array
         setPendingUserMessage(null);
         
         // Optionally reload history in background to sync with database (but don't clear UI)
@@ -375,7 +419,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           } catch (error) {
             console.error('Error reloading history:', error);
           }
-        }, 1000);
+        }, 2000);
       },
       async (error) => {
         console.error('Error sending message:', error);
@@ -812,6 +856,13 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     }
   }, [isWaiting, messages.length, pendingUserMessage, streamingMessage]);
 
+  useEffect(() => {
+    // Reset textarea height when input is cleared
+    if (inputRef.current && !input) {
+      inputRef.current.style.height = 'auto';
+    }
+  }, [input]);
+
   return (
     <div className="chatgpt-page">
       {/* Sidebar */}
@@ -1056,14 +1107,26 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                 <circle cx="12" cy="12" r="4"/>
               </svg>
             </button>
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
               className="chatgpt-input"
               placeholder="Ask anything"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize textarea to fit content
+                e.target.style.height = 'auto';
+                const newHeight = Math.min(e.target.scrollHeight, 200);
+                e.target.style.height = newHeight + 'px';
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              rows={1}
+              style={{ resize: 'none' }}
             />
             <div className="chatgpt-input-actions">
               <button 

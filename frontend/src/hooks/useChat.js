@@ -50,19 +50,50 @@ export function useChat(sessionId, mode, persona) {
       const data = await chatAPI.getHistory(50, 0, sessionId, mode, persona);
       console.log('[useChat] reloadHistory: Received', data?.messages?.length || 0, 'messages');
       if (data && data.messages && data.messages.length > 0) {
-        // Only update if we got messages - merge with existing to avoid clearing
+        // Merge with existing messages to avoid clearing temporary ones
         setMessages(prev => {
-          // If we have the same number or more messages, use the new data
-          // Otherwise keep existing and merge
+          // Create a map of existing messages by content and role (for temporary messages without DB IDs)
+          const existingByContent = new Map();
+          prev.forEach(m => {
+            const key = `${m.role}:${m.message?.substring(0, 50)}`;
+            existingByContent.set(key, m);
+          });
+          
+          // Merge: keep existing temporary messages, add new ones from DB
+          const merged = [...prev];
           const existingIds = new Set(prev.map(m => m.id));
-          const newMessages = data.messages.filter(m => !existingIds.has(m.id));
-          if (newMessages.length > 0 || prev.length === 0) {
-            return data.messages;
-          }
-          return prev;
+          
+          data.messages.forEach(dbMsg => {
+            // Check if this message already exists by ID
+            if (!existingIds.has(dbMsg.id)) {
+              // Check if it's a duplicate of a temporary message by content
+              const contentKey = `${dbMsg.role}:${dbMsg.message?.substring(0, 50)}`;
+              const existingTemp = existingByContent.get(contentKey);
+              if (existingTemp && existingTemp.id.startsWith('temp-') || existingTemp.id.startsWith('assistant-')) {
+                // Replace temporary message with DB version
+                const index = merged.findIndex(m => m.id === existingTemp.id);
+                if (index >= 0) {
+                  merged[index] = dbMsg;
+                }
+              } else {
+                // New message from DB
+                merged.push(dbMsg);
+              }
+            }
+          });
+          
+          // Sort by created_at
+          merged.sort((a, b) => {
+            const aTime = new Date(a.created_at || 0).getTime();
+            const bTime = new Date(b.created_at || 0).getTime();
+            return aTime - bTime;
+          });
+          
+          return merged;
         });
         setHasMore((data.messages?.length || 0) === 50);
       } else {
+        // No messages in DB - keep existing messages (they might be temporary/unsaved)
         console.warn('[useChat] reloadHistory: No messages in response, keeping current messages');
       }
     } catch (error) {

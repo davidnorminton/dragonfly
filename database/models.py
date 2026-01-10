@@ -110,6 +110,7 @@ class PromptPreset(Base):
     context = Column(Text, nullable=False)  # Custom system prompt/context
     temperature = Column(Float, nullable=True)  # Optional temperature override
     top_p = Column(Float, nullable=True)  # Optional top_p override
+    is_system = Column(Boolean, default=False, nullable=False)  # System presets cannot be deleted
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

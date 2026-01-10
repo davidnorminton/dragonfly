@@ -565,18 +565,27 @@ curl -X POST http://localhost:1337/api/chat \
 
 ## Recent Updates
 
+### Dashboard Enhancements
+- **API Health Monitoring**: New widget that monitors external API health (Claude, OpenWeather, Fish Audio TTS, Octopus Energy, Traffic). Shows status with check/cross icons and expandable error details. Updates on page load and hourly.
+- **System Stats**: Added human-readable directory sizes for Music Library and Generated Audio directories to monitor storage usage.
+- **Octopus Energy**: Added navigation arrows to switch between consumption graphs (Consumption Over Time and Consumption Per Day), displaying one graph at a time for cleaner interface.
+
 ### Chat Enhancements
+- **Multi-line Input**: Hold Shift+Enter to create new lines in chat input, press Enter alone to send message.
+- **Improved Message Persistence**: Fixed issue where messages were cleared when starting new chat - questions and answers now remain visible and properly linked to chat sessions.
 - **Custom Context Presets**: Create custom AI context presets with adjustable temperature and top_p parameters. Each chat session can use a different preset or the default system context.
 - **Chat Pinning**: Pin important conversations to keep them at the top of the chat list. Pinned status is persisted in the database.
 - **Search Results**: Unified search dropdown showing results for both music library (artists, albums, songs) and chat sessions (with context/persona information).
-- **Improved Message Handling**: Smooth message loading without flickering, with proper context preservation across conversations.
 
-### Music Player
+### Music Library
+- **Music Editor**: New music editor interface with folder picker for selecting music directory, cover art modal for viewing/editing album artwork, and conversion progress tracking.
+- **Directory Scanner**: Improved scanning to ignore common directory names like "Music", "Audio", preventing them from being incorrectly added as artists.
 - **Synchronized Controls**: Play/pause buttons across the interface are now synchronized, ensuring consistent state.
 - **Search Integration**: Search results include images for artists and albums, with quick navigation to selected items.
 
 ### Database Viewer
 - **Interactive Table Viewer**: Browse and edit database tables directly from the Settings page. View table schemas, row counts, and paginated data.
+- **System Presets Protection**: Added `is_system` flag to PromptPreset model to protect system presets from deletion.
 - **All Tables Visible**: All database tables are automatically discovered and displayed, including:
   - Chat sessions and messages
   - Prompt presets

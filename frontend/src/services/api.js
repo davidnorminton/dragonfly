@@ -9,6 +9,7 @@ export const systemAPI = {
   getUptime: () => api.get('/system/uptime').then(res => res.data),
   getIPs: () => api.get('/system/ips').then(res => res.data),
   restart: () => api.post('/system/restart').then(res => res.data),
+  getApiHealth: () => api.get('/system/api-health').then(res => res.data),
 };
 
 export const chatAPI = {
@@ -157,6 +158,12 @@ export const musicAPI = {
   deleteArtistVideo: (artist, videoId) => api.delete('/music/artist/video/delete', { data: { artist, videoId } }).then(res => res.data),
   trackPlay: (path, duration) => api.post('/music/track-play', { path, duration }).then(res => res.data),
   getAnalytics: () => api.get('/music/analytics').then(res => res.data),
+  convertAndCleanup: (directoryPath) => api.post('/music/convert-and-cleanup', { directory_path: directoryPath }).then(res => res.data),
+  scanConversion: (directoryPath) => api.post('/music/scan-conversion', { directory_path: directoryPath }).then(res => res.data),
+  scanMissingCovers: (directoryPath) => api.post('/music/scan-missing-covers', { directory_path: directoryPath }).then(res => res.data),
+  downloadCoverArt: (artist, album, targetPath) => api.post('/music/download-cover-art', { artist, album, target_path: targetPath }).then(res => res.data),
+  deleteArtist: (artistName) => api.delete(`/music/artist/${encodeURIComponent(artistName)}`).then(res => res.data),
+  cleanupInvalidArtists: () => api.post('/music/cleanup-invalid-artists').then(res => res.data),
 };
 
 export const weatherAPI = {

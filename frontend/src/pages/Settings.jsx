@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { configAPI, systemAPI, routerAPI, musicAPI, personaAPI, databaseAPI } from '../services/api';
 import { useRouterConfig } from '../hooks/useRouterConfig';
+import { FolderPicker, FilePicker } from '../components/FolderPicker';
+import { ConversionProgressModal } from '../components/ConversionProgressModal';
+import { CoverArtModal } from '../components/CoverArtModal';
 
 export function SettingsPage({ onNavigate }) {
   const [activeTab, setActiveTab] = useState('personas');
@@ -32,6 +35,18 @@ export function SettingsPage({ onNavigate }) {
   const [creatingFiller, setCreatingFiller] = useState(false);
   const [playingAudio, setPlayingAudio] = useState(null);
   const [databaseTables, setDatabaseTables] = useState([]);
+  const [conversionDirectory, setConversionDirectory] = useState('');
+  const [converting, setConverting] = useState(false);
+  const [conversionStatus, setConversionStatus] = useState(null);
+  const [showConversionModal, setShowConversionModal] = useState(false);
+  const [conversionScanData, setConversionScanData] = useState(null);
+  const [coverScanDirectory, setCoverScanDirectory] = useState('');
+  const [scanningCovers, setScanningCovers] = useState(false);
+  const [coverScanData, setCoverScanData] = useState(null);
+  const [showCoverModal, setShowCoverModal] = useState(false);
+  const [downloadingCovers, setDownloadingCovers] = useState(false);
+  const [coverDownloadProgress, setCoverDownloadProgress] = useState({ current: 0, total: 0, downloaded: 0, errors: 0 });
+  const [coverDownloadItem, setCoverDownloadItem] = useState('');
   const [selectedTable, setSelectedTable] = useState(null);
   const [tableData, setTableData] = useState(null);
   const [tablePage, setTablePage] = useState(1);
@@ -488,6 +503,13 @@ export function SettingsPage({ onNavigate }) {
     setSystemFields(updated);
   };
 
+  const updateLocationField = (field, value) => {
+    setLocationFields(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   const handleRestart = async () => {
     setRestarting(true);
     setRestartMsg('');
@@ -561,6 +583,32 @@ export function SettingsPage({ onNavigate }) {
       setMusicMessage(err?.message || 'Music clear failed.');
     } finally {
       setMusicLoading(false);
+    }
+  };
+
+  const handleConvertAndCleanup = async () => {
+    if (!conversionDirectory.trim()) {
+      setMusicMessage('Please select a directory first.');
+      return;
+    }
+    
+    setConverting(true);
+    setMusicMessage('');
+    
+    try {
+      // First, scan the directory to get the list of files
+      const scanRes = await musicAPI.scanConversion(conversionDirectory);
+      if (scanRes?.success) {
+        setConversionScanData(scanRes);
+        setShowConversionModal(true);
+      } else {
+        setMusicMessage(`Error scanning directory: ${scanRes?.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Scan error:', err);
+      setMusicMessage(`Error: ${err.message || 'Failed to scan directory'}`);
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -1259,16 +1307,13 @@ export function SettingsPage({ onNavigate }) {
                 {/* Music Directory Section */}
                 <div className="config-section">
                   <h4 className="config-section-title">Music Library Path</h4>
-                  <div className="form-group">
-                    <label>Music Directory</label>
-                    <input
-                      type="text"
-                      value={systemFields.paths?.music_directory || ''}
-                      onChange={(e) => updateSystemField('paths.music_directory', e.target.value)}
-                      placeholder="/Users/username/Music"
-                    />
-                    <span className="form-help">Path to your music library folder. Save config before scanning.</span>
-                  </div>
+                  <FolderPicker
+                    value={systemFields.paths?.music_directory || ''}
+                    onChange={(value) => updateSystemField('paths.music_directory', value)}
+                    placeholder="/Users/username/Music"
+                    label="Music Directory"
+                    helpText="Path to your music library folder. Save config before scanning."
+                  />
                 </div>
 
                 {/* Library Scanning Section */}
@@ -1277,6 +1322,140 @@ export function SettingsPage({ onNavigate }) {
                   <p className="settings-help">
                     Scan your music directory for artists, albums, and songs to update the library metadata.
                   </p>
+                  <div className="form-group" style={{ marginTop: '12px' }}>
+                    <button
+                      onClick={async () => {
+                        setMusicLoading(true);
+                        setMusicMessage('');
+                        try {
+                          const res = await musicAPI.cleanupInvalidArtists();
+                          if (res?.success) {
+                            if (res.count > 0) {
+                              setMusicMessage(`Cleaned up ${res.count} invalid artist(s): ${res.deleted.join(', ')}`);
+                            } else {
+                              setMusicMessage('No invalid artists found.');
+                            }
+                          } else {
+                            setMusicMessage(res?.error || 'Cleanup failed.');
+                          }
+                        } catch (err) {
+                          setMusicMessage(err?.message || 'Cleanup failed.');
+                        } finally {
+                          setMusicLoading(false);
+                        }
+                      }}
+                      disabled={musicLoading}
+                      className="save-button"
+                      style={{ background: musicLoading ? '#666' : '#f59e0b', marginRight: '12px' }}
+                    >
+                      {musicLoading ? 'Processing...' : '🧹 Cleanup Invalid Artists'}
+                    </button>
+                    <span className="form-help" style={{ display: 'inline', marginLeft: '8px' }}>
+                      Removes system directories (Music, Downloads, etc.) if accidentally added as artists
+                    </span>
+                  </div>
+                </div>
+
+                {/* Music Conversion Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">FLAC to MP3 Conversion & Cleanup</h4>
+                  <FolderPicker
+                    value={conversionDirectory}
+                    onChange={setConversionDirectory}
+                    placeholder="/Users/username/Music or C:\Users\username\Music"
+                    label="Directory Path"
+                    helpText="Enter the full path to the directory containing FLAC files. The tool will recursively convert all .flac files to .mp3 (320kbps) and delete non-image/non-mp3 files. Original FLAC files will be deleted after successful conversion."
+                    disabled={converting}
+                  />
+                  <div className="form-group" style={{ marginTop: '12px' }}>
+                    <button
+                      onClick={handleConvertAndCleanup}
+                      disabled={converting || !conversionDirectory || !conversionDirectory.trim()}
+                      className="save-button"
+                      style={{ 
+                        background: (converting || !conversionDirectory || !conversionDirectory.trim()) ? '#666' : '#3b82f6',
+                        minWidth: '200px'
+                      }}
+                    >
+                      {converting ? 'Scanning...' : '🔄 Convert & Cleanup'}
+                    </button>
+                  </div>
+                  {conversionStatus && (
+                    <div style={{ 
+                      marginTop: '16px', 
+                      padding: '12px', 
+                      background: 'rgba(59, 130, 246, 0.1)', 
+                      borderRadius: '8px',
+                      border: '1px solid rgba(59, 130, 246, 0.3)'
+                    }}>
+                      <div style={{ color: '#fff', marginBottom: '8px', fontWeight: 600 }}>
+                        Conversion Results:
+                      </div>
+                      <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.9em' }}>
+                        <div>✅ Converted: {conversionStatus.converted} files</div>
+                        <div>🗑️ Deleted: {conversionStatus.deleted} files</div>
+                        {conversionStatus.errors > 0 && (
+                          <div style={{ color: '#fbbf24', marginTop: '8px' }}>
+                            ⚠️ Errors: {conversionStatus.errors}
+                            {conversionStatus.errorMessages.length > 0 && (
+                              <ul style={{ marginTop: '4px', marginLeft: '20px', fontSize: '0.85em' }}>
+                                {conversionStatus.errorMessages.map((msg, idx) => (
+                                  <li key={idx}>{msg}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Cover Art Scanner Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Cover Art Scanner</h4>
+                  <FolderPicker
+                    value={coverScanDirectory}
+                    onChange={setCoverScanDirectory}
+                    placeholder="/Users/username/Music or C:\Users\username\Music"
+                    label="Music Directory Path"
+                    helpText="Enter the path to your music directory. Expected structure: ArtistName/AlbumName/. The scanner will download cover.jpg files for all artists (in ArtistName/) and albums (in ArtistName/AlbumName/), replacing any existing covers."
+                    disabled={scanningCovers || downloadingCovers}
+                  />
+                  <div className="form-group" style={{ marginTop: '12px' }}>
+                    <button
+                      onClick={async () => {
+                        if (!coverScanDirectory.trim()) {
+                          setMusicMessage('Please select a directory first.');
+                          return;
+                        }
+                        setScanningCovers(true);
+                        setMusicMessage('');
+                        try {
+                          const scanRes = await musicAPI.scanMissingCovers(coverScanDirectory);
+                          if (scanRes?.success) {
+                            setCoverScanData(scanRes);
+                            setShowCoverModal(true);
+                          } else {
+                            setMusicMessage(`Error scanning: ${scanRes?.error || 'Unknown error'}`);
+                          }
+                        } catch (err) {
+                          console.error('Scan error:', err);
+                          setMusicMessage(`Error: ${err.message || 'Failed to scan directory'}`);
+                        } finally {
+                          setScanningCovers(false);
+                        }
+                      }}
+                      disabled={scanningCovers || downloadingCovers || !coverScanDirectory || !coverScanDirectory.trim()}
+                      className="save-button"
+                      style={{ 
+                        background: (scanningCovers || downloadingCovers || !coverScanDirectory || !coverScanDirectory.trim()) ? '#666' : '#3b82f6',
+                        minWidth: '200px'
+                      }}
+                    >
+                      {scanningCovers ? 'Scanning...' : '🔍 Scan for Missing Covers'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Music Tools Section */}
@@ -1345,26 +1524,20 @@ export function SettingsPage({ onNavigate }) {
                   </h4>
                   {expandedSections['paths'] && (
                   <div>
-                  <div className="form-group">
-                    <label>Audio Output Directory</label>
-                    <input
-                      type="text"
-                      value={systemFields.paths?.audio_directory || ''}
-                      onChange={(e) => updateSystemField('paths.audio_directory', e.target.value)}
-                      placeholder="data/audio"
-                    />
-                    <span className="form-help">Where generated audio files are stored</span>
-                  </div>
-                  <div className="form-group">
-                    <label>Data Directory</label>
-                    <input
-                      type="text"
-                      value={systemFields.paths?.data_directory || ''}
-                      onChange={(e) => updateSystemField('paths.data_directory', e.target.value)}
-                      placeholder="data"
-                    />
-                    <span className="form-help">Base directory for application data</span>
-                  </div>
+                  <FolderPicker
+                    value={systemFields.paths?.audio_directory || ''}
+                    onChange={(value) => updateSystemField('paths.audio_directory', value)}
+                    placeholder="data/audio"
+                    label="Audio Output Directory"
+                    helpText="Where generated audio files are stored"
+                  />
+                  <FolderPicker
+                    value={systemFields.paths?.data_directory || ''}
+                    onChange={(value) => updateSystemField('paths.data_directory', value)}
+                    placeholder="data"
+                    label="Data Directory"
+                    helpText="Base directory for application data"
+                  />
                   </div>
                   )}
                 </div>
@@ -1380,16 +1553,14 @@ export function SettingsPage({ onNavigate }) {
                   </h4>
                   {expandedSections['alarm'] && (
                   <div>
-                  <div className="form-group">
-                    <label>Default Alarm Audio File</label>
-                    <input
-                      type="text"
-                      value={systemFields.alarm_audio_file || ''}
-                      onChange={(e) => updateSystemField('alarm_audio_file', e.target.value)}
-                      placeholder="/path/to/alarm.mp3"
-                    />
-                    <span className="form-help">Path to audio file to play when alarms trigger. Leave empty to use default beep sound.</span>
-                  </div>
+                  <FilePicker
+                    value={systemFields.alarm_audio_file || ''}
+                    onChange={(value) => updateSystemField('alarm_audio_file', value)}
+                    placeholder="/path/to/alarm.mp3"
+                    label="Default Alarm Audio File"
+                    helpText="Path to audio file to play when alarms trigger. Leave empty to use default beep sound."
+                    accept="audio/*"
+                  />
                   </div>
                   )}
                 </div>
@@ -1897,6 +2068,26 @@ export function SettingsPage({ onNavigate }) {
           )}
         </div>
       </div>
+
+      <ConversionProgressModal
+        isOpen={showConversionModal}
+        onClose={() => {
+          setShowConversionModal(false);
+          setConversionScanData(null);
+        }}
+        directoryPath={conversionDirectory}
+        scanData={conversionScanData}
+      />
+
+      <CoverArtModal
+        isOpen={showCoverModal}
+        onClose={() => {
+          setShowCoverModal(false);
+          setCoverScanData(null);
+        }}
+        directoryPath={coverScanDirectory}
+        scanData={coverScanData}
+      />
     </div>
   );
 }

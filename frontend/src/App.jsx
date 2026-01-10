@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { TopBar } from './components/TopBar';
 import { LeftPanel } from './components/LeftPanel';
 import { OctopusEnergy } from './components/OctopusEnergy';
+import { ApiHealth } from './components/ApiHealth';
 import { PersonaModal } from './components/PersonaModal';
 import { usePersonas } from './hooks/usePersonas';
 import { useAudioQueue } from './hooks/useAudioQueue';
@@ -534,6 +535,7 @@ function App() {
           )}
           <div className="right-section">
             <OctopusEnergy />
+            <ApiHealth />
           </div>
         </div>
       )}

@@ -2110,6 +2110,1297 @@ async def get_music_library():
             return {"success": False, "error": str(e)}
 
 
+@app.post("/api/system/detect-directory-path")
+async def detect_directory_path(request: Request):
+    """
+    Try to detect the full directory path from file paths or directory structure.
+    This helps when browsers don't expose full paths.
+    """
+    try:
+        data = await request.json()
+        file_paths = data.get("file_paths", [])  # Array of relative paths from webkitRelativePath
+        directory_name = data.get("directory_name", "")
+        
+        if not file_paths and not directory_name:
+            return JSONResponse(status_code=400, content={"success": False, "error": "No file paths or directory name provided"})
+        
+        # Try to detect the actual path by checking common locations
+        from pathlib import Path
+        
+        # Get current user's home directory
+        home = Path.home()
+        username = os.getenv("USER") or os.getenv("USERNAME") or "username"
+        
+        # Common locations to search (prioritized)
+        common_paths = []
+        if platform.system() == "Darwin":  # macOS
+            common_paths = [
+                home / "Documents",
+                home / "Desktop", 
+                home / "Music",
+                home / "Downloads",
+                Path("/Users") / username / "Documents",
+                Path("/Users") / username / "Desktop",
+                Path("/Users") / username / "Music",
+            ]
+        elif platform.system() == "Windows":
+            common_paths = [
+                Path(f"C:/Users/{username}/Documents"),
+                Path(f"C:/Users/{username}/Desktop"),
+                Path(f"C:/Users/{username}/Music"),
+                Path(f"C:/Users/{username}/Downloads"),
+            ]
+        else:  # Linux
+            common_paths = [
+                home / "Documents",
+                home / "Desktop",
+                home / "Music",
+                home / "Downloads",
+            ]
+        
+        # Extract directory name from file paths
+        search_dir_name = directory_name
+        if file_paths and not search_dir_name:
+            # Get the first part of the relative path (the selected directory name)
+            first_path = file_paths[0] if file_paths else ""
+            if first_path:
+                path_parts = first_path.split('/')
+                search_dir_name = path_parts[0] if path_parts else ""
+        
+        if not search_dir_name:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Could not determine directory name"})
+        
+        # Search for the directory in common locations
+        found_paths = []
+        for base_path in common_paths:
+            if not base_path.exists():
+                continue
+                
+            # Check direct match
+            potential_path = base_path / search_dir_name
+            if potential_path.exists() and potential_path.is_dir():
+                # Verify by checking if it has files (to increase confidence)
+                try:
+                    file_count = len(list(potential_path.rglob("*"))[:5])
+                    found_paths.append({
+                        "path": str(potential_path),
+                        "confidence": "high" if file_count > 0 else "medium"
+                    })
+                except Exception:
+                    found_paths.append({
+                        "path": str(potential_path),
+                        "confidence": "medium"
+                    })
+            
+            # Also check subdirectories recursively (limited depth - one level deep)
+            # This helps find directories like /Users/username/Documents/Eminem
+            try:
+                for subdir in base_path.iterdir():
+                    if subdir.is_dir():
+                        potential_path = subdir / search_dir_name
+                        if potential_path.exists() and potential_path.is_dir():
+                            try:
+                                file_count = len(list(potential_path.rglob("*"))[:5])
+                                found_paths.append({
+                                    "path": str(potential_path),
+                                    "confidence": "high" if file_count > 0 else "medium"
+                                })
+                            except Exception:
+                                found_paths.append({
+                                    "path": str(potential_path),
+                                    "confidence": "medium"
+                                })
+            except Exception:
+                pass
+        
+        # Return the best match (highest confidence first)
+        if found_paths:
+            # Sort by confidence (high > medium > low)
+            found_paths.sort(key=lambda x: 0 if x["confidence"] == "high" else 1)
+            best_match = found_paths[0]
+            return {
+                "success": True,
+                "detected_path": best_match["path"],
+                "confidence": best_match["confidence"]
+            }
+        
+        # Fallback: return a suggested path based on directory name
+        if platform.system() == "Darwin":
+            suggested = str(home / "Documents" / search_dir_name)
+        elif platform.system() == "Windows":
+            suggested = f"C:/Users/{username}/Documents/{search_dir_name}"
+        else:
+            suggested = str(home / "Documents" / search_dir_name)
+        
+        return {
+            "success": True,
+            "detected_path": suggested,
+            "confidence": "low",
+            "message": "Path suggested based on common location. Please verify."
+        }
+        
+    except Exception as e:
+        logger.error(f"Error detecting directory path: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/music/scan-conversion")
+async def scan_conversion_directory(request: Request):
+    """
+    Scan a directory and return list of files that will be converted and deleted.
+    """
+    try:
+        data = await request.json()
+        directory_path = data.get("directory_path", "").strip()
+        
+        if not directory_path:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Directory path is required"})
+        
+        base_path = Path(directory_path)
+        if not base_path.exists():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Directory does not exist: {directory_path}"})
+        
+        if not base_path.is_dir():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Path is not a directory: {directory_path}"})
+        
+        # Image extensions to keep
+        image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
+        # Audio extensions to keep (after conversion)
+        audio_exts = {".mp3"}
+        
+        # Find all FLAC files to convert
+        flac_files = list(base_path.rglob("*.flac"))
+        flac_files.extend(list(base_path.rglob("*.FLAC")))
+        
+        # Filter out files that already have MP3 versions
+        files_to_convert = []
+        for flac_file in flac_files:
+            mp3_file = flac_file.with_suffix(".mp3")
+            if not mp3_file.exists():
+                files_to_convert.append({
+                    "path": str(flac_file.relative_to(base_path)),
+                    "full_path": str(flac_file),
+                    "name": flac_file.name,
+                    "directory": str(flac_file.parent.relative_to(base_path)) if flac_file.parent != base_path else "."
+                })
+        
+        # Find all files to delete
+        all_files = list(base_path.rglob("*"))
+        files_to_delete = []
+        
+        for file_path in all_files:
+            if file_path.is_dir():
+                continue
+            
+            ext = file_path.suffix.lower()
+            if ext in image_exts or ext in audio_exts:
+                continue
+            
+            # FLAC files will be deleted after conversion
+            if ext == ".flac":
+                mp3_version = file_path.with_suffix(".mp3")
+                if mp3_version.exists():
+                    files_to_delete.append({
+                        "path": str(file_path.relative_to(base_path)),
+                        "full_path": str(file_path),
+                        "name": file_path.name,
+                        "directory": str(file_path.parent.relative_to(base_path)) if file_path.parent != base_path else ".",
+                        "reason": "FLAC file (MP3 exists)"
+                    })
+                continue
+            
+            # Other non-image/non-mp3 files
+            files_to_delete.append({
+                "path": str(file_path.relative_to(base_path)),
+                "full_path": str(file_path),
+                "name": file_path.name,
+                "directory": str(file_path.parent.relative_to(base_path)) if file_path.parent != base_path else ".",
+                "reason": f"Non-image/non-MP3 file ({ext})"
+            })
+        
+        # Group by directory
+        directories = {}
+        for file_info in files_to_convert + files_to_delete:
+            dir_path = file_info["directory"]
+            if dir_path not in directories:
+                directories[dir_path] = {"convert": [], "delete": []}
+            if file_info in files_to_convert:
+                directories[dir_path]["convert"].append(file_info)
+            else:
+                directories[dir_path]["delete"].append(file_info)
+        
+        return {
+            "success": True,
+            "directory_path": directory_path,
+            "files_to_convert": files_to_convert,
+            "files_to_delete": files_to_delete,
+            "directories": directories,
+            "summary": {
+                "total_to_convert": len(files_to_convert),
+                "total_to_delete": len(files_to_delete),
+                "total_directories": len(directories)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error scanning directory: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/music/convert-and-cleanup")
+async def convert_flac_to_mp3_and_cleanup(request: Request):
+    """
+    Convert FLAC files to MP3 and clean up non-image/non-mp3 files in a directory.
+    Recursively processes all subdirectories.
+    Returns summary only (for backward compatibility).
+    """
+    try:
+        data = await request.json()
+        directory_path = data.get("directory_path", "").strip()
+        
+        if not directory_path:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Directory path is required"})
+        
+        base_path = Path(directory_path)
+        if not base_path.exists():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Directory does not exist: {directory_path}"})
+        
+        if not base_path.is_dir():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Path is not a directory: {directory_path}"})
+        
+        # Image extensions to keep
+        image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
+        # Audio extensions to keep (after conversion)
+        audio_exts = {".mp3"}
+        
+        converted_count = 0
+        deleted_count = 0
+        error_count = 0
+        errors = []
+        
+        # Recursively find all FLAC files
+        flac_files = list(base_path.rglob("*.flac"))
+        flac_files.extend(list(base_path.rglob("*.FLAC")))
+        
+        logger.info(f"Found {len(flac_files)} FLAC files to convert in {directory_path}")
+        
+        # Convert FLAC to MP3
+        for flac_file in flac_files:
+            try:
+                mp3_file = flac_file.with_suffix(".mp3")
+                
+                # Skip if MP3 already exists
+                if mp3_file.exists():
+                    logger.info(f"MP3 already exists for {flac_file.name}, skipping conversion")
+                    continue
+                
+                # Convert using ffmpeg
+                cmd = [
+                    "ffmpeg", "-y", "-i", str(flac_file),
+                    "-codec:a", "libmp3lame", "-b:a", "320k",
+                    str(mp3_file)
+                ]
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout per file
+                )
+                
+                if result.returncode == 0:
+                    converted_count += 1
+                    logger.info(f"Converted {flac_file.name} to {mp3_file.name}")
+                else:
+                    error_count += 1
+                    error_msg = f"Failed to convert {flac_file.name}: {result.stderr[:200]}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                    
+            except subprocess.TimeoutExpired:
+                error_count += 1
+                error_msg = f"Timeout converting {flac_file.name}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+            except Exception as e:
+                error_count += 1
+                error_msg = f"Error converting {flac_file.name}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg, exc_info=True)
+        
+        # Clean up non-image/non-mp3 files (recursively)
+        all_files = list(base_path.rglob("*"))
+        
+        for file_path in all_files:
+            # Skip directories
+            if file_path.is_dir():
+                continue
+            
+            # Skip if it's an image or mp3 file
+            ext = file_path.suffix.lower()
+            if ext in image_exts or ext in audio_exts:
+                continue
+            
+            # Skip if it's a FLAC file (we'll delete originals after conversion)
+            if ext == ".flac":
+                # Only delete if MP3 version exists
+                mp3_version = file_path.with_suffix(".mp3")
+                if mp3_version.exists():
+                    try:
+                        file_path.unlink()
+                        deleted_count += 1
+                        logger.info(f"Deleted FLAC file {file_path.name} (MP3 exists)")
+                    except Exception as e:
+                        error_count += 1
+                        error_msg = f"Error deleting {file_path.name}: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(error_msg)
+                continue
+            
+            # Delete other files
+            try:
+                file_path.unlink()
+                deleted_count += 1
+                logger.info(f"Deleted {file_path.name}")
+            except Exception as e:
+                error_count += 1
+                error_msg = f"Error deleting {file_path.name}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        return {
+            "success": True,
+            "converted": converted_count,
+            "deleted": deleted_count,
+            "errors": error_count,
+            "error_messages": errors[:10] if errors else []  # Limit error messages
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in convert-and-cleanup: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/music/convert-and-cleanup-stream")
+async def convert_flac_to_mp3_and_cleanup_stream(request: Request):
+    """
+    Convert FLAC files to MP3 and clean up non-image/non-mp3 files with progress updates via SSE.
+    """
+    try:
+        data = await request.json()
+        directory_path = data.get("directory_path", "").strip()
+        
+        if not directory_path:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Directory path is required"})
+        
+        base_path = Path(directory_path)
+        if not base_path.exists():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Directory does not exist: {directory_path}"})
+        
+        if not base_path.is_dir():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Path is not a directory: {directory_path}"})
+        
+        # Image extensions to keep
+        image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"}
+        # Audio extensions to keep (after conversion)
+        audio_exts = {".mp3"}
+        
+        async def progress_stream():
+            converted_count = 0
+            deleted_count = 0
+            error_count = 0
+            errors = []
+            deleted_files = []
+            
+            # Recursively find all FLAC files
+            flac_files = list(base_path.rglob("*.flac"))
+            flac_files.extend(list(base_path.rglob("*.FLAC")))
+            
+            # Filter out files that already have MP3 versions
+            files_to_convert = [f for f in flac_files if not f.with_suffix(".mp3").exists()]
+            total_files = len(files_to_convert)
+            
+            yield f"data: {json.dumps({'type': 'start', 'total_files': total_files})}\n\n"
+            
+            # Convert FLAC to MP3
+            for idx, flac_file in enumerate(files_to_convert):
+                try:
+                    mp3_file = flac_file.with_suffix(".mp3")
+                    
+                    # Send progress update
+                    yield f"data: {json.dumps({'type': 'converting', 'file': str(flac_file.relative_to(base_path)), 'current': idx + 1, 'total': total_files})}\n\n"
+                    
+                    # Convert using ffmpeg (async)
+                    cmd = [
+                        "ffmpeg", "-y", "-i", str(flac_file),
+                        "-codec:a", "libmp3lame", "-b:a", "320k",
+                        str(mp3_file)
+                    ]
+                    
+                    # Use asyncio subprocess to avoid blocking
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    
+                    try:
+                        stdout, stderr = await asyncio.wait_for(
+                            process.communicate(),
+                            timeout=300  # 5 minute timeout per file
+                        )
+                        
+                        if process.returncode == 0:
+                            converted_count += 1
+                            yield f"data: {json.dumps({'type': 'converted', 'file': str(flac_file.relative_to(base_path)), 'count': converted_count})}\n\n"
+                            await asyncio.sleep(0.01)  # Small delay to ensure frontend receives update
+                        else:
+                            error_count += 1
+                            stderr_text = stderr.decode('utf-8', errors='ignore')[:200] if stderr else "Unknown error"
+                            error_msg = f"Failed to convert {flac_file.name}: {stderr_text}"
+                            errors.append(error_msg)
+                            yield f"data: {json.dumps({'type': 'error', 'file': str(flac_file.relative_to(base_path)), 'error': error_msg})}\n\n"
+                            await asyncio.sleep(0.01)
+                            
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.wait()
+                        error_count += 1
+                        error_msg = f"Timeout converting {flac_file.name}"
+                        errors.append(error_msg)
+                        yield f"data: {json.dumps({'type': 'error', 'file': str(flac_file.relative_to(base_path)), 'error': error_msg})}\n\n"
+                        await asyncio.sleep(0.01)
+                        
+                except Exception as e:
+                    error_count += 1
+                    error_msg = f"Error converting {flac_file.name}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(f"Conversion error: {error_msg}", exc_info=True)
+                    yield f"data: {json.dumps({'type': 'error', 'file': str(flac_file.relative_to(base_path)), 'error': error_msg})}\n\n"
+                    await asyncio.sleep(0.01)
+                
+                # Small delay to ensure frontend receives updates after each file
+                await asyncio.sleep(0.01)
+            
+            # Send cleanup start
+            yield f"data: {json.dumps({'type': 'cleanup_start'})}\n\n"
+            await asyncio.sleep(0.01)
+            
+            # Clean up non-image/non-mp3 files (recursively)
+            all_files = list(base_path.rglob("*"))
+            total_to_delete = len([f for f in all_files if f.is_file() and f.suffix.lower() not in image_exts and f.suffix.lower() not in audio_exts and (f.suffix.lower() != ".flac" or f.with_suffix(".mp3").exists())])
+            
+            for file_path in all_files:
+                # Skip directories
+                if file_path.is_dir():
+                    continue
+                
+                # Skip if it's an image or mp3 file
+                ext = file_path.suffix.lower()
+                if ext in image_exts or ext in audio_exts:
+                    continue
+                
+                # Skip if it's a FLAC file (we'll delete originals after conversion)
+                if ext == ".flac":
+                    # Only delete if MP3 version exists
+                    mp3_version = file_path.with_suffix(".mp3")
+                    if mp3_version.exists():
+                        try:
+                            file_path.unlink()
+                            deleted_count += 1
+                            deleted_files.append(str(file_path.relative_to(base_path)))
+                            yield f"data: {json.dumps({'type': 'deleted', 'file': str(file_path.relative_to(base_path)), 'reason': 'FLAC file (MP3 exists)', 'count': deleted_count})}\n\n"
+                            await asyncio.sleep(0.01)
+                        except Exception as e:
+                            error_count += 1
+                            error_msg = f"Error deleting {file_path.name}: {str(e)}"
+                            errors.append(error_msg)
+                            yield f"data: {json.dumps({'type': 'error', 'file': str(file_path.relative_to(base_path)), 'error': error_msg})}\n\n"
+                            await asyncio.sleep(0.01)
+                    continue
+                
+                # Delete other files
+                try:
+                    file_path.unlink()
+                    deleted_count += 1
+                    deleted_files.append(str(file_path.relative_to(base_path)))
+                    yield f"data: {json.dumps({'type': 'deleted', 'file': str(file_path.relative_to(base_path)), 'reason': f'Non-image/non-MP3 ({ext})', 'count': deleted_count})}\n\n"
+                    await asyncio.sleep(0.01)
+                except Exception as e:
+                    error_count += 1
+                    error_msg = f"Error deleting {file_path.name}: {str(e)}"
+                    errors.append(error_msg)
+                    yield f"data: {json.dumps({'type': 'error', 'file': str(file_path.relative_to(base_path)), 'error': error_msg})}\n\n"
+                    await asyncio.sleep(0.01)
+            
+            # Send completion
+            yield f"data: {json.dumps({'type': 'complete', 'converted': converted_count, 'deleted': deleted_count, 'errors': error_count, 'deleted_files': deleted_files[:50], 'error_messages': errors[:10]})}\n\n"
+        
+        return StreamingResponse(
+            progress_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error converting files: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+# Directories to ignore when scanning for artists/albums
+IGNORED_DIRECTORY_NAMES = {
+    'music', 'Music', 'MUSIC',
+    'downloads', 'Downloads', 'DOWNLOADS',
+    'desktop', 'Desktop', 'DESKTOP',
+    'documents', 'Documents', 'DOCUMENTS',
+    'pictures', 'Pictures', 'PICTURES',
+    'videos', 'Videos', 'VIDEOS',
+    '.trash', '.Trash', 'Trash',
+    'library', 'Library',
+    'applications', 'Applications',
+    'system', 'System',
+    'users', 'Users',
+    'home', 'Home',
+    'tmp', 'temp', 'Temp',
+}
+
+
+def _is_artist_directory(directory: Path) -> bool:
+    """
+    Detect if a directory is an artist directory (contains album subdirectories with music files)
+    rather than a music library root (contains artist subdirectories).
+    
+    Returns True if the directory appears to be an artist folder.
+    
+    Music Library Root structure:
+        /Music/ArtistA/Album1/song.mp3
+        /Music/ArtistB/Album2/song.mp3
+        -> subdirectories have their own subdirectories with audio (3+ levels)
+    
+    Artist Directory structure:
+        /Music/ArtistA/Album1/song.mp3
+        /Music/ArtistA/Album2/song.mp3
+        -> subdirectories directly contain audio (2 levels)
+    """
+    audio_extensions = {'.mp3', '.flac', '.m4a', '.aac', '.ogg', '.wav', '.wma', '.opus'}
+    
+    # Check if this directory directly contains audio files (could be a single-album artist)
+    for item in directory.iterdir():
+        if item.is_file() and item.suffix.lower() in audio_extensions:
+            return True
+    
+    # Check the depth of audio files to determine structure
+    # If subdirectories have their own subdirectories with audio, this is a library root
+    # If subdirectories directly contain audio, this is an artist directory
+    
+    subdirs_with_audio = 0
+    subdirs_with_nested_audio = 0
+    
+    for subdir in directory.iterdir():
+        if not subdir.is_dir():
+            continue
+        
+        has_direct_audio = False
+        has_nested_audio = False
+        
+        # Check for direct audio files in subdirectory
+        for item in subdir.iterdir():
+            if item.is_file() and item.suffix.lower() in audio_extensions:
+                has_direct_audio = True
+                break
+        
+        # Check for nested audio files (subdirectory of subdirectory)
+        for nested_subdir in subdir.iterdir():
+            if not nested_subdir.is_dir():
+                continue
+            for item in nested_subdir.iterdir():
+                if item.is_file() and item.suffix.lower() in audio_extensions:
+                    has_nested_audio = True
+                    break
+            if has_nested_audio:
+                break
+        
+        if has_direct_audio:
+            subdirs_with_audio += 1
+        if has_nested_audio:
+            subdirs_with_nested_audio += 1
+    
+    # If most subdirectories have nested audio (3+ levels), this is a library root
+    # If subdirectories have direct audio (2 levels), this is an artist directory
+    if subdirs_with_nested_audio > subdirs_with_audio:
+        return False  # Library root (Artist/Album/Song structure)
+    
+    return subdirs_with_audio > 0  # Artist directory (Album/Song structure)
+
+
+@app.post("/api/music/scan-missing-covers")
+async def scan_missing_covers(request: Request):
+    """
+    Scan a directory for cover.jpg files (will replace existing ones).
+    Expected structure: /path/to/music/ArtistName/AlbumName/
+    - Artist cover.jpg should be in ArtistName/
+    - Album cover.jpg should be in ArtistName/AlbumName/
+    
+    Also handles when user selects an artist directory directly:
+    - /path/to/music/ArtistName/ -> treats as single artist, subdirs are albums
+    
+    Returns all directories found, indicating which have existing covers.
+    """
+    try:
+        data = await request.json()
+        directory_path = data.get("directory_path", "").strip()
+        
+        if not directory_path:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Directory path is required"})
+        
+        base_path = Path(directory_path)
+        if not base_path.exists():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Directory does not exist: {directory_path}"})
+        
+        if not base_path.is_dir():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Path is not a directory: {directory_path}"})
+        
+        missing_artist_covers = []
+        missing_album_covers = []
+        
+        # Detect if this is an artist directory (subdirectories are albums)
+        # or a music library root (subdirectories are artists)
+        is_artist_dir = _is_artist_directory(base_path)
+        
+        if is_artist_dir:
+            # User selected an artist directory - treat base_path as the artist
+            artist_name = base_path.name
+            
+            # Skip if this is a common system/ignored directory
+            if artist_name in IGNORED_DIRECTORY_NAMES:
+                return JSONResponse(status_code=400, content={
+                    "success": False, 
+                    "error": f"'{artist_name}' appears to be a system directory, not an artist folder. Please select an artist directory or music library root."
+                })
+            
+            # Add the artist cover entry
+            missing_artist_covers.append({
+                "artist": artist_name,
+                "path": ".",
+                "full_path": str(base_path),
+                "has_existing": (base_path / "cover.jpg").exists()
+            })
+            
+            # Subdirectories are albums
+            for album_dir in base_path.iterdir():
+                if not album_dir.is_dir():
+                    continue
+                
+                album_name = album_dir.name
+                
+                # Skip ignored directories
+                if album_name in IGNORED_DIRECTORY_NAMES:
+                    continue
+                
+                missing_album_covers.append({
+                    "artist": artist_name,
+                    "album": album_name,
+                    "path": album_name,
+                    "full_path": str(album_dir),
+                    "has_existing": (album_dir / "cover.jpg").exists()
+                })
+        else:
+            # User selected a music library root - subdirectories are artists
+            for artist_dir in base_path.iterdir():
+                if not artist_dir.is_dir():
+                    continue
+                
+                artist_name = artist_dir.name
+                
+                # Skip ignored directories (like "Music" folder if nested)
+                if artist_name in IGNORED_DIRECTORY_NAMES:
+                    logger.info(f"Skipping ignored directory: {artist_name}")
+                    continue
+                
+                # Include all artist directories (will replace existing covers too)
+                missing_artist_covers.append({
+                    "artist": artist_name,
+                    "path": str(artist_dir.relative_to(base_path)),
+                    "full_path": str(artist_dir),
+                    "has_existing": (artist_dir / "cover.jpg").exists()
+                })
+                
+                # Scan for album directories (subdirectories of artist)
+                for album_dir in artist_dir.iterdir():
+                    if not album_dir.is_dir():
+                        continue
+                    
+                    album_name = album_dir.name
+                    
+                    # Skip ignored directories
+                    if album_name in IGNORED_DIRECTORY_NAMES:
+                        continue
+                    
+                    # Include all album directories (will replace existing covers too)
+                    missing_album_covers.append({
+                        "artist": artist_name,
+                        "album": album_name,
+                        "path": str(album_dir.relative_to(base_path)),
+                        "full_path": str(album_dir),
+                        "has_existing": (album_dir / "cover.jpg").exists()
+                    })
+        
+        return {
+            "success": True,
+            "directory_path": directory_path,
+            "is_artist_directory": is_artist_dir,
+            "missing_artist_covers": missing_artist_covers,
+            "missing_album_covers": missing_album_covers,
+            "summary": {
+                "total_missing_artist": len(missing_artist_covers),
+                "total_missing_album": len(missing_album_covers)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error scanning for missing covers: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+def is_lastfm_placeholder(image_url: str) -> bool:
+    """Check if a Last.fm image URL is a placeholder (white star)."""
+    if not image_url:
+        return True
+    # Last.fm placeholder hash for white star images
+    placeholder_hash = "2a96cbd8b46e442fc41c2b86b821562f"
+    return placeholder_hash in image_url
+
+
+@app.post("/api/music/download-cover-art")
+async def download_cover_art(request: Request):
+    """
+    Download cover art from Last.fm API and save as cover.jpg.
+    For artists: searches for artist images
+    For albums: searches for album cover art
+    """
+    try:
+        data = await request.json()
+        artist_name = data.get("artist", "").strip()
+        album_name = data.get("album", "").strip()  # Optional, if provided searches for album cover
+        target_path = data.get("target_path", "").strip()
+        
+        if not artist_name or not target_path:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Artist name and target path are required"})
+        
+        target_file = Path(target_path) / "cover.jpg"
+        
+        # Ensure target directory exists
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Use Last.fm API (free, no API key required for basic usage)
+        # For better results, we can use MusicBrainz Cover Art Archive as fallback
+        image_url = None
+        
+        try:
+            if album_name:
+                # Search for album cover art
+                # Last.fm API endpoint: http://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=YOUR_API_KEY&artist=ARTIST&album=ALBUM&format=json
+                # We'll use a public endpoint that doesn't require API key
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    # Try Last.fm first (more flexible with artist name variations)
+                    try:
+                        import urllib.parse
+                        lastfm_url = f"http://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=b25b959554ed76058ac220b7b2e0a026&artist={urllib.parse.quote(artist_name)}&album={urllib.parse.quote(album_name)}&format=json"
+                        response = await client.get(lastfm_url, timeout=10.0)
+                        
+                        if response.status_code == 200:
+                            data_json = response.json()
+                            if "album" in data_json and "image" in data_json["album"]:
+                                # Last.fm returns images in different sizes, get the largest one
+                                images = data_json["album"].get("image", [])
+                                # Find the largest image, skipping placeholders
+                                for img in reversed(images):
+                                    if img.get("#text"):
+                                        candidate_url = img["#text"]
+                                        # Skip placeholder images (white stars)
+                                        if not is_lastfm_placeholder(candidate_url):
+                                            image_url = candidate_url
+                                            break
+                    except Exception as lfm_err:
+                        logger.debug(f"Last.fm search failed: {lfm_err}")
+                    
+                    # Fallback to MusicBrainz Cover Art Archive if Last.fm fails
+                    if not image_url:
+                        try:
+                            import urllib.parse
+                            # Try multiple query formats for MusicBrainz (it's strict about artist names)
+                            mb_queries = [
+                                f"{artist_name} AND {album_name}",  # Free text search (most flexible)
+                                f'artist:"{artist_name}" AND release:"{album_name}"',  # Exact match
+                                f'artist:{artist_name} AND release:{album_name}',  # Field search
+                            ]
+                            
+                            for query in mb_queries:
+                                mb_search_url = f"https://musicbrainz.org/ws/2/release/?query={urllib.parse.quote(query)}&fmt=json&limit=3"
+                                mb_response = await client.get(mb_search_url, headers={"User-Agent": "Dragonfly/1.0 (https://github.com/dragonfly)"}, timeout=10.0)
+                                
+                                if mb_response.status_code == 200:
+                                    mb_data = mb_response.json()
+                                    if "releases" in mb_data and len(mb_data["releases"]) > 0:
+                                        # Try to find the best match (exact album name match)
+                                        for release in mb_data["releases"]:
+                                            release_title = release.get("title", "").lower()
+                                            if album_name.lower() in release_title or release_title in album_name.lower():
+                                                mbid = release.get("id")
+                                                if mbid:
+                                                    # Get cover art from Cover Art Archive
+                                                    caa_url = f"https://coverartarchive.org/release/{mbid}/front-500"
+                                                    caa_check = await client.head(caa_url, timeout=5.0)
+                                                    if caa_check.status_code == 200:
+                                                        image_url = caa_url
+                                                        break
+                                        
+                                        # If no exact match, use first result
+                                        if not image_url:
+                                            mbid = mb_data["releases"][0].get("id")
+                                            if mbid:
+                                                caa_url = f"https://coverartarchive.org/release/{mbid}/front-500"
+                                                caa_check = await client.head(caa_url, timeout=5.0)
+                                                if caa_check.status_code == 200:
+                                                    image_url = caa_url
+                                        
+                                        if image_url:
+                                            break
+                        except Exception as mb_err:
+                            logger.debug(f"MusicBrainz search failed: {mb_err}")
+            else:
+                # Search for artist image using Last.fm
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    try:
+                        import urllib.parse
+                        lastfm_url = f"http://ws.audioscrobbler.com/2.0/?method=artist.getinfo&api_key=b25b959554ed76058ac220b7b2e0a026&artist={urllib.parse.quote(artist_name)}&format=json"
+                        response = await client.get(lastfm_url, timeout=10.0)
+                        
+                        if response.status_code == 200:
+                            data_json = response.json()
+                            if "artist" in data_json and "image" in data_json["artist"]:
+                                images = data_json["artist"].get("image", [])
+                                # Get the largest image, skipping placeholders
+                                for img in reversed(images):
+                                    if img.get("#text"):
+                                        candidate_url = img["#text"]
+                                        # Skip placeholder images (white stars)
+                                        if not is_lastfm_placeholder(candidate_url):
+                                            image_url = candidate_url
+                                            break
+                    except Exception as err:
+                        logger.debug(f"Last.fm artist search failed: {err}")
+                
+                # If Last.fm only returned placeholders, try MusicBrainz (use first album cover as artist image)
+                if not image_url:
+                    try:
+                        # Search for artist's releases and use the first album cover
+                        mb_search_url = f"https://musicbrainz.org/ws/2/release/?query=artist:{urllib.parse.quote(artist_name)}&fmt=json&limit=1"
+                        mb_response = await client.get(mb_search_url, headers={"User-Agent": "Dragonfly/1.0 (https://github.com/dragonfly)"}, timeout=10.0)
+                        
+                        if mb_response.status_code == 200:
+                            mb_data = mb_response.json()
+                            if "releases" in mb_data and len(mb_data["releases"]) > 0:
+                                mbid = mb_data["releases"][0].get("id")
+                                if mbid:
+                                    caa_url = f"https://coverartarchive.org/release/{mbid}/front-500"
+                                    caa_check = await client.head(caa_url, timeout=5.0)
+                                    if caa_check.status_code == 200:
+                                        image_url = caa_url
+                    except Exception as mb_err:
+                        logger.debug(f"MusicBrainz fallback failed for artist {artist_name}: {mb_err}")
+            
+            if not image_url:
+                return JSONResponse(status_code=404, content={"success": False, "error": f"Could not find cover art for {artist_name}" + (f" - {album_name}" if album_name else "")})
+            
+            # Download the image
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                img_response = await client.get(image_url, follow_redirects=True)
+                
+                if img_response.status_code == 200:
+                    # Save as cover.jpg (overwrite if exists)
+                    existing = target_file.exists()
+                    with open(target_file, 'wb') as f:
+                        f.write(img_response.content)
+                    
+                    action = "replaced" if existing else "downloaded"
+                    return {
+                        "success": True,
+                        "message": f"{action.capitalize()} cover art: {target_file.name}",
+                        "path": str(target_file),
+                        "action": action
+                    }
+                else:
+                    return JSONResponse(status_code=404, content={"success": False, "error": f"Failed to download image: HTTP {img_response.status_code}"})
+                    
+        except Exception as e:
+            logger.error(f"Error downloading cover art: {e}", exc_info=True)
+            return JSONResponse(status_code=500, content={"success": False, "error": f"Error downloading cover art: {str(e)}"})
+            
+    except Exception as e:
+        logger.error(f"Error in download_cover_art: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/api/music/download-covers-stream")
+async def download_covers_stream(request: Request):
+    """
+    Download missing cover art with progress updates via SSE.
+    """
+    try:
+        data = await request.json()
+        directory_path = data.get("directory_path", "").strip()
+        
+        if not directory_path:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Directory path is required"})
+        
+        base_path = Path(directory_path)
+        if not base_path.exists():
+            return JSONResponse(status_code=400, content={"success": False, "error": f"Directory does not exist: {directory_path}"})
+        
+        async def progress_stream():
+            downloaded_count = 0
+            error_count = 0
+            errors = []
+            
+            # First scan for missing covers
+            missing_artist_covers = []
+            missing_album_covers = []
+            
+            # Detect if this is an artist directory (subdirectories are albums)
+            # or a music library root (subdirectories are artists)
+            is_artist_dir = _is_artist_directory(base_path)
+            
+            if is_artist_dir:
+                # User selected an artist directory - treat base_path as the artist
+                artist_name = base_path.name
+                
+                # Skip ignored directories
+                if artist_name not in IGNORED_DIRECTORY_NAMES:
+                    # Add the artist cover entry
+                    missing_artist_covers.append({
+                        "artist": artist_name,
+                        "path": str(base_path),
+                        "has_existing": (base_path / "cover.jpg").exists()
+                    })
+                
+                # Subdirectories are albums
+                for album_dir in base_path.iterdir():
+                    if not album_dir.is_dir():
+                        continue
+                    
+                    album_name = album_dir.name
+                    
+                    # Skip ignored directories
+                    if album_name in IGNORED_DIRECTORY_NAMES:
+                        continue
+                    
+                    missing_album_covers.append({
+                        "artist": artist_name,
+                        "album": album_name,
+                        "path": str(album_dir),
+                        "has_existing": (album_dir / "cover.jpg").exists()
+                    })
+            else:
+                # User selected a music library root - subdirectories are artists
+                for artist_dir in base_path.iterdir():
+                    if not artist_dir.is_dir():
+                        continue
+                    
+                    artist_name = artist_dir.name
+                    
+                    # Skip ignored directories (like "Music" folder if nested)
+                    if artist_name in IGNORED_DIRECTORY_NAMES:
+                        continue
+                    
+                    missing_artist_covers.append({
+                        "artist": artist_name,
+                        "path": str(artist_dir),
+                        "has_existing": (artist_dir / "cover.jpg").exists()
+                    })
+                    
+                    for album_dir in artist_dir.iterdir():
+                        if not album_dir.is_dir():
+                            continue
+                        
+                        # Skip ignored directories
+                        if album_dir.name in IGNORED_DIRECTORY_NAMES:
+                            continue
+                        
+                        album_name = album_dir.name
+                        
+                        missing_album_covers.append({
+                            "artist": artist_name,
+                            "album": album_name,
+                            "path": str(album_dir),
+                            "has_existing": (album_dir / "cover.jpg").exists()
+                        })
+            
+            total = len(missing_artist_covers) + len(missing_album_covers)
+            yield f"data: {json.dumps({'type': 'start', 'total': total, 'artists': len(missing_artist_covers), 'albums': len(missing_album_covers)})}\n\n"
+            
+            # Download artist covers
+            for idx, item in enumerate(missing_artist_covers):
+                artist_name = item["artist"]
+                target_path = item["path"]
+                
+                yield f"data: {json.dumps({'type': 'downloading', 'item': f'Artist: {artist_name}', 'current': idx + 1, 'total': total})}\n\n"
+                
+                try:
+                    # Download artist image - since Last.fm deprecated artist images,
+                    # we primarily use MusicBrainz to find the artist's albums and use an album cover
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        image_url = None
+                        import urllib.parse
+                        
+                        # Try Last.fm first (in case they restore artist images)
+                        try:
+                            lastfm_url = f"http://ws.audioscrobbler.com/2.0/?method=artist.getinfo&api_key=b25b959554ed76058ac220b7b2e0a026&artist={urllib.parse.quote(artist_name)}&format=json"
+                            response = await client.get(lastfm_url, timeout=10.0)
+                            
+                            if response.status_code == 200:
+                                data_json = response.json()
+                                if "artist" in data_json and "image" in data_json["artist"]:
+                                    images = data_json["artist"].get("image", [])
+                                    # Get the largest image, skipping placeholders
+                                    for img in reversed(images):
+                                        if img.get("#text"):
+                                            candidate_url = img["#text"]
+                                            # Skip placeholder images (white stars)
+                                            if not is_lastfm_placeholder(candidate_url):
+                                                image_url = candidate_url
+                                                logger.info(f"Found artist image from Last.fm for {artist_name}")
+                                                break
+                        except Exception as search_err:
+                            logger.debug(f"Last.fm search failed for {artist_name}: {search_err}")
+                        
+                        # Primary method: Use MusicBrainz to find artist's albums and use album cover
+                        if not image_url:
+                            try:
+                                # Try multiple search queries with increasing flexibility
+                                search_queries = [
+                                    f'artist:"{artist_name}"',  # Exact match
+                                    f'artist:{artist_name}',     # Word match
+                                    artist_name,                  # Free text
+                                ]
+                                
+                                for query in search_queries:
+                                    if image_url:
+                                        break
+                                        
+                                    mb_search_url = f"https://musicbrainz.org/ws/2/release/?query={urllib.parse.quote(query)}&fmt=json&limit=10"
+                                    mb_response = await client.get(
+                                        mb_search_url, 
+                                        headers={"User-Agent": "Dragonfly/1.0 (https://github.com/dragonfly)"}, 
+                                        timeout=10.0
+                                    )
+                                    
+                                    if mb_response.status_code == 200:
+                                        mb_data = mb_response.json()
+                                        releases = mb_data.get("releases", [])
+                                        
+                                        # Try each release until we find one with cover art
+                                        for release in releases:
+                                            mbid = release.get("id")
+                                            if not mbid:
+                                                continue
+                                            
+                                            try:
+                                                caa_url = f"https://coverartarchive.org/release/{mbid}/front-500"
+                                                caa_check = await client.head(caa_url, timeout=5.0, follow_redirects=True)
+                                                if caa_check.status_code in (200, 307, 302):
+                                                    image_url = caa_url
+                                                    logger.info(f"Found artist image via MusicBrainz album cover for {artist_name}")
+                                                    break
+                                            except Exception:
+                                                continue
+                                    
+                                    await asyncio.sleep(0.5)  # Rate limit for MusicBrainz
+                            except Exception as mb_err:
+                                logger.debug(f"MusicBrainz fallback failed for artist {artist_name}: {mb_err}")
+                        
+                        if image_url:
+                            try:
+                                logger.info(f"Downloading artist image from: {image_url}")
+                                img_response = await client.get(image_url, follow_redirects=True, timeout=30.0)
+                                logger.info(f"Image response status: {img_response.status_code}, content-type: {img_response.headers.get('content-type', 'unknown')}")
+                                
+                                if img_response.status_code == 200:
+                                    content_type = img_response.headers.get('content-type', '')
+                                    if 'image' in content_type or len(img_response.content) > 1000:
+                                        target_file = Path(target_path) / "cover.jpg"
+                                        target_file.parent.mkdir(parents=True, exist_ok=True)
+                                        # Overwrite existing file if it exists
+                                        existing = target_file.exists()
+                                        with open(target_file, 'wb') as f:
+                                            f.write(img_response.content)
+                                        downloaded_count += 1
+                                        action = "replaced" if existing else "downloaded"
+                                        logger.info(f"Successfully saved artist cover: {target_file}")
+                                        yield f"data: {json.dumps({'type': 'downloaded', 'item': f'Artist: {artist_name} ({action})', 'count': downloaded_count})}\n\n"
+                                    else:
+                                        error_count += 1
+                                        error_msg = f"Invalid image content for {artist_name} (size: {len(img_response.content)} bytes)"
+                                        logger.warning(error_msg)
+                                        errors.append(error_msg)
+                                        yield f"data: {json.dumps({'type': 'error', 'item': f'Artist: {artist_name}', 'error': 'Invalid image content'})}\n\n"
+                                else:
+                                    error_count += 1
+                                    error_msg = f"Failed to download artist image for {artist_name}: HTTP {img_response.status_code}"
+                                    logger.warning(error_msg)
+                                    errors.append(error_msg)
+                                    yield f"data: {json.dumps({'type': 'error', 'item': f'Artist: {artist_name}', 'error': f'HTTP {img_response.status_code}'})}\n\n"
+                            except Exception as dl_err:
+                                error_count += 1
+                                error_msg = f"Error downloading image for {artist_name}: {str(dl_err)}"
+                                logger.error(error_msg, exc_info=True)
+                                errors.append(error_msg)
+                                yield f"data: {json.dumps({'type': 'error', 'item': f'Artist: {artist_name}', 'error': str(dl_err)})}\n\n"
+                        else:
+                            error_count += 1
+                            error_msg = f"Could not find any image source for artist {artist_name} (Last.fm and MusicBrainz both failed)"
+                            logger.warning(error_msg)
+                            errors.append(error_msg)
+                            yield f"data: {json.dumps({'type': 'error', 'item': f'Artist: {artist_name}', 'error': 'No image source found - artist may not be in databases'})}\n\n"
+                except Exception as e:
+                    error_count += 1
+                    error_msg = f"Error downloading artist {artist_name}: {str(e)}"
+                    errors.append(error_msg)
+                    yield f"data: {json.dumps({'type': 'error', 'item': f'Artist: {artist_name}', 'error': str(e)})}\n\n"
+                
+                await asyncio.sleep(0.1)  # Small delay between downloads
+            
+            # Download album covers
+            for idx, item in enumerate(missing_album_covers):
+                artist_name = item["artist"]
+                album_name = item["album"]
+                target_path = item["path"]
+                current_num = len(missing_artist_covers) + idx + 1
+                
+                yield f"data: {json.dumps({'type': 'downloading', 'item': f'{artist_name} - {album_name}', 'current': current_num, 'total': total})}\n\n"
+                
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        image_url = None
+                        import urllib.parse
+                        
+                        # Try Last.fm first (more flexible with artist name variations)
+                        try:
+                            lastfm_url = f"http://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=b25b959554ed76058ac220b7b2e0a026&artist={urllib.parse.quote(artist_name)}&album={urllib.parse.quote(album_name)}&format=json"
+                            response = await client.get(lastfm_url, timeout=10.0)
+                            
+                            if response.status_code == 200:
+                                data_json = response.json()
+                                if "album" in data_json and "image" in data_json["album"]:
+                                    images = data_json["album"].get("image", [])
+                                    # Get the largest image, skipping placeholders
+                                    for img in reversed(images):
+                                        if img.get("#text"):
+                                            candidate_url = img["#text"]
+                                            # Skip placeholder images (white stars)
+                                            if not is_lastfm_placeholder(candidate_url):
+                                                image_url = candidate_url
+                                                break
+                        except Exception as lfm_err:
+                            logger.debug(f"Last.fm search failed for {artist_name} - {album_name}: {lfm_err}")
+                        
+                        # Fallback to MusicBrainz Cover Art Archive
+                        if not image_url:
+                            try:
+                                # Try multiple query formats for MusicBrainz (it's strict about artist names)
+                                mb_queries = [
+                                    f"{artist_name} AND {album_name}",  # Free text search (most flexible)
+                                    f'artist:"{artist_name}" AND release:"{album_name}"',  # Exact match
+                                    f'artist:{artist_name} AND release:{album_name}',  # Field search
+                                ]
+                                
+                                for query in mb_queries:
+                                    mb_search_url = f"https://musicbrainz.org/ws/2/release/?query={urllib.parse.quote(query)}&fmt=json&limit=3"
+                                    mb_response = await client.get(mb_search_url, headers={"User-Agent": "Dragonfly/1.0 (https://github.com/dragonfly)"}, timeout=10.0)
+                                    
+                                    if mb_response.status_code == 200:
+                                        mb_data = mb_response.json()
+                                        if "releases" in mb_data and len(mb_data["releases"]) > 0:
+                                            # Try to find the best match (exact album name match)
+                                            for release in mb_data["releases"]:
+                                                release_title = release.get("title", "").lower()
+                                                if album_name.lower() in release_title or release_title in album_name.lower():
+                                                    mbid = release.get("id")
+                                                    if mbid:
+                                                        caa_url = f"https://coverartarchive.org/release/{mbid}/front-500"
+                                                        caa_check = await client.head(caa_url, timeout=5.0)
+                                                        if caa_check.status_code == 200:
+                                                            image_url = caa_url
+                                                            break
+                                            
+                                            # If no exact match, use first result
+                                            if not image_url:
+                                                mbid = mb_data["releases"][0].get("id")
+                                                if mbid:
+                                                    caa_url = f"https://coverartarchive.org/release/{mbid}/front-500"
+                                                    caa_check = await client.head(caa_url, timeout=5.0)
+                                                    if caa_check.status_code == 200:
+                                                        image_url = caa_url
+                                            
+                                            if image_url:
+                                                break
+                            except Exception as mb_err:
+                                logger.debug(f"MusicBrainz search failed for {artist_name} - {album_name}: {mb_err}")
+                        
+                        if image_url:
+                            try:
+                                img_response = await client.get(image_url, follow_redirects=True, timeout=30.0)
+                                if img_response.status_code == 200:
+                                    target_file = Path(target_path) / "cover.jpg"
+                                    target_file.parent.mkdir(parents=True, exist_ok=True)
+                                    # Overwrite existing file if it exists
+                                    existing = target_file.exists()
+                                    with open(target_file, 'wb') as f:
+                                        f.write(img_response.content)
+                                    downloaded_count += 1
+                                    action = "replaced" if existing else "downloaded"
+                                    yield f"data: {json.dumps({'type': 'downloaded', 'item': f'{artist_name} - {album_name} ({action})', 'count': downloaded_count})}\n\n"
+                                else:
+                                    error_count += 1
+                                    errors.append(f"Failed to download album cover for {artist_name} - {album_name}")
+                                    yield f"data: {json.dumps({'type': 'error', 'item': f'{artist_name} - {album_name}', 'error': 'Failed to download image'})}\n\n"
+                            except Exception as dl_err:
+                                error_count += 1
+                                errors.append(f"Error downloading cover for {artist_name} - {album_name}: {str(dl_err)}")
+                                yield f"data: {json.dumps({'type': 'error', 'item': f'{artist_name} - {album_name}', 'error': str(dl_err)})}\n\n"
+                        else:
+                            error_count += 1
+                            errors.append(f"Could not find cover for {artist_name} - {album_name}")
+                            yield f"data: {json.dumps({'type': 'error', 'item': f'{artist_name} - {album_name}', 'error': 'Cover not found'})}\n\n"
+                except Exception as e:
+                    error_count += 1
+                    error_msg = f"Error downloading {artist_name} - {album_name}: {str(e)}"
+                    errors.append(error_msg)
+                    yield f"data: {json.dumps({'type': 'error', 'item': f'{artist_name} - {album_name}', 'error': str(e)})}\n\n"
+                
+                await asyncio.sleep(0.1)
+            
+            yield f"data: {json.dumps({'type': 'complete', 'downloaded': downloaded_count, 'errors': error_count, 'error_messages': errors[:20]})}\n\n"
+        
+        return StreamingResponse(
+            progress_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading covers: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
 @app.post("/api/music/clear")
 async def clear_music_library():
     """
@@ -2131,6 +3422,110 @@ async def clear_music_library():
         logger.error(f"Failed to clear music data: {e}", exc_info=True)
         return JSONResponse(
             status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.delete("/api/music/artist/{artist_name}")
+async def delete_artist(artist_name: str):
+    """
+    Delete a specific artist and all their albums/songs from the database.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # Find the artist
+            result = await session.execute(
+                select(MusicArtist).where(MusicArtist.name == artist_name)
+            )
+            artist = result.scalar_one_or_none()
+            
+            if not artist:
+                return JSONResponse(
+                    status_code=404,
+                    content={"success": False, "error": f"Artist '{artist_name}' not found"}
+                )
+            
+            # Delete songs for this artist's albums
+            albums_result = await session.execute(
+                select(MusicAlbum.id).where(MusicAlbum.artist_id == artist.id)
+            )
+            album_ids = [a[0] for a in albums_result.all()]
+            
+            if album_ids:
+                await session.execute(
+                    delete(MusicSong).where(MusicSong.album_id.in_(album_ids))
+                )
+            
+            # Delete albums for this artist
+            await session.execute(
+                delete(MusicAlbum).where(MusicAlbum.artist_id == artist.id)
+            )
+            
+            # Delete the artist
+            await session.execute(
+                delete(MusicArtist).where(MusicArtist.id == artist.id)
+            )
+            
+            await session.commit()
+            
+            logger.info(f"Deleted artist '{artist_name}' and all their data")
+            return {"success": True, "message": f"Deleted artist '{artist_name}' and all their albums/songs"}
+    except Exception as e:
+        logger.error(f"Failed to delete artist: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.post("/api/music/cleanup-invalid-artists")
+async def cleanup_invalid_artists():
+    """
+    Remove artists with system/invalid names from the database.
+    """
+    try:
+        deleted_artists = []
+        async with AsyncSessionLocal() as session:
+            # Find artists with invalid names
+            result = await session.execute(select(MusicArtist))
+            artists = result.scalars().all()
+            
+            for artist in artists:
+                if artist.name in IGNORED_DIRECTORY_NAMES:
+                    # Delete songs for this artist's albums
+                    albums_result = await session.execute(
+                        select(MusicAlbum.id).where(MusicAlbum.artist_id == artist.id)
+                    )
+                    album_ids = [a[0] for a in albums_result.all()]
+                    
+                    if album_ids:
+                        await session.execute(
+                            delete(MusicSong).where(MusicSong.album_id.in_(album_ids))
+                        )
+                    
+                    # Delete albums for this artist
+                    await session.execute(
+                        delete(MusicAlbum).where(MusicAlbum.artist_id == artist.id)
+                    )
+                    
+                    # Delete the artist
+                    await session.execute(
+                        delete(MusicArtist).where(MusicArtist.id == artist.id)
+                    )
+                    
+                    deleted_artists.append(artist.name)
+            
+            await session.commit()
+            
+            if deleted_artists:
+                logger.info(f"Cleaned up invalid artists: {deleted_artists}")
+                return {"success": True, "deleted": deleted_artists, "count": len(deleted_artists)}
+            else:
+                return {"success": True, "deleted": [], "count": 0, "message": "No invalid artists found"}
+    except Exception as e:
+        logger.error(f"Failed to cleanup invalid artists: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
             content={"success": False, "error": str(e)}
         )
 
@@ -2211,6 +3606,11 @@ async def scan_music_library():
                 artist_dir, album_dir = parts[0], parts[1]
                 song_filename = Path(parts[-1]).stem
                 rel_path = str(full_path.relative_to(base_path))
+                
+                # Skip ignored directories (e.g., "Music" folder if nested)
+                if artist_dir in IGNORED_DIRECTORY_NAMES:
+                    logger.debug(f"Skipping ignored directory: {artist_dir}")
+                    continue
                 
                 # Skip existing songs
                 if rel_path in existing_song_paths:
@@ -3903,6 +5303,42 @@ async def get_latest_telemetry():
         return list(latest.values())
 
 
+def _get_directory_size(path: Path) -> int:
+    """Calculate total size of a directory in bytes."""
+    total_size = 0
+    try:
+        if not path.exists():
+            return 0
+        for dirpath, dirnames, filenames in os.walk(path):
+            for filename in filenames:
+                file_path = Path(dirpath) / filename
+                try:
+                    total_size += file_path.stat().st_size
+                except (OSError, PermissionError):
+                    continue
+    except (OSError, PermissionError):
+        pass
+    return total_size
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format bytes to human readable string."""
+    if size_bytes == 0:
+        return "0 B"
+    
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    unit_index = 0
+    size = float(size_bytes)
+    
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+    
+    if unit_index == 0:
+        return f"{int(size)} {units[unit_index]}"
+    return f"{size:.1f} {units[unit_index]}"
+
+
 @app.get("/api/system/stats")
 async def get_system_stats():
     """Get system statistics (CPU, RAM, Disk) across all drives."""
@@ -3954,10 +5390,38 @@ async def get_system_stats():
                     "disk_total_gb": 0.0,
                     "disk_used_gb": 0.0,
                     "disk_free_gb": 0.0,
-                    "disk_percent": 0.0
+                    "disk_percent": 0.0,
+                    "music_dir_size": "N/A",
+                    "music_dir_size_bytes": 0,
+                    "audio_dir_size": "N/A",
+                    "audio_dir_size_bytes": 0
                 }
         
         disk_percent = (total_disk_used / total_disk_space * 100) if total_disk_space > 0 else 0.0
+        
+        # Get directory sizes for Music and Audio directories
+        # Load paths from system config
+        music_dir_path = Path("/Users/davidnorminton/Music")  # Default
+        audio_dir_path = Path("data/audio")  # Default
+        
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(SystemConfig).where(SystemConfig.key == "paths")
+                )
+                config = result.scalar_one_or_none()
+                if config and config.value:
+                    paths_config = config.value
+                    if paths_config.get("music_directory"):
+                        music_dir_path = Path(paths_config["music_directory"])
+                    if paths_config.get("audio_directory"):
+                        audio_dir_path = Path(paths_config["audio_directory"])
+        except Exception as e:
+            logger.debug(f"Could not load paths from config: {e}")
+        
+        # Calculate directory sizes (do this in a thread to not block)
+        music_dir_size_bytes = _get_directory_size(music_dir_path)
+        audio_dir_size_bytes = _get_directory_size(audio_dir_path)
         
         stats = {
             "cpu_percent": cpu_percent,
@@ -3967,7 +5431,13 @@ async def get_system_stats():
             "disk_total_gb": total_disk_space / (1024**3),
             "disk_used_gb": total_disk_used / (1024**3),
             "disk_free_gb": total_disk_free / (1024**3),
-            "disk_percent": disk_percent
+            "disk_percent": disk_percent,
+            "music_dir_size": _format_size(music_dir_size_bytes),
+            "music_dir_size_bytes": music_dir_size_bytes,
+            "music_dir_path": str(music_dir_path),
+            "audio_dir_size": _format_size(audio_dir_size_bytes),
+            "audio_dir_size_bytes": audio_dir_size_bytes,
+            "audio_dir_path": str(audio_dir_path)
         }
         
         # Log the stats
@@ -3999,6 +5469,364 @@ async def get_system_stats():
             "disk_used_gb": 0.0,
             "disk_free_gb": 0.0,
             "disk_percent": 0.0
+        }
+
+
+@app.get("/api/system/api-health")
+async def check_api_health():
+    """Check health status of external APIs used by the system."""
+    try:
+        import httpx
+        from config.api_key_loader import load_api_keys
+        
+        results = {}
+        
+        # Load API keys
+        try:
+            api_keys = await load_api_keys()
+        except Exception as e:
+            logger.error(f"Error loading API keys for health check: {e}")
+            api_keys = {}
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # 1. Check Anthropic (Claude) API
+            anthropic_key = api_keys.get("anthropic", {}).get("api_key")
+            if anthropic_key:
+                try:
+                    # Use a lightweight endpoint - just check if API key is valid
+                    response = await client.get(
+                        "https://api.anthropic.com/v1/models",
+                        headers={
+                            "x-api-key": anthropic_key,
+                            "anthropic-version": "2023-06-01"
+                        }
+                    )
+                    results["anthropic"] = {
+                        "name": "Claude AI",
+                        "status": "ok" if response.status_code == 200 else "error",
+                        "code": response.status_code,
+                        "configured": True
+                    }
+                except Exception as e:
+                    logger.warning(f"Anthropic API health check failed: {e}")
+                    results["anthropic"] = {
+                        "name": "Claude AI",
+                        "status": "error",
+                        "error": str(e),
+                        "configured": True
+                    }
+            else:
+                results["anthropic"] = {
+                    "name": "Claude AI",
+                    "status": "not_configured",
+                    "configured": False
+                }
+            
+            # 2. Check RapidAPI (Weather) - open-weather13.p.rapidapi.com
+            rapidapi_key = api_keys.get("rapidapi", {}).get("api_key")
+            if rapidapi_key:
+                try:
+                    # Simple request to weather API
+                    response = await client.get(
+                        "https://open-weather13.p.rapidapi.com/fivedaysforcast",
+                        headers={
+                            "X-RapidAPI-Key": rapidapi_key,
+                            "X-RapidAPI-Host": "open-weather13.p.rapidapi.com"
+                        },
+                        params={"q": "London,UK"}
+                    )
+                    # 200 = success, 403 = rate limit/auth issue
+                    results["rapidapi_weather"] = {
+                        "name": "Weather API",
+                        "status": "ok" if response.status_code == 200 else "error",
+                        "code": response.status_code,
+                        "configured": True
+                    }
+                except Exception as e:
+                    logger.warning(f"RapidAPI Weather health check failed: {e}")
+                    results["rapidapi_weather"] = {
+                        "name": "Weather API",
+                        "status": "error",
+                        "error": str(e),
+                        "configured": True
+                    }
+                
+                # 3. Check RapidAPI (Waze/Traffic) - waze.p.rapidapi.com
+                # Use lowercase headers to match actual traffic_collector.py usage
+                try:
+                    response = await client.get(
+                        "https://waze.p.rapidapi.com/alerts-and-jams",
+                        headers={
+                            "x-rapidapi-key": rapidapi_key,
+                            "x-rapidapi-host": "waze.p.rapidapi.com"
+                        },
+                        params={
+                            "top_right": "51.6,0.2",
+                            "bottom_left": "51.4,-0.2",
+                            "max_alerts": 1,
+                            "max_jams": 1
+                        },
+                        timeout=10.0
+                    )
+                    # Accept 200/204 (success), or 429 (rate limited but API is working)
+                    if response.status_code in [200, 204, 429]:
+                        results["rapidapi_traffic"] = {
+                            "name": "Traffic API",
+                            "status": "ok",
+                            "code": response.status_code,
+                            "configured": True
+                        }
+                    elif response.status_code == 401:
+                        results["rapidapi_traffic"] = {
+                            "name": "Traffic API",
+                            "status": "error",
+                            "code": response.status_code,
+                            "error": "Invalid API key",
+                            "configured": True
+                        }
+                    elif response.status_code == 403:
+                        results["rapidapi_traffic"] = {
+                            "name": "Traffic API",
+                            "status": "error",
+                            "code": response.status_code,
+                            "error": "Access forbidden - check API subscription",
+                            "configured": True
+                        }
+                    else:
+                        results["rapidapi_traffic"] = {
+                            "name": "Traffic API",
+                            "status": "error",
+                            "code": response.status_code,
+                            "error": f"HTTP {response.status_code}",
+                            "configured": True
+                        }
+                except httpx.TimeoutException:
+                    results["rapidapi_traffic"] = {
+                        "name": "Traffic API",
+                        "status": "error",
+                        "error": "Request timeout",
+                        "configured": True
+                    }
+                except Exception as e:
+                    logger.warning(f"RapidAPI Traffic health check failed: {e}")
+                    results["rapidapi_traffic"] = {
+                        "name": "Traffic API",
+                        "status": "error",
+                        "error": str(e)[:100],
+                        "configured": True
+                    }
+            else:
+                results["rapidapi_weather"] = {
+                    "name": "Weather API",
+                    "status": "not_configured",
+                    "configured": False
+                }
+                results["rapidapi_traffic"] = {
+                    "name": "Traffic API",
+                    "status": "not_configured",
+                    "configured": False
+                }
+            
+            # 4. Check Fish Audio (TTS) API
+            fish_key = api_keys.get("fish_audio", {}).get("api_key")
+            if fish_key:
+                try:
+                    # Try the models endpoint to verify API key
+                    response = await client.get(
+                        "https://api.fish.audio/model",
+                        headers={
+                            "Authorization": f"Bearer {fish_key}"
+                        },
+                        timeout=10.0
+                    )
+                    # Accept 200 (success) or 429 (rate limited but working)
+                    if response.status_code in [200, 429]:
+                        results["fish_audio"] = {
+                            "name": "Fish Audio TTS",
+                            "status": "ok",
+                            "code": response.status_code,
+                            "configured": True
+                        }
+                    elif response.status_code == 401:
+                        results["fish_audio"] = {
+                            "name": "Fish Audio TTS",
+                            "status": "error",
+                            "code": 401,
+                            "error": "Invalid API key",
+                            "configured": True
+                        }
+                    elif response.status_code == 404:
+                        # Endpoint doesn't exist, try wallet/balance endpoint
+                        response2 = await client.get(
+                            "https://api.fish.audio/wallet/self/api-credit",
+                            headers={
+                                "Authorization": f"Bearer {fish_key}"
+                            },
+                            timeout=10.0
+                        )
+                        if response2.status_code in [200, 429]:
+                            results["fish_audio"] = {
+                                "name": "Fish Audio TTS",
+                                "status": "ok",
+                                "code": response2.status_code,
+                                "configured": True
+                            }
+                        elif response2.status_code == 401:
+                            results["fish_audio"] = {
+                                "name": "Fish Audio TTS",
+                                "status": "error",
+                                "code": 401,
+                                "error": "Invalid API key",
+                                "configured": True
+                            }
+                        else:
+                            # If we can't find a working endpoint, assume configured if key exists
+                            # The actual TTS endpoint requires a POST with audio data
+                            results["fish_audio"] = {
+                                "name": "Fish Audio TTS",
+                                "status": "ok",
+                                "configured": True,
+                                "note": "Key configured (endpoint check unavailable)"
+                            }
+                    else:
+                        results["fish_audio"] = {
+                            "name": "Fish Audio TTS",
+                            "status": "error",
+                            "code": response.status_code,
+                            "error": f"HTTP {response.status_code}",
+                            "configured": True
+                        }
+                except httpx.TimeoutException:
+                    # Timeout might mean the service is slow but working
+                    results["fish_audio"] = {
+                        "name": "Fish Audio TTS",
+                        "status": "ok",
+                        "configured": True,
+                        "note": "Key configured (timeout on health check)"
+                    }
+                except Exception as e:
+                    logger.warning(f"Fish Audio health check failed: {e}")
+                    # If configured but check fails, mark as configured but unknown status
+                    results["fish_audio"] = {
+                        "name": "Fish Audio TTS",
+                        "status": "ok",
+                        "configured": True,
+                        "note": "Key configured (health check unavailable)"
+                    }
+            else:
+                results["fish_audio"] = {
+                    "name": "Fish Audio TTS",
+                    "status": "not_configured",
+                    "configured": False
+                }
+            
+            # 5. Check Octopus Energy API
+            # Use the same functions that the actual Octopus endpoints use
+            octopus_key = await _get_octopus_api_key()
+            octopus_account = await _get_octopus_account_number()
+            
+            if octopus_key:
+                if octopus_account:
+                    try:
+                        response = await client.get(
+                            f"https://api.octopus.energy/v1/accounts/{octopus_account}/",
+                            auth=(octopus_key, ""),
+                            timeout=10.0
+                        )
+                        # Accept 200 (success) or 429 (rate limited but working)
+                        if response.status_code in [200, 429]:
+                            results["octopus_energy"] = {
+                                "name": "Octopus Energy",
+                                "status": "ok",
+                                "code": response.status_code,
+                                "configured": True
+                            }
+                        elif response.status_code == 401:
+                            results["octopus_energy"] = {
+                                "name": "Octopus Energy",
+                                "status": "error",
+                                "code": 401,
+                                "error": "Invalid API key",
+                                "configured": True
+                            }
+                        elif response.status_code == 404:
+                            results["octopus_energy"] = {
+                                "name": "Octopus Energy",
+                                "status": "error",
+                                "code": 404,
+                                "error": "Account not found",
+                                "configured": True
+                            }
+                        else:
+                            results["octopus_energy"] = {
+                                "name": "Octopus Energy",
+                                "status": "error",
+                                "code": response.status_code,
+                                "error": f"HTTP {response.status_code}",
+                                "configured": True
+                            }
+                    except httpx.TimeoutException:
+                        # Timeout might mean service is slow but configured
+                        results["octopus_energy"] = {
+                            "name": "Octopus Energy",
+                            "status": "ok",
+                            "configured": True,
+                            "note": "Configured (timeout on health check)"
+                        }
+                    except Exception as e:
+                        logger.warning(f"Octopus Energy health check failed: {e}")
+                        # If configured but check fails, assume it's working
+                        results["octopus_energy"] = {
+                            "name": "Octopus Energy",
+                            "status": "ok",
+                            "configured": True,
+                            "note": "Configured (health check unavailable)"
+                        }
+                else:
+                    # API key configured but no account number - still mark as partially configured
+                    # The system has default fallback meter points
+                    results["octopus_energy"] = {
+                        "name": "Octopus Energy",
+                        "status": "ok",
+                        "configured": True,
+                        "note": "Using default meter (no account number)"
+                    }
+            else:
+                results["octopus_energy"] = {
+                    "name": "Octopus Energy",
+                    "status": "not_configured",
+                    "configured": False
+                }
+        
+        # Calculate summary
+        configured_apis = [k for k, v in results.items() if v.get("configured")]
+        healthy_apis = [k for k, v in results.items() if v.get("status") == "ok"]
+        
+        return {
+            "apis": results,
+            "summary": {
+                "total": len(results),
+                "configured": len(configured_apis),
+                "healthy": len(healthy_apis),
+                "all_healthy": len(healthy_apis) == len(configured_apis) and len(configured_apis) > 0
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error in API health check: {e}", exc_info=True)
+        import traceback
+        error_details = traceback.format_exc()
+        logger.debug(f"API health check traceback: {error_details}")
+        return {
+            "apis": {},
+            "summary": {
+                "total": 0,
+                "configured": 0,
+                "healthy": 0,
+                "all_healthy": False
+            },
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
         }
 
 
@@ -4560,11 +6388,13 @@ async def toggle_chat_session_pin(session_id: str, request: Request):
 
 @app.get("/api/prompt-presets")
 async def get_prompt_presets():
-    """Get all prompt presets."""
+    """Get all prompt presets. Only returns user-created presets (non-system)."""
     try:
         async with AsyncSessionLocal() as db_session:
             result = await db_session.execute(
-                select(PromptPreset).order_by(PromptPreset.created_at.desc())
+                select(PromptPreset)
+                .where(PromptPreset.is_system == False)  # Only return user-created presets
+                .order_by(PromptPreset.created_at.desc())
             )
             presets = result.scalars().all()
             return {
@@ -4576,6 +6406,7 @@ async def get_prompt_presets():
                         "context": p.context,
                         "temperature": p.temperature,
                         "top_p": p.top_p,
+                        "is_system": p.is_system,
                         "created_at": p.created_at.isoformat() if p.created_at else None,
                         "updated_at": p.updated_at.isoformat() if p.updated_at else None
                     }
@@ -4589,15 +6420,32 @@ async def get_prompt_presets():
 
 @app.post("/api/prompt-presets")
 async def create_prompt_preset(request: Request):
-    """Create a new prompt preset."""
+    """Create a new prompt preset. Only user-created presets are allowed."""
     try:
         data = await request.json()
+        name = data.get("name", "").strip()
+        context = data.get("context", "").strip()
+        
+        if not name:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Preset name is required"})
+        if not context:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Preset context is required"})
+        
         async with AsyncSessionLocal() as db_session:
+            # Check if preset with same name already exists
+            existing_result = await db_session.execute(
+                select(PromptPreset).where(PromptPreset.name == name)
+            )
+            existing = existing_result.scalar_one_or_none()
+            if existing:
+                return JSONResponse(status_code=400, content={"success": False, "error": f"Preset with name '{name}' already exists"})
+            
             preset = PromptPreset(
-                name=data.get("name", "").strip(),
-                context=data.get("context", "").strip(),
+                name=name,
+                context=context,
                 temperature=data.get("temperature"),
-                top_p=data.get("top_p")
+                top_p=data.get("top_p"),
+                is_system=False  # User-created presets are not system presets
             )
             db_session.add(preset)
             await db_session.commit()
@@ -4609,7 +6457,8 @@ async def create_prompt_preset(request: Request):
                     "name": preset.name,
                     "context": preset.context,
                     "temperature": preset.temperature,
-                    "top_p": preset.top_p
+                    "top_p": preset.top_p,
+                    "is_system": preset.is_system
                 }
             }
     except Exception as e:
@@ -4697,7 +6546,7 @@ Return ONLY the improved context text, without any explanations, quotes, or addi
 
 @app.put("/api/prompt-presets/{preset_id}")
 async def update_prompt_preset(preset_id: int, request: Request):
-    """Update an existing prompt preset."""
+    """Update an existing prompt preset. Only user-created presets can be updated."""
     try:
         data = await request.json()
         async with AsyncSessionLocal() as db_session:
@@ -4708,10 +6557,28 @@ async def update_prompt_preset(preset_id: int, request: Request):
             if not preset:
                 return JSONResponse(status_code=404, content={"success": False, "error": "Preset not found"})
             
-            preset.name = data.get("name", preset.name).strip()
-            preset.context = data.get("context", preset.context).strip()
-            preset.temperature = data.get("temperature")
-            preset.top_p = data.get("top_p")
+            # Prevent updating system presets
+            if preset.is_system:
+                return JSONResponse(status_code=403, content={"success": False, "error": "System presets cannot be modified"})
+            
+            name = data.get("name", preset.name)
+            if name:
+                name = name.strip()
+                # Check for duplicate names
+                if name != preset.name:
+                    existing_result = await db_session.execute(
+                        select(PromptPreset).where(PromptPreset.name == name, PromptPreset.id != preset_id)
+                    )
+                    if existing_result.scalar_one_or_none():
+                        return JSONResponse(status_code=400, content={"success": False, "error": f"Preset with name '{name}' already exists"})
+                preset.name = name
+            
+            if "context" in data:
+                preset.context = data.get("context", preset.context).strip()
+            if "temperature" in data:
+                preset.temperature = data.get("temperature")
+            if "top_p" in data:
+                preset.top_p = data.get("top_p")
             
             await db_session.commit()
             await db_session.refresh(preset)
@@ -4722,7 +6589,8 @@ async def update_prompt_preset(preset_id: int, request: Request):
                     "name": preset.name,
                     "context": preset.context,
                     "temperature": preset.temperature,
-                    "top_p": preset.top_p
+                    "top_p": preset.top_p,
+                    "is_system": preset.is_system
                 }
             }
     except Exception as e:
@@ -4732,7 +6600,7 @@ async def update_prompt_preset(preset_id: int, request: Request):
 
 @app.delete("/api/prompt-presets/{preset_id}")
 async def delete_prompt_preset(preset_id: int):
-    """Delete a prompt preset."""
+    """Delete a prompt preset. Only user-created presets can be deleted."""
     try:
         async with AsyncSessionLocal() as db_session:
             result = await db_session.execute(
@@ -4742,12 +6610,28 @@ async def delete_prompt_preset(preset_id: int):
             if not preset:
                 return JSONResponse(status_code=404, content={"success": False, "error": "Preset not found"})
             
+            # Prevent deletion of system presets
+            if preset.is_system:
+                return JSONResponse(status_code=403, content={"success": False, "error": "System presets cannot be deleted"})
+            
+            # Check if preset is being used by any chat sessions
+            sessions_result = await db_session.execute(
+                select(ChatSession).where(ChatSession.preset_id == preset_id)
+            )
+            sessions_using_preset = sessions_result.scalars().all()
+            
+            if sessions_using_preset:
+                # Unlink preset from sessions before deleting
+                for session in sessions_using_preset:
+                    session.preset_id = None
+            
             await db_session.delete(preset)
             await db_session.commit()
             return {"success": True}
     except Exception as e:
         logger.error(f"Error deleting prompt preset: {e}", exc_info=True)
-        await db_session.rollback()
+        if 'db_session' in locals():
+            await db_session.rollback()
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 

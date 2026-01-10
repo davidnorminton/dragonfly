@@ -45,6 +45,21 @@ export function SystemStats() {
           style={{ width: `${stats.disk_percent}%` }}
         ></div>
       </div>
+      
+      {/* Storage Breakdown */}
+      <div className="stat-divider"></div>
+      <div className="stat-row">
+        <span className="stat-label" title={stats.music_dir_path || 'Music Directory'}>
+          Music Library
+        </span>
+        <span className="stat-value">{stats.music_dir_size ?? '...'}</span>
+      </div>
+      <div className="stat-row">
+        <span className="stat-label" title={stats.audio_dir_path || 'Audio Directory'}>
+          Generated Audio
+        </span>
+        <span className="stat-value">{stats.audio_dir_size ?? '...'}</span>
+      </div>
     </div>
   );
 }
