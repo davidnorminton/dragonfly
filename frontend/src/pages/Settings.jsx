@@ -2203,39 +2203,41 @@ export function SettingsPage({ onNavigate }) {
                 </div>
               )}
               {!loading && databaseTables.length > 0 && (
-                <div className="database-tables-list">
+                <div className="database-viewer-layout">
+                  {/* Left Column - Table Names */}
+                  <div className="database-tables-sidebar">
+                    <div className="database-tables-sidebar-header">Tables</div>
+                    <div className="database-tables-sidebar-list">
                       {databaseTables.map((table) => (
-                        <div key={table.name}>
-                          <div
-                            onClick={() => {
-                              if (selectedTable === table.name) {
-                                setSelectedTable(null);
-                                setTableData(null);
-                              } else {
-                                setTablePage(1);
-                                setSelectedTable(table.name);
-                              }
-                            }}
-                            className={`database-table-card ${selectedTable === table.name ? 'active' : ''}`}
-                          >
-                            <div className="database-table-card-header">
-                              <div>
-                                <div className="database-table-name">
-                                  {table.name}
-                                </div>
-                                <div className="database-table-info">
-                                  {table.row_count} rows • {table.columns.length} columns
-                                </div>
-                              </div>
-                              <div className="database-table-arrow">
-                                {selectedTable === table.name ? '▼' : '→'}
-                              </div>
-                            </div>
+                        <div
+                          key={table.name}
+                          onClick={() => {
+                            setTablePage(1);
+                            setSelectedTable(table.name);
+                          }}
+                          className={`database-table-item ${selectedTable === table.name ? 'active' : ''}`}
+                        >
+                          <div className="database-table-item-name">{table.name}</div>
+                          <div className="database-table-item-info">
+                            {table.row_count} rows
                           </div>
-                          
-                          {/* Table Data View - Inline below the clicked table */}
-                          {selectedTable === table.name && (
-                            <div className="database-table-data-container">
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Right Column - Table Data */}
+                  <div className="database-table-content">
+                    {!selectedTable ? (
+                      <div className="database-no-selection">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.3, marginBottom: '16px' }}>
+                          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                          <polyline points="9 22 9 12 15 12 15 22"/>
+                        </svg>
+                        <div style={{ fontSize: '16px', color: '#666' }}>Select a table to view its data</div>
+                      </div>
+                    ) : (
+                      <div className="database-table-data-container">
 
                               {loadingTableData && !tableData && (
                                 <div className="database-loading-data">
@@ -2462,14 +2464,13 @@ export function SettingsPage({ onNavigate }) {
                             )}
                           </>
                         ) : null}
+                                </div>
+                              )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                </div>
+              )}
             </div>
           )}
         </div>
