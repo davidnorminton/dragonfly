@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePersonas } from '../hooks/usePersonas';
 
-export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage = 'dashboard', onNavigate, onMusicSearch, onChatSearch, musicSearchResults, chatSearchResults }) {
+export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage = 'dashboard', onNavigate, onMusicSearch, onChatSearch, onVideoSearch, musicSearchResults, chatSearchResults, videoSearchResults }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [videoSearchQuery, setVideoSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
   const searchRef = useRef(null);
   const { currentTitle } = usePersonas();
@@ -21,12 +22,18 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
 
   // Show results when there's a query and results
   useEffect(() => {
-    const hasQuery = (activePage === 'music' || activePage === 'music-editor') ? searchQuery.trim() : chatSearchQuery.trim();
+    const hasQuery = (activePage === 'music' || activePage === 'music-editor') 
+      ? searchQuery.trim() 
+      : activePage === 'videos'
+      ? videoSearchQuery.trim()
+      : chatSearchQuery.trim();
     const hasResults = (activePage === 'music' || activePage === 'music-editor') 
       ? (musicSearchResults && musicSearchResults.length > 0)
+      : activePage === 'videos'
+      ? (videoSearchResults && videoSearchResults.length > 0)
       : (chatSearchResults && chatSearchResults.length > 0);
     setShowResults(hasQuery && hasResults);
-  }, [searchQuery, chatSearchQuery, musicSearchResults, chatSearchResults, activePage]);
+  }, [searchQuery, chatSearchQuery, videoSearchQuery, musicSearchResults, chatSearchResults, videoSearchResults, activePage]);
 
   return (
     <div className="top-bar">
@@ -60,6 +67,16 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+            </svg>
+          </button>
+          <button
+            className={`nav-button ${activePage === 'videos' ? 'active' : ''}`}
+            onClick={() => onNavigate?.('videos')}
+            style={{ minWidth: 40, padding: '6px 12px' }}
+            title="Videos"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
             </svg>
           </button>
           <button

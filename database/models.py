@@ -1,5 +1,5 @@
 """Database models."""
-from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Enum as SQLEnum, ForeignKey, Float, Boolean
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, JSON, Enum as SQLEnum, ForeignKey, Float, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -130,6 +130,125 @@ class AIModelCache(Base):
     
     def __repr__(self):
         return f"<AIModelCache {self.provider}>"
+
+
+class VideoMovie(Base):
+    """Movie table for video library."""
+    __tablename__ = "video_movies"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String, nullable=False, index=True)
+    file_path = Column(String, nullable=False, unique=True)
+    file_size = Column(BigInteger, nullable=True)  # Size in bytes (BigInteger supports files > 2GB)
+    duration = Column(BigInteger, nullable=True)  # Duration in seconds (BigInteger for safety)
+    year = Column(Integer, nullable=True)
+    resolution = Column(String, nullable=True)  # 1080p, 4K, etc.
+    codec = Column(String, nullable=True)  # h264, h265, etc.
+    description = Column(Text, nullable=True)
+    poster_path = Column(String, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)  # Column name is "metadata" in DB
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<VideoMovie {self.title}>"
+
+
+class VideoTVShow(Base):
+    """TV Show table."""
+    __tablename__ = "video_tv_shows"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String, nullable=False, unique=True, index=True)
+    directory_path = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    poster_path = Column(String, nullable=True)
+    year = Column(Integer, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)  # Column name is "metadata" in DB
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    seasons = relationship("VideoTVSeason", back_populates="show", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<VideoTVShow {self.title}>"
+
+
+class VideoTVSeason(Base):
+    """TV Season table."""
+    __tablename__ = "video_tv_seasons"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    show_id = Column(Integer, ForeignKey("video_tv_shows.id"), nullable=False, index=True)
+    season_number = Column(Integer, nullable=False)
+    directory_path = Column(String, nullable=False)
+    poster_path = Column(String, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)  # Column name is "metadata" in DB
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    show = relationship("VideoTVShow", back_populates="seasons")
+    episodes = relationship("VideoTVEpisode", back_populates="season", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<VideoTVSeason {self.show.title if self.show else 'Unknown'} S{self.season_number}>"
+
+
+class VideoTVEpisode(Base):
+    """TV Episode table."""
+    __tablename__ = "video_tv_episodes"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    season_id = Column(Integer, ForeignKey("video_tv_seasons.id"), nullable=False, index=True)
+    episode_number = Column(Integer, nullable=False)
+    title = Column(String, nullable=True)
+    file_path = Column(String, nullable=False, unique=True)
+    file_size = Column(BigInteger, nullable=True)  # Size in bytes (BigInteger supports files > 2GB)
+    duration = Column(BigInteger, nullable=True)  # Duration in seconds (BigInteger for safety)
+    resolution = Column(String, nullable=True)
+    codec = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    thumbnail_path = Column(String, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)  # Column name is "metadata" in DB
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    season = relationship("VideoTVSeason", back_populates="episodes")
+
+    def __repr__(self):
+        return f"<VideoTVEpisode S{self.season.season_number if self.season else '?'}E{self.episode_number}>"
+
+
+class VideoPlaybackProgress(Base):
+    """Track video playback progress for resume functionality."""
+    __tablename__ = "video_playback_progress"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    video_type = Column(String, nullable=False, index=True)  # 'movie' or 'episode'
+    video_id = Column(Integer, nullable=False, index=True)  # ID of movie or episode
+    position = Column(Float, nullable=False)  # Current playback position in seconds
+    duration = Column(Float)  # Total duration in seconds
+    last_played = Column(DateTime(timezone=True), server_default=func.now())
+    completed = Column(Boolean, default=False)  # Mark as completed if watched >90%
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<VideoPlaybackProgress {self.video_type}:{self.video_id} @ {self.position}s>"
+
+
+class ActorFilmography(Base):
+    """Actor filmography data from TMDB."""
+    __tablename__ = 'actor_filmography'
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    actor_name = Column(String, nullable=False, index=True)
+    tmdb_person_id = Column(Integer, index=True)  # TMDB person ID
+    profile_path = Column(String)  # Actor's profile image URL
+    filmography = Column(JSON)  # List of movies with details
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<ActorFilmography {self.actor_name}>"
 
 
 class MusicArtist(Base):

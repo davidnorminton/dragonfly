@@ -1,6 +1,6 @@
 """FastAPI application for the web GUI."""
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, JSONResponse, Response
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -25,7 +25,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, ActorFilmography, SystemConfig, ApiKeysConfig
 from sqlalchemy import select, desc, func, or_, delete, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -5339,6 +5339,507 @@ def _format_size(size_bytes: int) -> str:
     return f"{size:.1f} {units[unit_index]}"
 
 
+@app.get("/api/system/network-info")
+async def get_network_info():
+    """Get server network information for Chromecast."""
+    try:
+        import socket
+        
+        # Get local IP address
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        
+        # Get all network interfaces
+        try:
+            # Better method to get actual network IP (not 127.0.0.1)
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            network_ip = s.getsockname()[0]
+            s.close()
+        except:
+            network_ip = local_ip
+        
+        return {
+            "hostname": hostname,
+            "local_ip": local_ip,
+            "network_ip": network_ip,
+            "port": settings.port
+        }
+    except Exception as e:
+        logger.error(f"Error getting network info: {e}")
+        return {
+            "hostname": "unknown",
+            "local_ip": "127.0.0.1",
+            "network_ip": "127.0.0.1",
+            "port": settings.port
+        }
+
+
+# Video Playback Progress Endpoints
+@app.get("/api/video/progress/{video_type}/{video_id}")
+async def get_playback_progress(video_type: str, video_id: int):
+    """Get saved playback progress for a video."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(VideoPlaybackProgress).where(
+                    VideoPlaybackProgress.video_type == video_type,
+                    VideoPlaybackProgress.video_id == video_id
+                )
+            )
+            progress = result.scalar_one_or_none()
+            
+            if progress:
+                return {
+                    "position": progress.position,
+                    "duration": progress.duration,
+                    "completed": progress.completed,
+                    "last_played": progress.last_played.isoformat() if progress.last_played else None
+                }
+            return {"position": 0, "completed": False}
+    except Exception as e:
+        logger.error(f"Error getting playback progress: {e}")
+        return {"position": 0, "completed": False}
+
+
+@app.post("/api/video/progress")
+async def save_playback_progress(data: dict):
+    """Save playback progress."""
+    try:
+        video_type = data.get("video_type")
+        video_id = data.get("video_id")
+        position = data.get("position", 0)
+        duration = data.get("duration")
+        
+        # Mark as completed if watched >90%
+        completed = duration and position / duration > 0.9
+        
+        async with AsyncSessionLocal() as session:
+            # Check if progress exists
+            result = await session.execute(
+                select(VideoPlaybackProgress).where(
+                    VideoPlaybackProgress.video_type == video_type,
+                    VideoPlaybackProgress.video_id == video_id
+                )
+            )
+            progress = result.scalar_one_or_none()
+            
+            if progress:
+                progress.position = position
+                progress.duration = duration
+                progress.completed = completed
+                progress.last_played = datetime.now()
+            else:
+                progress = VideoPlaybackProgress(
+                    video_type=video_type,
+                    video_id=video_id,
+                    position=position,
+                    duration=duration,
+                    completed=completed
+                )
+                session.add(progress)
+            
+            await session.commit()
+            return {"success": True, "completed": completed}
+    except Exception as e:
+        logger.error(f"Error saving playback progress: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/video/next-episode/{episode_id}")
+async def get_next_episode(episode_id: int):
+    """Get the next episode to play."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get current episode
+            result = await session.execute(
+                select(VideoTVEpisode).where(VideoTVEpisode.id == episode_id)
+            )
+            current_episode = result.scalar_one_or_none()
+            
+            if not current_episode:
+                return {"next_episode": None}
+            
+            # Get current season
+            result = await session.execute(
+                select(VideoTVSeason).where(VideoTVSeason.id == current_episode.season_id)
+            )
+            current_season = result.scalar_one_or_none()
+            
+            if not current_season:
+                return {"next_episode": None}
+            
+            # Try to get next episode in same season
+            result = await session.execute(
+                select(VideoTVEpisode).where(
+                    VideoTVEpisode.season_id == current_season.id,
+                    VideoTVEpisode.episode_number == current_episode.episode_number + 1
+                )
+            )
+            next_episode = result.scalar_one_or_none()
+            
+            if next_episode:
+                return {
+                    "next_episode": {
+                        "id": next_episode.id,
+                        "title": next_episode.title,
+                        "episode_number": next_episode.episode_number,
+                        "season_number": current_season.season_number,
+                        "show_id": current_season.show_id
+                    }
+                }
+            
+            # No next episode in season, try next season
+            result = await session.execute(
+                select(VideoTVSeason).where(
+                    VideoTVSeason.show_id == current_season.show_id,
+                    VideoTVSeason.season_number == current_season.season_number + 1
+                )
+            )
+            next_season = result.scalar_one_or_none()
+            
+            if next_season:
+                # Get first episode of next season
+                result = await session.execute(
+                    select(VideoTVEpisode).where(
+                        VideoTVEpisode.season_id == next_season.id
+                    ).order_by(VideoTVEpisode.episode_number).limit(1)
+                )
+                first_episode = result.scalar_one_or_none()
+                
+                if first_episode:
+                    return {
+                        "next_episode": {
+                            "id": first_episode.id,
+                            "title": first_episode.title,
+                            "episode_number": first_episode.episode_number,
+                            "season_number": next_season.season_number,
+                            "show_id": next_season.show_id
+                        }
+                    }
+            
+            return {"next_episode": None}
+    except Exception as e:
+        logger.error(f"Error getting next episode: {e}")
+        return {"next_episode": None}
+
+
+@app.post("/api/video/cast-crew")
+async def get_cast_crew(request: Request):
+    """Get cast and crew information for a movie from TMDB."""
+    data = await request.json()
+    movie_title = data.get("title", "")
+    movie_year = data.get("year", "")
+    
+    if not movie_title:
+        raise HTTPException(status_code=400, detail="Movie title is required")
+    
+    logging.info(f"🎬 Getting cast/crew for: {movie_title} ({movie_year})")
+    
+    try:
+        # Get TMDB API key from database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ApiKeysConfig).where(ApiKeysConfig.service_name == "tmdb")
+            )
+            config = result.scalar_one_or_none()
+            
+            if not config or not config.api_key:
+                logging.error("TMDB API key not configured")
+                raise HTTPException(status_code=500, detail="TMDB API key not configured")
+            
+            tmdb_api_key = config.api_key
+        
+        # Initialize TMDB service
+        from services.tmdb_service import TMDBService
+        tmdb = TMDBService(tmdb_api_key)
+        
+        # Search for the movie to get its TMDB ID
+        logging.info(f"🔍 Searching TMDB for: {movie_title} ({movie_year})")
+        movie_data = tmdb.search_movie(movie_title, movie_year)
+        
+        if not movie_data or not movie_data.get("tmdb_id"):
+            logging.warning(f"⚠️ Movie not found in TMDB: {movie_title}")
+            return {
+                "cast": [],
+                "director": "Unknown",
+                "writer": "Unknown",
+                "producer": "Unknown",
+                "error": "Movie not found in TMDB"
+            }
+        
+        movie_id = movie_data["tmdb_id"]
+        logging.info(f"✅ Found movie with TMDB ID: {movie_id}")
+        
+        # Get credits from TMDB
+        credits = tmdb.get_movie_credits(movie_id)
+        
+        if not credits:
+            logging.warning(f"⚠️ No credits found for movie ID: {movie_id}")
+            return {
+                "cast": [],
+                "director": "Unknown",
+                "writer": "Unknown",
+                "producer": "Unknown",
+                "error": "No credits available"
+            }
+        
+        # Format cast with names and images for the UI
+        cast_list = [
+            {
+                "name": person["name"],
+                "character": person.get("character", ""),
+                "profile_path": person.get("profile_path")
+            }
+            for person in credits.get("cast", [])
+        ]
+        
+        result = {
+            "cast": cast_list,
+            "director": credits.get("director", "Unknown"),
+            "writer": credits.get("writer", "Unknown"),
+            "producer": credits.get("producer", "Unknown")
+        }
+        
+        logging.info(f"✅ Successfully retrieved cast/crew: {len(cast_list)} actors, director: {result['director']}")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"❌ Error getting cast/crew: {e}", exc_info=True)
+        return {
+            "cast": [],
+            "director": "Unknown",
+            "writer": "Unknown",
+            "producer": "Unknown",
+            "error": str(e)
+        }
+
+
+@app.post("/api/video/person-filmography")
+async def get_person_filmography(request: Request):
+    """Get filmography for a person from TMDB."""
+    data = await request.json()
+    person_name = data.get("name", "")
+    role = data.get("role", "actor")  # actor, director, writer, producer
+    
+    if not person_name:
+        raise HTTPException(status_code=400, detail="Person name is required")
+    
+    logging.info(f"👤 Getting filmography for: {person_name} ({role})")
+    
+    try:
+        # Get TMDB API key from database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ApiKeysConfig).where(ApiKeysConfig.service_name == "tmdb")
+            )
+            config = result.scalar_one_or_none()
+            
+            if not config or not config.api_key:
+                logging.error("TMDB API key not configured")
+                raise HTTPException(status_code=500, detail="TMDB API key not configured")
+            
+            tmdb_api_key = config.api_key
+        
+        # Initialize TMDB service
+        from services.tmdb_service import TMDBService
+        tmdb = TMDBService(tmdb_api_key)
+        
+        # Search for the person
+        logging.info(f"🔍 Searching TMDB for person: {person_name}")
+        person_id = tmdb.search_person(person_name)
+        
+        if not person_id:
+            logging.warning(f"⚠️ Person not found in TMDB: {person_name}")
+            return {
+                "name": person_name,
+                "role": role,
+                "filmography": f"No filmography found for {person_name}"
+            }
+        
+        logging.info(f"✅ Found person with TMDB ID: {person_id}")
+        
+        # Get their credits
+        credits = tmdb.get_person_credits(person_id)
+        
+        if not credits:
+            return {
+                "name": person_name,
+                "role": role,
+                "filmography": "No credits available"
+            }
+        
+        # Format based on role
+        filmography_lines = []
+        
+        if role == "actor":
+            # Show their acting roles
+            for movie in credits.get("cast", [])[:12]:
+                character = f" as {movie['character']}" if movie.get('character') else ""
+                filmography_lines.append(f"- {movie['title']} ({movie['year']}){character}")
+        else:
+            # Show their crew work (director/writer/producer)
+            relevant_jobs = {
+                "director": ["Director"],
+                "writer": ["Writer", "Screenplay"],
+                "producer": ["Producer", "Executive Producer"]
+            }.get(role, [])
+            
+            crew_credits = [
+                movie for movie in credits.get("crew", [])
+                if movie.get("job") in relevant_jobs
+            ][:12]
+            
+            for movie in crew_credits:
+                job_suffix = f" ({movie['job']})" if movie.get('job') else ""
+                filmography_lines.append(f"- {movie['title']} ({movie['year']}){job_suffix}")
+        
+        if not filmography_lines:
+            filmography_text = f"No {role} credits found for {person_name}"
+        else:
+            filmography_text = "\n".join(filmography_lines)
+        
+        logging.info(f"✅ Retrieved {len(filmography_lines)} films for {person_name}")
+        
+        return {
+            "name": person_name,
+            "role": role,
+            "filmography": filmography_text
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"❌ Error getting filmography: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/video/generate-all-filmographies")
+async def generate_all_filmographies(request: Request):
+    """Generate and save filmographies for all cast members."""
+    data = await request.json()
+    cast_list = data.get("cast", [])
+    
+    if not cast_list:
+        raise HTTPException(status_code=400, detail="Cast list is required")
+    
+    logging.info(f"🎬 Generating filmographies for {len(cast_list)} actors")
+    
+    try:
+        # Get TMDB API key from database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ApiKeysConfig).where(ApiKeysConfig.service_name == "tmdb")
+            )
+            config = result.scalar_one_or_none()
+            
+            if not config or not config.api_key:
+                logging.error("TMDB API key not configured")
+                raise HTTPException(status_code=500, detail="TMDB API key not configured")
+            
+            tmdb_api_key = config.api_key
+        
+        # Initialize TMDB service
+        from services.tmdb_service import TMDBService
+        tmdb = TMDBService(tmdb_api_key)
+        
+        saved_count = 0
+        
+        async with AsyncSessionLocal() as session:
+            for actor in cast_list:
+                actor_name = actor.get("name") if isinstance(actor, dict) else actor
+                
+                try:
+                    # Check if we already have this actor's filmography
+                    result = await session.execute(
+                        select(ActorFilmography).where(ActorFilmography.actor_name == actor_name)
+                    )
+                    existing = result.scalar_one_or_none()
+                    
+                    if existing:
+                        logging.info(f"ℹ️ Filmography already exists for: {actor_name}")
+                        continue
+                    
+                    # Search for the person
+                    person_id = tmdb.search_person(actor_name)
+                    
+                    if not person_id:
+                        logging.warning(f"⚠️ Person not found in TMDB: {actor_name}")
+                        continue
+                    
+                    # Get their credits
+                    credits = tmdb.get_person_credits(person_id)
+                    
+                    if not credits:
+                        continue
+                    
+                    # Save to database
+                    filmography = ActorFilmography(
+                        actor_name=actor_name,
+                        tmdb_person_id=person_id,
+                        profile_path=actor.get("profile_path") if isinstance(actor, dict) else None,
+                        filmography=credits
+                    )
+                    session.add(filmography)
+                    saved_count += 1
+                    logging.info(f"✅ Saved filmography for: {actor_name}")
+                    
+                except Exception as e:
+                    logging.error(f"❌ Error processing {actor_name}: {e}")
+                    continue
+            
+            await session.commit()
+        
+        logging.info(f"✅ Successfully saved {saved_count} filmographies")
+        
+        return {
+            "success": True,
+            "saved_count": saved_count,
+            "total": len(cast_list)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"❌ Error generating filmographies: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/video/actor-filmography/{actor_name}")
+async def get_saved_filmography(actor_name: str):
+    """Get saved filmography for an actor from database."""
+    try:
+        async with AsyncSessionLocal() as session:
+            try:
+                result = await session.execute(
+                    select(ActorFilmography).where(ActorFilmography.actor_name == actor_name)
+                )
+                filmography = result.scalar_one_or_none()
+
+                if not filmography:
+                    logging.info(f"ℹ️ No saved filmography found for: {actor_name}")
+                    return {"found": False}
+
+                logging.info(f"✅ Found saved filmography for: {actor_name}")
+                return {
+                    "found": True,
+                    "actor_name": filmography.actor_name,
+                    "profile_path": filmography.profile_path,
+                    "filmography": filmography.filmography,
+                    "updated_at": filmography.updated_at.isoformat() if filmography.updated_at else None
+                }
+            except Exception as db_error:
+                # Table might not exist yet
+                logging.warning(f"⚠️ Database error (table might not exist): {db_error}")
+                return {"found": False}
+    except Exception as e:
+        logging.error(f"❌ Error getting saved filmography: {e}", exc_info=True)
+        # Return not found instead of error to allow fallback to TMDB
+        return {"found": False}
+
+
 @app.get("/api/system/stats")
 async def get_system_stats():
     """Get system statistics (CPU, RAM, Disk) across all drives."""
@@ -5794,6 +6295,69 @@ async def check_api_health():
             else:
                 results["octopus_energy"] = {
                     "name": "Octopus Energy",
+                    "status": "not_configured",
+                    "configured": False
+                }
+            
+            # 6. Check TMDB (The Movie Database) API
+            tmdb_key = api_keys.get("tmdb", {}).get("api_key")
+            if tmdb_key:
+                try:
+                    # Test with a simple configuration endpoint
+                    response = await client.get(
+                        "https://api.themoviedb.org/3/configuration",
+                        params={"api_key": tmdb_key},
+                        timeout=10.0
+                    )
+                    if response.status_code == 200:
+                        results["tmdb"] = {
+                            "name": "TMDB (Movies/TV)",
+                            "status": "ok",
+                            "code": response.status_code,
+                            "configured": True
+                        }
+                    elif response.status_code == 401:
+                        results["tmdb"] = {
+                            "name": "TMDB (Movies/TV)",
+                            "status": "error",
+                            "code": 401,
+                            "error": "Invalid API key",
+                            "configured": True
+                        }
+                    elif response.status_code == 429:
+                        results["tmdb"] = {
+                            "name": "TMDB (Movies/TV)",
+                            "status": "ok",
+                            "code": 429,
+                            "note": "Rate limited but working",
+                            "configured": True
+                        }
+                    else:
+                        results["tmdb"] = {
+                            "name": "TMDB (Movies/TV)",
+                            "status": "error",
+                            "code": response.status_code,
+                            "error": f"HTTP {response.status_code}",
+                            "configured": True
+                        }
+                except httpx.TimeoutException:
+                    results["tmdb"] = {
+                        "name": "TMDB (Movies/TV)",
+                        "status": "ok",
+                        "configured": True,
+                        "note": "Configured (timeout on health check)"
+                    }
+                except Exception as e:
+                    logger.warning(f"TMDB health check failed: {e}")
+                    results["tmdb"] = {
+                        "name": "TMDB (Movies/TV)",
+                        "status": "error",
+                        "error": str(e)[:100],
+                        "configured": True
+                    }
+            else:
+                results["tmdb"] = {
+                    "name": "TMDB (Movies/TV)",
                     "status": "not_configured",
                     "configured": False
                 }
@@ -6952,6 +7516,463 @@ async def get_location():
     """Get location configuration."""
     location_config = await load_location_config()
     return location_config
+
+
+# Video library endpoints
+@app.get("/api/video/scan")
+async def scan_video_library():
+    """Scan the video library (Movies and TV Shows) and update the database."""
+    try:
+        from data_collectors.video_collector import VideoScanner
+
+        # Load video directory and TMDB API key from database
+        async with AsyncSessionLocal() as session:
+            # Load video directory
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = result.scalar_one_or_none()
+
+            if not config or not config.config_value:
+                raise HTTPException(status_code=400, detail="System paths not configured.")
+
+            paths_data = config.config_value
+            video_dir = paths_data.get("video_directory")
+
+            if not video_dir:
+                raise HTTPException(status_code=400, detail="Video directory not configured. Please set it in Settings → Videos.")
+
+            # Load TMDB API key (optional)
+            api_key_result = await session.execute(
+                select(ApiKeysConfig).where(ApiKeysConfig.service_name == "tmdb")
+            )
+            api_key_config = api_key_result.scalar_one_or_none()
+            tmdb_api_key = api_key_config.api_key if api_key_config else None
+            
+            # Clear existing video data before scanning
+            logger.info("Clearing existing video data before scan...")
+            from sqlalchemy import delete
+            await session.execute(delete(VideoTVEpisode))
+            await session.execute(delete(VideoTVSeason))
+            await session.execute(delete(VideoTVShow))
+            await session.execute(delete(VideoMovie))
+            await session.commit()
+            logger.info("✓ Video data cleared")
+
+        # Create scanner and scan library
+        scanner = VideoScanner(video_dir, tmdb_api_key)
+        scan_results = await scanner.scan_library()
+        
+        if not scan_results["success"]:
+            return {
+                "success": False,
+                "error": scan_results.get("error", "Unknown error during scan")
+            }
+        
+        return {
+            "success": True,
+            "message": "Video library scanned successfully",
+            "results": {
+                "movies": scan_results["movies_scanned"],
+                "tv_shows": scan_results["tv_shows_scanned"],
+                "seasons": scan_results["seasons_scanned"],
+                "episodes": scan_results["episodes_scanned"],
+                "errors": scan_results.get("errors", [])
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error scanning video library: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/video/clear")
+async def clear_video_library():
+    """Clear all video library data from the database."""
+    try:
+        from data_collectors.video_collector import clear_video_library as clear_videos
+
+        success = await clear_videos()
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to clear video library")
+
+        return {
+            "success": True,
+            "message": "Video library cleared successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error clearing video library: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/video/convert")
+async def convert_video_files():
+    """Convert all MKV/AVI files to MP4 format."""
+    try:
+        from services.video_converter import VideoConverter
+        
+        # Load video directory from database
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = result.scalar_one_or_none()
+
+            if not config or not config.config_value:
+                raise HTTPException(status_code=400, detail="System paths not configured.")
+
+            paths_data = config.config_value
+            video_dir = paths_data.get("video_directory")
+
+            if not video_dir:
+                raise HTTPException(status_code=400, detail="Video directory not configured.")
+        
+        # Create converter and convert all files
+        converter = VideoConverter(video_dir)
+        conversion_results = await converter.convert_all()
+        
+        return {
+            "success": True,
+            "message": "Video conversion completed",
+            "results": conversion_results
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error converting video files: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/video/library/count")
+async def get_video_library_count():
+    """Get counts of movies and TV shows in the library."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Count movies
+            movie_result = await session.execute(select(func.count(VideoMovie.id)))
+            movie_count = movie_result.scalar() or 0
+            
+            # Count TV shows
+            show_result = await session.execute(select(func.count(VideoTVShow.id)))
+            show_count = show_result.scalar() or 0
+            
+            # Count seasons
+            season_result = await session.execute(select(func.count(VideoTVSeason.id)))
+            season_count = season_result.scalar() or 0
+            
+            # Count episodes
+            episode_result = await session.execute(select(func.count(VideoTVEpisode.id)))
+            episode_count = episode_result.scalar() or 0
+            
+            # Get sample data
+            movie_sample = await session.execute(select(VideoMovie).limit(3))
+            movies_sample = movie_sample.scalars().all()
+            
+            episode_sample = await session.execute(select(VideoTVEpisode).limit(5))
+            episodes_sample = episode_sample.scalars().all()
+            
+            return {
+                "success": True,
+                "counts": {
+                    "movies": movie_count,
+                    "tv_shows": show_count,
+                    "seasons": season_count,
+                    "episodes": episode_count
+                },
+                "sample_movies": [
+                    {
+                        "id": m.id,
+                        "title": m.title,
+                        "year": m.year,
+                        "file_path": m.file_path
+                    } for m in movies_sample
+                ],
+                "sample_episodes": [
+                    {
+                        "id": e.id,
+                        "title": e.title,
+                        "episode_number": e.episode_number,
+                        "season_id": e.season_id
+                    } for e in episodes_sample
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting video library count: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.options("/api/video/stream/{video_id}")
+async def stream_video_options(video_id: int):
+    """Handle OPTIONS preflight requests for CORS (Chromecast compatibility)."""
+    return Response(
+        status_code=200,
+        headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+            'Access-Control-Allow-Headers': 'Range, Content-Type',
+            'Access-Control-Max-Age': '86400',
+        }
+    )
+
+
+@app.head("/api/video/stream/{video_id}")
+async def stream_video_head(video_id: int):
+    """Handle HEAD requests for video metadata (required by Chromecast)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Try to find in movies
+            result = await session.execute(
+                select(VideoMovie).where(VideoMovie.id == video_id)
+            )
+            movie = result.scalar_one_or_none()
+            
+            if movie:
+                video_path = Path(movie.file_path)
+            else:
+                # Try to find in TV episodes
+                result = await session.execute(
+                    select(VideoTVEpisode).where(VideoTVEpisode.id == video_id)
+                )
+                episode = result.scalar_one_or_none()
+                
+                if not episode:
+                    raise HTTPException(status_code=404, detail="Video not found")
+                
+                video_path = Path(episode.file_path)
+            
+            if not video_path.exists():
+                raise HTTPException(status_code=404, detail="Video file not found")
+            
+            file_size = video_path.stat().st_size
+            ext = video_path.suffix.lower()
+            media_type = 'video/mp4' if ext in ['.mp4', '.m4v'] else 'video/mp4'
+            
+            return Response(
+                status_code=200,
+                headers={
+                    'Content-Type': media_type,
+                    'Content-Length': str(file_size),
+                    'Accept-Ranges': 'bytes',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Expose-Headers': 'Content-Length, Content-Type, Accept-Ranges',
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error handling HEAD request for video {video_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/video/stream/{video_id}")
+async def stream_video(video_id: int, request: Request):
+    """Stream a video file with range support for seeking and Chromecast casting."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Try to find in movies
+            result = await session.execute(
+                select(VideoMovie).where(VideoMovie.id == video_id)
+            )
+            movie = result.scalar_one_or_none()
+            
+            if movie:
+                video_path = Path(movie.file_path)
+                logger.info(f"Streaming movie: {movie.title} from {video_path}")
+            else:
+                # Try to find in TV episodes
+                result = await session.execute(
+                    select(VideoTVEpisode).where(VideoTVEpisode.id == video_id)
+                )
+                episode = result.scalar_one_or_none()
+                
+                if not episode:
+                    logger.error(f"Video ID {video_id} not found in database")
+                    raise HTTPException(status_code=404, detail="Video not found in database")
+                
+                video_path = Path(episode.file_path)
+                logger.info(f"Streaming episode ID {episode.id} from {video_path}")
+            
+            if not video_path.exists():
+                logger.error(f"Video file not found at path: {video_path}")
+                raise HTTPException(status_code=404, detail=f"Video file not found: {video_path.name}")
+            
+            # Detect MIME type based on file extension
+            # Note: Chromecast only supports specific formats
+            ext = video_path.suffix.lower()
+            mime_types = {
+                '.mp4': 'video/mp4',
+                '.m4v': 'video/mp4',  # Chromecast treats m4v as mp4
+                '.webm': 'video/webm',
+                '.mkv': 'video/x-matroska',  # Not supported by Chromecast
+                '.avi': 'video/x-msvideo',   # Not supported by Chromecast
+                '.mov': 'video/quicktime',   # Limited Chromecast support
+            }
+            media_type = mime_types.get(ext, 'video/mp4')
+            
+            # For Chromecast compatibility, force mp4 MIME type for common formats
+            if ext in ['.mp4', '.m4v']:
+                media_type = 'video/mp4'
+            
+            # Get file size
+            file_size = video_path.stat().st_size
+            logger.info(f"Video file size: {file_size} bytes, type: {media_type}")
+            
+            # Handle range requests for seeking
+            range_header = request.headers.get('range')
+            
+            if range_header:
+                # Parse range header (e.g., "bytes=0-1023")
+                range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+                if range_match:
+                    start = int(range_match.group(1))
+                    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+                    
+                    # Ensure end is not beyond file size
+                    end = min(end, file_size - 1)
+                    
+                    # Limit chunk size to prevent memory issues (10MB max per request)
+                    max_chunk = 10 * 1024 * 1024
+                    if end - start + 1 > max_chunk:
+                        end = start + max_chunk - 1
+                    
+                    content_length = end - start + 1
+                    
+                    logger.info(f"Range request: {start}-{end}/{file_size} ({content_length} bytes)")
+                    
+                    # Read the requested chunk
+                    with open(video_path, 'rb') as video_file:
+                        video_file.seek(start)
+                        data = video_file.read(content_length)
+                    
+                    # Chromecast-compatible headers
+                    headers = {
+                        'Content-Range': f'bytes {start}-{end}/{file_size}',
+                        'Accept-Ranges': 'bytes',
+                        'Content-Length': str(content_length),
+                        'Content-Type': media_type,
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Range',
+                        'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+                    }
+                    
+                    return Response(content=data, status_code=206, headers=headers)
+            
+            # No range request - return file info with range support
+            # Most browsers and Chromecast will immediately request a range after this
+            logger.info(f"Initial request without range, returning FileResponse")
+            return FileResponse(
+                video_path,
+                media_type=media_type,
+                headers={
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': str(file_size),
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                    'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+                }
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error streaming video ID {video_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/video/library")
+async def get_video_library():
+    """Get the complete video library (movies and TV shows)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get all movies
+            result = await session.execute(
+                select(VideoMovie).order_by(VideoMovie.title)
+            )
+            movies = result.scalars().all()
+            
+            # Get all TV shows with seasons and episodes
+            result = await session.execute(
+                select(VideoTVShow).options(
+                    selectinload(VideoTVShow.seasons).selectinload(VideoTVSeason.episodes)
+                ).order_by(VideoTVShow.title)
+            )
+            tv_shows = result.scalars().all()
+            
+            # Format the response
+            movies_data = []
+            for movie in movies:
+                movies_data.append({
+                    "id": movie.id,
+                    "title": movie.title,
+                    "file_path": movie.file_path,
+                    "file_size": movie.file_size,
+                    "year": movie.year,
+                    "resolution": movie.resolution,
+                    "codec": movie.codec,
+                    "duration": movie.duration,
+                    "poster_path": movie.poster_path,
+                    "description": movie.description,
+                    "extra_metadata": movie.extra_metadata
+                })
+            
+            tv_shows_data = []
+            for show in tv_shows:
+                seasons_data = []
+                for season in sorted(show.seasons, key=lambda s: s.season_number):
+                    episodes_data = []
+                    for episode in sorted(season.episodes, key=lambda e: e.episode_number):
+                        episodes_data.append({
+                            "id": episode.id,
+                            "episode_number": episode.episode_number,
+                            "title": episode.title,
+                            "file_path": episode.file_path,
+                            "file_size": episode.file_size,
+                            "resolution": episode.resolution,
+                            "duration": episode.duration,
+                            "codec": episode.codec,
+                            "thumbnail_path": episode.thumbnail_path,
+                            "description": episode.description,
+                            "extra_metadata": episode.extra_metadata
+                        })
+                    
+                    seasons_data.append({
+                        "id": season.id,
+                        "season_number": season.season_number,
+                        "poster_path": season.poster_path,
+                        "episode_count": len(episodes_data),
+                        "episodes": episodes_data
+                    })
+                
+                tv_shows_data.append({
+                    "id": show.id,
+                    "title": show.title,
+                    "year": show.year,
+                    "poster_path": show.poster_path,
+                    "description": show.description,
+                    "extra_metadata": show.extra_metadata,
+                    "season_count": len(seasons_data),
+                    "seasons": seasons_data
+                })
+            
+            return {
+                "success": True,
+                "movies": movies_data,
+                "tv_shows": tv_shows_data,
+                "counts": {
+                    "movies": len(movies_data),
+                    "tv_shows": len(tv_shows_data),
+                    "total_seasons": sum(len(show.seasons) for show in tv_shows),
+                    "total_episodes": sum(len(season.episodes) for show in tv_shows for season in show.seasons)
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error getting video library: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Config editing endpoints

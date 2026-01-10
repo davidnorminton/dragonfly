@@ -9,6 +9,7 @@ import { useAudioQueue } from './hooks/useAudioQueue';
 import { routerAPI, aiAPI } from './services/api';
 import { MusicPage } from './pages/Music';
 import { MusicEditor } from './pages/MusicEditor';
+import { VideosPage } from './pages/Videos';
 import { AnalyticsPage } from './pages/Analytics';
 import { ChatPage } from './pages/Chat';
 import { NewsPage } from './pages/News';
@@ -41,8 +42,10 @@ function App() {
   const [showLeft, setShowLeft] = useState(true);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [videoSearchQuery, setVideoSearchQuery] = useState('');
   const [musicSearchResults, setMusicSearchResults] = useState([]);
   const [chatSearchResults, setChatSearchResults] = useState([]);
+  const [videoSearchResults, setVideoSearchResults] = useState([]);
   const { selectPersona, currentTitle } = usePersonas();
   const audioQueue = useAudioQueue();
 
@@ -498,8 +501,10 @@ function App() {
         onNavigate={(page) => setActivePage(page)}
         onMusicSearch={(query) => setMusicSearchQuery(query)}
         onChatSearch={(query) => setChatSearchQuery(query)}
+        onVideoSearch={(query) => setVideoSearchQuery(query)}
         musicSearchResults={musicSearchResults}
         chatSearchResults={chatSearchResults}
+        videoSearchResults={videoSearchResults}
       />
       {activePage === 'music' ? (
         <MusicPage 
@@ -511,6 +516,11 @@ function App() {
         />
       ) : activePage === 'music-editor' ? (
         <MusicEditor />
+      ) : activePage === 'videos' ? (
+        <VideosPage
+          searchQuery={videoSearchQuery}
+          onSearchResultsChange={setVideoSearchResults}
+        />
       ) : activePage === 'analytics' ? (
         <AnalyticsPage />
       ) : activePage === 'chat' ? (

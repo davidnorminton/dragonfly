@@ -131,6 +131,49 @@ export const aiAPI = {
   }),
 };
 
+export const videoAPI = {
+  getLibrary: () => api.get('/video/library').then(res => res.data),
+  scanVideos: () => api.get('/video/scan').then(res => res.data),
+  clearVideos: () => api.post('/video/clear').then(res => res.data),
+  convertVideos: () => api.post('/video/convert').then(res => res.data),
+  
+  async getCastCrew(title, year) {
+    const response = await fetch('/api/video/cast-crew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, year })
+    });
+    if (!response.ok) throw new Error('Failed to get cast and crew');
+    return response.json();
+  },
+
+  async getPersonFilmography(name, role) {
+    const response = await fetch('/api/video/person-filmography', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, role })
+    });
+    if (!response.ok) throw new Error('Failed to get filmography');
+    return response.json();
+  },
+
+  async generateAllFilmographies(castList) {
+    const response = await fetch('/api/video/generate-all-filmographies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cast: castList })
+    });
+    if (!response.ok) throw new Error('Failed to generate filmographies');
+    return response.json();
+  },
+
+  async getSavedFilmography(actorName) {
+    const response = await fetch(`/api/video/actor-filmography/${encodeURIComponent(actorName)}`);
+    if (!response.ok) throw new Error('Failed to get saved filmography');
+    return response.json();
+  }
+};
+
 export const musicAPI = {
   getLibrary: () => api.get('/music/library').then(res => res.data),
   scanMusic: () => api.get('/music/scan').then(res => res.data),

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { configAPI, systemAPI, routerAPI, musicAPI, personaAPI, databaseAPI } from '../services/api';
+import { configAPI, systemAPI, routerAPI, musicAPI, videoAPI, personaAPI, databaseAPI } from '../services/api';
 import { useRouterConfig } from '../hooks/useRouterConfig';
 import { useAIModels } from '../hooks/useAIModels';
 import { FolderPicker, FilePicker } from '../components/FolderPicker';
@@ -38,6 +38,8 @@ export function SettingsPage({ onNavigate }) {
   const [activeRouterTab, setActiveRouterTab] = useState('router');
   const [musicLoading, setMusicLoading] = useState(false);
   const [musicMessage, setMusicMessage] = useState('');
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [videoMessage, setVideoMessage] = useState('');
   const [systemConfig, setSystemConfig] = useState('');
   const [systemFields, setSystemFields] = useState({});
   const [expandedSections, setExpandedSections] = useState({});
@@ -1484,10 +1486,33 @@ export function SettingsPage({ onNavigate }) {
                   )}
                 </div>
 
+                {/* TMDB Section */}
+                <div className="config-section">
+                  <h4
+                    className="config-section-title collapsible"
+                    onClick={() => toggleSection('api-tmdb')}
+                  >
+                    <span className="collapse-icon">{expandedSections['api-tmdb'] ? '▼' : '▶'}</span>
+                    TMDB (The Movie Database)
+                  </h4>
+                  {expandedSections['api-tmdb'] && (
+                  <div className="form-group">
+                    <label>API Key</label>
+                    <input
+                      type="password"
+                      value={apiKeysFields.tmdb?.api_key || ''}
+                      onChange={(e) => updateApiKeyField('tmdb.api_key', e.target.value)}
+                      placeholder="Enter TMDB API key"
+                    />
+                    <span className="form-help">Get your API key from <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" style={{color: '#4a9eff'}}>themoviedb.org</a>. Used for fetching movie and TV show metadata including posters and descriptions.</span>
+                  </div>
+                  )}
+                </div>
+
                 {/* BBC Weather Section */}
                 <div className="config-section">
-                  <h4 
-                    className="config-section-title collapsible" 
+                  <h4
+                    className="config-section-title collapsible"
                     onClick={() => toggleSection('api-weather')}
                   >
                     <span className="collapse-icon">{expandedSections['api-weather'] ? '▼' : '▶'}</span>
@@ -1739,8 +1764,99 @@ export function SettingsPage({ onNavigate }) {
                   >
                     {saving ? 'Saving...' : 'Save Config'}
                   </button>
+                  <button
+                    onClick={async () => {
+                      setVideoLoading(true);
+                      setVideoMessage('');
+                      try {
+                        const res = await videoAPI.scanVideos();
+                        if (res?.success) {
+                          const { results } = res;
+                          let message = `Video library scanned successfully! ` +
+                            `Movies: ${results.movies}, TV Shows: ${results.tv_shows}, ` +
+                            `Seasons: ${results.seasons}, Episodes: ${results.episodes}`;
+                          
+                          if (results.errors?.length > 0) {
+                            message += `\n\nErrors (${results.errors.length}):\n` + results.errors.join('\n');
+                          }
+                          
+                          setVideoMessage(message);
+                        } else {
+                          setVideoMessage(res?.error || 'Video scan failed.');
+                        }
+                      } catch (err) {
+                        setVideoMessage(err?.response?.data?.detail || err?.message || 'Video scan failed.');
+                      } finally {
+                        setVideoLoading(false);
+                      }
+                    }}
+                    disabled={videoLoading || !systemFields.paths?.video_directory}
+                    className="save-button"
+                    style={{ 
+                      background: (videoLoading || !systemFields.paths?.video_directory) ? '#666' : '#10b981'
+                    }}
+                  >
+                    {videoLoading ? 'Scanning…' : '🎬 Scan Library'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm('This will convert all MKV and AVI files to MP4, then delete the original files. This may take a while. Continue?')) {
+                        return;
+                      }
+                      setVideoLoading(true);
+                      setVideoMessage('Converting videos... This may take several minutes depending on your library size.');
+                      try {
+                        const res = await videoAPI.convertVideos();
+                        if (res?.success) {
+                          const results = res.results || {};
+                          setVideoMessage(`✅ Conversion complete! Converted: ${results.converted || 0}, Failed: ${results.failed || 0}, Total: ${results.total_files || 0}. Run a scan to update the database.`);
+                        } else {
+                          setVideoMessage(res?.error || 'Conversion failed.');
+                        }
+                      } catch (err) {
+                        setVideoMessage(err?.message || 'Conversion failed.');
+                      } finally {
+                        setVideoLoading(false);
+                      }
+                    }}
+                    disabled={videoLoading || !systemFields.paths?.video_directory}
+                    className="save-button"
+                    style={{ 
+                      background: (videoLoading || !systemFields.paths?.video_directory) ? '#666' : '#f59e0b',
+                      marginLeft: '10px'
+                    }}
+                  >
+                    {videoLoading ? 'Converting…' : '🔄 Convert to MP4'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Are you sure you want to clear all video data? This will delete all movies, TV shows, seasons, and episodes from the database.')) {
+                        return;
+                      }
+                      setVideoLoading(true);
+                      setVideoMessage('');
+                      try {
+                        const res = await videoAPI.clearVideos();
+                        if (res?.success) {
+                          setVideoMessage('Video library cleared successfully. You can now scan to rebuild it.');
+                        } else {
+                          setVideoMessage(res?.error || 'Video clear failed.');
+                        }
+                      } catch (err) {
+                        setVideoMessage(err?.message || 'Video clear failed.');
+                      } finally {
+                        setVideoLoading(false);
+                      }
+                    }}
+                    disabled={videoLoading}
+                    className="save-button"
+                    style={{ background: '#dc3545', marginLeft: '10px' }}
+                  >
+                    Clear Library
+                  </button>
                 </div>
               </div>
+              {videoMessage && <div className="settings-message info">{videoMessage}</div>}
               
               <div className="config-form-container">
                 {/* Video Directory Section */}
@@ -1751,31 +1867,28 @@ export function SettingsPage({ onNavigate }) {
                     onChange={(value) => updateSystemField('paths.video_directory', value)}
                     placeholder="/Users/username/Videos"
                     label="Video Directory"
-                    helpText="Path to your video library folder. Save config before scanning."
+                    helpText="Path to your video library folder containing Movies and Tv subdirectories. Save config before scanning."
                   />
                 </div>
 
-                {/* Library Scanning Section (Placeholder) */}
+                {/* Library Scanning Section */}
                 <div className="config-section">
-                  <h4 className="config-section-title">Library Management</h4>
+                  <h4 className="config-section-title">Library Structure</h4>
                   <p className="settings-help">
-                    Scan your video directory to index and organize your video library.
+                    Your video directory should contain two subdirectories:
                   </p>
-                  <div className="form-group" style={{ marginTop: '12px' }}>
-                    <button
-                      onClick={() => {
-                        // Placeholder for video scan functionality
-                        setSuccess('Video scan functionality coming soon!');
-                      }}
-                      disabled={!systemFields.paths?.video_directory}
-                      className="save-button"
-                      style={{ 
-                        background: !systemFields.paths?.video_directory ? '#666' : '#3b82f6'
-                      }}
-                    >
-                      🎬 Scan Video Library
-                    </button>
-                  </div>
+                  <ul className="settings-help" style={{ marginLeft: '20px', marginTop: '8px' }}>
+                    <li><strong>Movies/</strong> - Contains movie files (e.g., "The Matrix (1999).mkv")</li>
+                    <li><strong>Tv/</strong> - Contains TV show directories:
+                      <ul style={{ marginLeft: '20px', marginTop: '4px' }}>
+                        <li>ShowName/Season 1/S01E01.mkv</li>
+                        <li>ShowName/Season 2/S02E01.mkv</li>
+                      </ul>
+                    </li>
+                  </ul>
+                  <p className="settings-help" style={{ marginTop: '12px' }}>
+                    Supported formats: MP4, MKV, AVI, MOV, M4V, WMV, FLV, WebM, MPEG, MPG
+                  </p>
                 </div>
               </div>
             </div>
