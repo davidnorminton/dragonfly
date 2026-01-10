@@ -112,6 +112,19 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
               }}
               className="music-search-input"
             />
+            {searchQuery && (
+              <button
+                className="search-clear-btn"
+                onClick={() => {
+                  setSearchQuery('');
+                  if (onMusicSearch) onMusicSearch('');
+                  setShowResults(false);
+                }}
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
             {showResults && musicSearchResults && musicSearchResults.length > 0 && (
               <div className="search-results-dropdown">
                 {musicSearchResults.slice(0, 10).map((result, idx) => (
@@ -159,6 +172,19 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
               }}
               className="music-search-input"
             />
+            {chatSearchQuery && (
+              <button
+                className="search-clear-btn"
+                onClick={() => {
+                  setChatSearchQuery('');
+                  if (onChatSearch) onChatSearch('');
+                  setShowResults(false);
+                }}
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
             {showResults && chatSearchResults && chatSearchResults.length > 0 && (
               <div className="search-results-dropdown">
                 {chatSearchResults.slice(0, 10).map((result, idx) => (
@@ -201,6 +227,19 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
               }}
               className="music-search-input"
             />
+            {videoSearchQuery && (
+              <button
+                className="search-clear-btn"
+                onClick={() => {
+                  setVideoSearchQuery('');
+                  if (onVideoSearch) onVideoSearch('');
+                  setShowResults(false);
+                }}
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
             {showResults && videoSearchResults && videoSearchResults.length > 0 && (
               <div className="search-results-dropdown">
                 {videoSearchResults.map((result, idx) => {

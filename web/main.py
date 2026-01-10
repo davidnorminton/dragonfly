@@ -6066,15 +6066,18 @@ async def get_system_stats():
                     "music_dir_size": "N/A",
                     "music_dir_size_bytes": 0,
                     "audio_dir_size": "N/A",
-                    "audio_dir_size_bytes": 0
+                    "audio_dir_size_bytes": 0,
+                    "video_dir_size": "N/A",
+                    "video_dir_size_bytes": 0
                 }
         
         disk_percent = (total_disk_used / total_disk_space * 100) if total_disk_space > 0 else 0.0
         
-        # Get directory sizes for Music and Audio directories
+        # Get directory sizes for Music, Audio, and Video directories
         # Load paths from system config
         music_dir_path = Path("/Users/davidnorminton/Music")  # Default
         audio_dir_path = Path("data/audio")  # Default
+        video_dir_path = Path("/Users/davidnorminton/Movies")  # Default
         
         try:
             async with AsyncSessionLocal() as session:
@@ -6088,12 +6091,15 @@ async def get_system_stats():
                         music_dir_path = Path(paths_config["music_directory"])
                     if paths_config.get("audio_directory"):
                         audio_dir_path = Path(paths_config["audio_directory"])
+                    if paths_config.get("video_directory"):
+                        video_dir_path = Path(paths_config["video_directory"])
         except Exception as e:
             logger.debug(f"Could not load paths from config: {e}")
         
         # Calculate directory sizes (do this in a thread to not block)
         music_dir_size_bytes = _get_directory_size(music_dir_path)
         audio_dir_size_bytes = _get_directory_size(audio_dir_path)
+        video_dir_size_bytes = _get_directory_size(video_dir_path)
         
         stats = {
             "cpu_percent": cpu_percent,
@@ -6109,7 +6115,10 @@ async def get_system_stats():
             "music_dir_path": str(music_dir_path),
             "audio_dir_size": _format_size(audio_dir_size_bytes),
             "audio_dir_size_bytes": audio_dir_size_bytes,
-            "audio_dir_path": str(audio_dir_path)
+            "audio_dir_path": str(audio_dir_path),
+            "video_dir_size": _format_size(video_dir_size_bytes),
+            "video_dir_size_bytes": video_dir_size_bytes,
+            "video_dir_path": str(video_dir_path)
         }
         
         # Log the stats

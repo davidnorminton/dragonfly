@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Video URL</title>
+</head>
+<body>
+    <h1>Video URL Test</h1>
+    <p>Open this in your browser to see what URL the video player uses</p>
+    
+    <video id="testVideo" controls width="600">
+        <source id="videoSource" src="/api/video/stream/96" type="video/mp4">
+    </video>
+    
+    <div style="margin-top: 20px; padding: 20px; background: #f0f0f0;">
+        <h2>URL Information:</h2>
+        <p><strong>Current page URL:</strong> <span id="pageUrl"></span></p>
+        <p><strong>Video source (relative):</strong> <span id="relativeUrl"></span></p>
+        <p><strong>Video source (absolute):</strong> <span id="absoluteUrl"></span></p>
+        <p><strong>Full URL for Chromecast:</strong> <span id="fullUrl" style="color: green; font-weight: bold;"></span></p>
+    </div>
+    
+    <script>
+        const video = document.getElementById('testVideo');
+        const source = document.getElementById('videoSource');
+        
+        // Display URLs
+        document.getElementById('pageUrl').textContent = window.location.href;
+        document.getElementById('relativeUrl').textContent = source.getAttribute('src');
+        document.getElementById('absoluteUrl').textContent = source.src;
+        
+        // Build full URL like the VideoPlayer component should
+        const protocol = window.location.protocol;
+        const host = window.location.host;
+        const videoId = 96;
+        const fullUrl = `${protocol}//${host}/api/video/stream/${videoId}`;
+        document.getElementById('fullUrl').textContent = fullUrl;
+        
+        console.log('Video URLs:');
+        console.log('  Relative:', source.getAttribute('src'));
+        console.log('  Absolute:', source.src);
+        console.log('  Full URL:', fullUrl);
+        console.log('');
+        console.log('For Chromecast to work, video source should be:', fullUrl);
+    </script>
+</body>
+</html>

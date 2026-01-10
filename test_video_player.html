@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Streaming Test</title>
+    <style>
+        body {
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        video {
+            width: 100%;
+            max-width: 800px;
+            background: #000;
+        }
+        .info {
+            max-width: 800px;
+            margin: 20px 0;
+            padding: 15px;
+            background: #222;
+            border-radius: 8px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success { background: #0a4; }
+        .error { background: #a04; }
+        .info-item { margin: 5px 0; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 Video Streaming Test</h1>
+    
+    <div class="info">
+        <h2>Instructions:</h2>
+        <ol>
+            <li>Make sure your server is running: <code>python main.py</code></li>
+            <li>Enter a video ID below (e.g., 96)</li>
+            <li>Click "Test Video"</li>
+            <li>Check the console (F12) for detailed logs</li>
+        </ol>
+    </div>
+
+    <div class="info">
+        <label>Video ID: </label>
+        <input type="number" id="videoId" value="96" style="padding: 5px; font-size: 16px;">
+        <button onclick="loadVideo()">Test Video</button>
+        <button onclick="testEndpoint()">Test Endpoint</button>
+    </div>
+
+    <div id="status"></div>
+
+    <video id="testVideo" controls preload="metadata" playsInline>
+        <source id="videoSource" src="" type="video/mp4">
+        Your browser does not support HTML5 video.
+    </video>
+
+    <div class="info">
+        <h3>Video Events:</h3>
+        <div id="events" style="max-height: 200px; overflow-y: auto; font-size: 12px;"></div>
+    </div>
+
+    <script>
+        const video = document.getElementById('testVideo');
+        const source = document.getElementById('videoSource');
+        const statusDiv = document.getElementById('status');
+        const eventsDiv = document.getElementById('events');
+
+        function log(message, type = 'info') {
+            console.log(message);
+            const time = new Date().toLocaleTimeString();
+            eventsDiv.innerHTML = `<div>[${time}] ${message}</div>` + eventsDiv.innerHTML;
+        }
+
+        function setStatus(message, isError = false) {
+            statusDiv.innerHTML = `<div class="status ${isError ? 'error' : 'success'}">${message}</div>`;
+        }
+
+        // Add all video event listeners
+        const events = [
+            'loadstart', 'progress', 'suspend', 'abort', 'error',
+            'emptied', 'stalled', 'loadedmetadata', 'loadeddata',
+            'canplay', 'canplaythrough', 'playing', 'waiting',
+            'seeking', 'seeked', 'ended', 'durationchange',
+            'timeupdate', 'play', 'pause', 'ratechange',
+            'volumechange'
+        ];
+
+        events.forEach(event => {
+            video.addEventListener(event, (e) => {
+                if (event !== 'timeupdate' && event !== 'progress') {
+                    log(`📺 Event: ${event}`);
+                }
+                
+                if (event === 'error') {
+                    const error = video.error;
+                    log(`❌ Video Error: Code ${error.code} - ${error.message}`, 'error');
+                    setStatus(`Video Error: ${error.message}`, true);
+                }
+                
+                if (event === 'loadedmetadata') {
+                    log(`✅ Video loaded: ${video.videoWidth}x${video.videoHeight}, ${video.duration.toFixed(2)}s`);
+                    setStatus(`✅ Video loaded successfully! ${video.duration.toFixed(0)}s duration`);
+                }
+            });
+        });
+
+        function loadVideo() {
+            const videoId = document.getElementById('videoId').value;
+            const url = `/api/video/stream/${videoId}`;
+            
+            log(`🔄 Loading video ID: ${videoId}`);
+            log(`📍 URL: ${url}`);
+            setStatus('Loading video...');
+            
+            // Update source and reload
+            source.src = url;
+            video.load();
+            
+            // Try to play
+            setTimeout(() => {
+                video.play().then(() => {
+                    log('▶️ Video playing');
+                }).catch(err => {
+                    log(`❌ Play failed: ${err.message}`, 'error');
+                    setStatus(`Play failed: ${err.message}`, true);
+                });
+            }, 500);
+        }
+
+        async function testEndpoint() {
+            const videoId = document.getElementById('videoId').value;
+            const url = `/api/video/stream/${videoId}`;
+            
+            log(`🧪 Testing endpoint: ${url}`);
+            setStatus('Testing endpoint...');
+            
+            try {
+                // Test 1: Basic request
+                log('Test 1: Basic GET request...');
+                const response1 = await fetch(url);
+                log(`Response: ${response1.status} ${response1.statusText}`);
+                log(`Content-Type: ${response1.headers.get('content-type')}`);
+                log(`Content-Length: ${response1.headers.get('content-length')}`);
+                log(`Accept-Ranges: ${response1.headers.get('accept-ranges')}`);
+                
+                if (response1.ok) {
+                    setStatus('✅ Endpoint responding correctly!');
+                } else {
+                    setStatus(`❌ Endpoint returned ${response1.status}`, true);
+                    const text = await response1.text();
+                    log(`Error response: ${text}`, 'error');
+                }
+                
+                // Test 2: Range request
+                log('Test 2: Range request...');
+                const response2 = await fetch(url, {
+                    headers: { 'Range': 'bytes=0-1023' }
+                });
+                log(`Range response: ${response2.status} ${response2.statusText}`);
+                log(`Content-Range: ${response2.headers.get('content-range')}`);
+                
+                if (response2.status === 206) {
+                    log('✅ Range requests working!');
+                } else {
+                    log(`⚠️ Expected 206, got ${response2.status}`, 'error');
+                }
+                
+            } catch (error) {
+                log(`❌ Fetch error: ${error.message}`, 'error');
+                setStatus(`❌ Network error: ${error.message}`, true);
+            }
+        }
+
+        // Auto-load on page load if video ID is set
+        window.addEventListener('load', () => {
+            log('🚀 Test page loaded');
+            log('💡 Enter a video ID and click "Test Video"');
+        });
+    </script>
+</body>
+</html>

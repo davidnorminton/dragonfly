@@ -1,0 +1,100 @@
+CHROMECAST CASTING - FINAL TEST STEPS
+======================================
+
+Your server is running on: http://192.168.7.190:1337
+
+THE FIX:
+--------
+Video player now uses FULL URLs instead of relative paths.
+- Before: /api/video/stream/96
+- After:  http://192.168.7.190:1337/api/video/stream/96
+
+This allows Chromecast to find your server!
+
+STEP-BY-STEP TEST:
+------------------
+
+1. OPEN CHROME (not Safari, not Firefox - only Chrome supports casting)
+   Go to: http://localhost:1337
+
+2. CLEAR BROWSER CACHE (important!)
+   Press: Ctrl + Shift + R (or Cmd + Shift + R on Mac)
+   This ensures you get the new code
+
+3. NAVIGATE TO VIDEOS
+   Click "Videos" in the top menu bar
+
+4. SELECT A MOVIE
+   Click any movie in the left sidebar
+
+5. CLICK PLAY BUTTON
+   The big ▶ Play button in the hero section
+
+6. OPEN DEVELOPER CONSOLE
+   Press F12 (or Cmd + Option + I on Mac)
+   Click "Console" tab
+
+7. VERIFY FULL URL
+   You should see in console:
+   🎬 VideoPlayer mounted: {videoId: 96, title: "Movie Name", type: "movie"}
+   📍 Video URL (full): http://192.168.7.190:1337/api/video/stream/96
+   📍 This URL will be sent to Chromecast
+   
+   ⚠️  If you don't see "(full)" in the log, the old code is still cached!
+       Press Ctrl+Shift+R to hard refresh the page
+
+8. CAST TO CHROMECAST
+   Option A: Click the Cast icon 📡 in the Chrome toolbar (top right)
+   Option B: Click the Cast icon in the video player controls
+   
+9. SELECT YOUR CHROMECAST
+   Pick your Chromecast device from the list
+
+10. WATCH ON TV
+    Video should start playing immediately!
+    No black flicker, just plays!
+
+TROUBLESHOOTING:
+----------------
+
+If video STILL doesn't play on Chromecast:
+
+A) CHECK BROWSER CACHE
+   - Hard refresh: Ctrl+Shift+R (Cmd+Shift+R on Mac)
+   - Or clear all cache: Chrome Settings → Privacy → Clear browsing data
+
+B) CHECK CONSOLE LOG
+   Must show "Video URL (full)" not just "Video URL"
+   
+C) CHECK NETWORK
+   - Computer and Chromecast must be on SAME WiFi
+   - Test: curl http://192.168.7.190:1337/api/system/stats
+   - Should return JSON, not error
+
+D) CHECK FIREWALL
+   - macOS: System Preferences → Security & Privacy → Firewall
+   - Allow Python to accept incoming connections
+
+E) CHECK SERVER LOGS
+   tail -f ~/Code/dragonfly/server.log
+   
+   When you cast, you should see:
+   "INFO: Streaming movie: Movie Name from /path/to/file"
+
+F) TEST URL DIRECTLY
+   Open: http://localhost:1337/test_url_in_browser.html
+   Check if "Full URL for Chromecast" shows full URL
+
+EXPECTED BEHAVIOR:
+------------------
+✅ Console shows full URL with IP address
+✅ Video plays in browser
+✅ Cast icon appears and is clickable
+✅ Selecting Chromecast shows video on TV immediately
+✅ No black flicker
+✅ Video plays smoothly on TV
+
+If all else fails, send me:
+1. Screenshot of Chrome console (F12)
+2. Output of: tail -50 ~/Code/dragonfly/server.log
+3. Your Chromecast model/generation

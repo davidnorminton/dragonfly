@@ -60,6 +60,12 @@ export function SystemStats() {
         </span>
         <span className="stat-value">{stats.audio_dir_size ?? '...'}</span>
       </div>
+      <div className="stat-row">
+        <span className="stat-label" title={stats.video_dir_path || 'Video Directory'}>
+          Movie Library
+        </span>
+        <span className="stat-value">{stats.video_dir_size ?? '...'}</span>
+      </div>
     </div>
   );
 }

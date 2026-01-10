@@ -118,6 +118,26 @@ body {
   color: #6a6a6a;
 }
 
+.search-clear-btn {
+  background: transparent;
+  border: none;
+  color: #a0a0a0;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.search-clear-btn:hover {
+  color: #fff;
+}
+
 .search-results-dropdown {
   position: absolute;
   top: calc(100% + 8px);
@@ -5390,6 +5410,35 @@ body {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.context-section-collapsible {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 16px;
+}
+
+.context-section-title {
+  color: #e0e0e0;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px 0;
+  user-select: none;
+}
+
+.context-section-title:hover {
+  color: rgba(59, 130, 246, 0.8);
+}
+
+.context-section-title .collapse-icon {
+  font-size: 12px;
+  transition: transform 0.2s ease;
 }
 
 .context-form-group {

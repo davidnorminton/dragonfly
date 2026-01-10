@@ -31,6 +31,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [useSystemContext, setUseSystemContext] = useState(true);
   const [improvingContext, setImprovingContext] = useState(false);
   const [infoTooltip, setInfoTooltip] = useState(null);
+  const [createPresetExpanded, setCreatePresetExpanded] = useState(false);
   const [sessionPresets, setSessionPresets] = useState({}); // Store preset per session: { sessionId: { presetId: number | null, useSystemContext: boolean } }
   const [deleteError, setDeleteError] = useState(null);
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
@@ -1188,133 +1189,147 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               }}>×</button>
             </div>
             <div className="context-modal-body">
-              <div className="context-form-group">
-                <label>Preset Name</label>
-                <input
-                  type="text"
-                  className="context-input"
-                  placeholder="e.g., PhD Chemist"
-                  value={contextPreset.name}
-                  onChange={(e) => setContextPreset({ ...contextPreset, name: e.target.value })}
-                />
-              </div>
-              <div className="context-form-group">
-                <label>Custom Context</label>
-                <textarea
-                  className="context-textarea"
-                  placeholder="You are a phd level chemist etc..."
-                  rows="4"
-                  value={contextPreset.context}
-                  onChange={(e) => setContextPreset({ ...contextPreset, context: e.target.value })}
-                />
-                <button
-                  className="context-improve-btn"
-                  onClick={handleImproveContext}
-                  disabled={improvingContext || !contextPreset.name.trim() || !contextPreset.context.trim()}
-                  title="Use AI to improve the context"
+              {/* Create Context Section - Collapsible */}
+              <div className="context-section-collapsible">
+                <h4 
+                  className="context-section-title" 
+                  onClick={() => setCreatePresetExpanded(!createPresetExpanded)}
                 >
-                  {improvingContext ? (
-                    <>
-                      <svg className="context-improve-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                      </svg>
-                      Improving...
-                    </>
-                  ) : (
-                    <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 2v4M12 18v4M4 12H2M6.314 6.314l-2.828-2.828M20.485 20.485l-2.828-2.828M17.686 6.314l2.828-2.828M3.515 20.485l2.828-2.828M22 12h-2M6.314 17.686l-2.828 2.828M20.485 3.515l-2.828 2.828"/>
-                        <circle cx="12" cy="12" r="4"/>
-                      </svg>
-                      Improve with AI
-                    </>
-                  )}
-                </button>
-              </div>
-              <div className="context-form-row">
-                <div className="context-form-group">
-                  <label>
-                    Temperature
-                    <button
-                      className="context-info-btn"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setInfoTooltip(infoTooltip === 'temperature' ? null : 'temperature');
-                      }}
-                      title="What is Temperature?"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M12 16v-4M12 8h.01"/>
-                      </svg>
-                    </button>
-                    {infoTooltip === 'temperature' && (
-                      <div className="context-info-tooltip">
-                        <p><strong>Temperature</strong> controls randomness in the AI's responses.</p>
-                        <ul>
-                          <li><strong>0.0</strong>: More deterministic, focused responses</li>
-                          <li><strong>0.7</strong>: Balanced creativity and consistency</li>
-                          <li><strong>1.0</strong>: More creative and varied responses</li>
-                        </ul>
-                        <p>Lower values make responses more predictable; higher values increase creativity.</p>
+                  <span className="collapse-icon">{createPresetExpanded ? '▼' : '▶'}</span>
+                  Create Context
+                </h4>
+                {createPresetExpanded && (
+                  <>
+                    <div className="context-form-group">
+                      <label>Preset Name</label>
+                      <input
+                        type="text"
+                        className="context-input"
+                        placeholder="e.g., PhD Chemist"
+                        value={contextPreset.name}
+                        onChange={(e) => setContextPreset({ ...contextPreset, name: e.target.value })}
+                      />
+                    </div>
+                    <div className="context-form-group">
+                      <label>Custom Context</label>
+                      <textarea
+                        className="context-textarea"
+                        placeholder="You are a phd level chemist etc..."
+                        rows="4"
+                        value={contextPreset.context}
+                        onChange={(e) => setContextPreset({ ...contextPreset, context: e.target.value })}
+                      />
+                      <button
+                        className="context-improve-btn"
+                        onClick={handleImproveContext}
+                        disabled={improvingContext || !contextPreset.name.trim() || !contextPreset.context.trim()}
+                        title="Use AI to improve the context"
+                      >
+                        {improvingContext ? (
+                          <>
+                            <svg className="context-improve-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                            </svg>
+                            Improving...
+                          </>
+                        ) : (
+                          <>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M12 2v4M12 18v4M4 12H2M6.314 6.314l-2.828-2.828M20.485 20.485l-2.828-2.828M17.686 6.314l2.828-2.828M3.515 20.485l2.828-2.828M22 12h-2M6.314 17.686l-2.828 2.828M20.485 3.515l-2.828 2.828"/>
+                              <circle cx="12" cy="12" r="4"/>
+                            </svg>
+                            Improve with AI
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <div className="context-form-row">
+                      <div className="context-form-group">
+                        <label>
+                          Temperature
+                          <button
+                            className="context-info-btn"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setInfoTooltip(infoTooltip === 'temperature' ? null : 'temperature');
+                            }}
+                            title="What is Temperature?"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="12" cy="12" r="10"/>
+                              <path d="M12 16v-4M12 8h.01"/>
+                            </svg>
+                          </button>
+                          {infoTooltip === 'temperature' && (
+                            <div className="context-info-tooltip">
+                              <p><strong>Temperature</strong> controls randomness in the AI's responses.</p>
+                              <ul>
+                                <li><strong>0.0</strong>: More deterministic, focused responses</li>
+                                <li><strong>0.7</strong>: Balanced creativity and consistency</li>
+                                <li><strong>1.0</strong>: More creative and varied responses</li>
+                              </ul>
+                              <p>Lower values make responses more predictable; higher values increase creativity.</p>
+                            </div>
+                          )}
+                        </label>
+                        <input
+                          type="number"
+                          className="context-input"
+                          placeholder="0.0 - 1.0"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={contextPreset.temperature}
+                          onChange={(e) => setContextPreset({ ...contextPreset, temperature: e.target.value })}
+                        />
                       </div>
-                    )}
-                  </label>
-                  <input
-                    type="number"
-                    className="context-input"
-                    placeholder="0.0 - 1.0"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={contextPreset.temperature}
-                    onChange={(e) => setContextPreset({ ...contextPreset, temperature: e.target.value })}
-                  />
-                </div>
-                <div className="context-form-group">
-                  <label>
-                    Top P
-                    <button
-                      className="context-info-btn"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setInfoTooltip(infoTooltip === 'top_p' ? null : 'top_p');
-                      }}
-                      title="What is Top P?"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M12 16v-4M12 8h.01"/>
-                      </svg>
-                    </button>
-                    {infoTooltip === 'top_p' && (
-                      <div className="context-info-tooltip">
-                        <p><strong>Top P</strong> (nucleus sampling) controls diversity by limiting token selection.</p>
-                        <ul>
-                          <li><strong>0.1</strong>: Only considers most likely tokens (narrow)</li>
-                          <li><strong>0.9</strong>: Considers a wider range of tokens (broad)</li>
-                          <li><strong>1.0</strong>: Considers all tokens (maximum diversity)</li>
-                        </ul>
-                        <p>Lower values produce more focused responses; higher values allow more diverse word choices.</p>
+                      <div className="context-form-group">
+                        <label>
+                          Top P
+                          <button
+                            className="context-info-btn"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setInfoTooltip(infoTooltip === 'top_p' ? null : 'top_p');
+                            }}
+                            title="What is Top P?"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="12" cy="12" r="10"/>
+                              <path d="M12 16v-4M12 8h.01"/>
+                            </svg>
+                          </button>
+                          {infoTooltip === 'top_p' && (
+                            <div className="context-info-tooltip">
+                              <p><strong>Top P</strong> (nucleus sampling) controls diversity by limiting token selection.</p>
+                              <ul>
+                                <li><strong>0.1</strong>: Only considers most likely tokens (narrow)</li>
+                                <li><strong>0.9</strong>: Considers a wider range of tokens (broad)</li>
+                                <li><strong>1.0</strong>: Considers all tokens (maximum diversity)</li>
+                              </ul>
+                              <p>Lower values produce more focused responses; higher values allow more diverse word choices.</p>
+                            </div>
+                          )}
+                        </label>
+                        <input
+                          type="number"
+                          className="context-input"
+                          placeholder="0.0 - 1.0"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={contextPreset.top_p}
+                          onChange={(e) => setContextPreset({ ...contextPreset, top_p: e.target.value })}
+                        />
                       </div>
-                    )}
-                  </label>
-                  <input
-                    type="number"
-                    className="context-input"
-                    placeholder="0.0 - 1.0"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={contextPreset.top_p}
-                    onChange={(e) => setContextPreset({ ...contextPreset, top_p: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="context-save-preset-section">
-                <button className="context-btn-save-preset" onClick={handleSavePreset}>
-                  {editingPresetId ? 'Update' : 'Save'} Preset
-                </button>
+                    </div>
+                    <div className="context-save-preset-section">
+                      <button className="context-btn-save-preset" onClick={handleSavePreset}>
+                        {editingPresetId ? 'Update' : 'Save'} Preset
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
               <div className="context-presets-list">
                 <label>Context Selection</label>
