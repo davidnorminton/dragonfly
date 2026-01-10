@@ -552,44 +552,62 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
     });
   }, [library.tvShows, searchQuery]);
 
-  // Compute search results for dropdown
+  // Compute search results for dropdown with separate sections
   useEffect(() => {
     if (!onSearchResultsChange) return;
-    
+
     if (!searchQuery || !searchQuery.trim()) {
       onSearchResultsChange([]);
       return;
     }
-    
+
     const results = [];
-    
-    // Add matching movies
-    filteredMovies.slice(0, 5).forEach(movie => {
+
+    // Add movies section if there are movie results
+    const movieResults = filteredMovies.slice(0, 5);
+    if (movieResults.length > 0) {
       results.push({
-        title: movie.title,
-        subtitle: `Movie${movie.year ? ` (${movie.year})` : ''}`,
-        image: movie.poster_path,
-        onClick: () => {
-          setViewMode('movies');
-          setSelectedMovie(movie);
-        }
+        type: 'section',
+        title: 'Movies'
       });
-    });
-    
-    // Add matching TV shows
-    filteredTVShows.slice(0, 5).forEach(show => {
+      
+      movieResults.forEach(movie => {
+        results.push({
+          type: 'item',
+          title: movie.title,
+          subtitle: movie.year ? `${movie.year}` : '',
+          image: movie.poster_path,
+          onClick: () => {
+            setViewMode('movies');
+            setSelectedMovie(movie);
+          }
+        });
+      });
+    }
+
+    // Add TV shows section if there are TV show results
+    const tvResults = filteredTVShows.slice(0, 5);
+    if (tvResults.length > 0) {
       results.push({
-        title: show.title,
-        subtitle: `TV Show${show.year ? ` (${show.year})` : ''}`,
-        image: show.poster_path,
-        onClick: () => {
-          setViewMode('tvshows');
-          setSelectedShow(show);
-        }
+        type: 'section',
+        title: 'TV Shows'
       });
-    });
-    
-    onSearchResultsChange(results.slice(0, 10));
+      
+      tvResults.forEach(show => {
+        results.push({
+          type: 'item',
+          title: show.title,
+          subtitle: show.year ? `${show.year}` : '',
+          image: show.poster_path,
+          onClick: () => {
+            setViewMode('tvshows');
+            setSelectedShow(show);
+          }
+        });
+      });
+    }
+
+    onSearchResultsChange(results);
   }, [searchQuery, filteredMovies, filteredTVShows, onSearchResultsChange]);
 
   const formatDuration = (seconds) => {

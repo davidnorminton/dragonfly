@@ -203,26 +203,36 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
             />
             {showResults && videoSearchResults && videoSearchResults.length > 0 && (
               <div className="search-results-dropdown">
-                {videoSearchResults.slice(0, 10).map((result, idx) => (
-                  <div
-                    key={idx}
-                    className="search-result-item"
-                    onClick={() => {
-                      if (result.onClick) result.onClick();
-                      setShowResults(false);
-                      setVideoSearchQuery('');
-                      if (onVideoSearch) onVideoSearch('');
-                    }}
-                  >
-                    {result.image && (
-                      <img src={result.image} alt={result.title} className="search-result-image" onError={(e) => { e.target.style.display = 'none'; }} />
-                    )}
-                    <div className="search-result-content">
-                      <div className="search-result-title">{result.title}</div>
-                      {result.subtitle && <div className="search-result-subtitle">{result.subtitle}</div>}
+                {videoSearchResults.map((result, idx) => {
+                  if (result.type === 'section') {
+                    return (
+                      <div key={idx} className="search-result-section-header">
+                        {result.title}
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <div
+                      key={idx}
+                      className="search-result-item"
+                      onClick={() => {
+                        if (result.onClick) result.onClick();
+                        setShowResults(false);
+                        setVideoSearchQuery('');
+                        if (onVideoSearch) onVideoSearch('');
+                      }}
+                    >
+                      {result.image && (
+                        <img src={result.image} alt={result.title} className="search-result-image" onError={(e) => { e.target.style.display = 'none'; }} />
+                      )}
+                      <div className="search-result-content">
+                        <div className="search-result-title">{result.title}</div>
+                        {result.subtitle && <div className="search-result-subtitle">{result.subtitle}</div>}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
