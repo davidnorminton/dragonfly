@@ -552,6 +552,35 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
     });
   }, [library.tvShows, searchQuery]);
 
+  // Filter episodes across all TV shows
+  const filteredEpisodes = useMemo(() => {
+    if (!searchQuery || !searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase();
+    const episodes = [];
+    
+    library.tvShows.forEach(show => {
+      show.seasons?.forEach(season => {
+        season.episodes?.forEach(episode => {
+          // Search in episode title and description
+          if (episode.title?.toLowerCase().includes(query) ||
+              episode.description?.toLowerCase().includes(query) ||
+              episode.episode_number?.toString().includes(query)) {
+            episodes.push({
+              ...episode,
+              showTitle: show.title,
+              showId: show.id,
+              seasonNumber: season.season_number,
+              seasonId: season.id,
+              showPoster: show.poster_path
+            });
+          }
+        });
+      });
+    });
+    
+    return episodes;
+  }, [library.tvShows, searchQuery]);
+
   // Compute search results for dropdown with separate sections
   useEffect(() => {
     if (!onSearchResultsChange) return;
@@ -602,13 +631,53 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
           onClick: () => {
             setViewMode('tvshows');
             setSelectedShow(show);
+            setSelectedSeason(null);
+            setSelectedMovie(null);
+          }
+        });
+      });
+    }
+
+    // Add episodes section if there are episode results
+    const episodeResults = filteredEpisodes.slice(0, 8);
+    if (episodeResults.length > 0) {
+      results.push({
+        type: 'section',
+        title: 'Episodes'
+      });
+      
+      episodeResults.forEach(episode => {
+        results.push({
+          type: 'item',
+          title: episode.title || `Episode ${episode.episode_number}`,
+          subtitle: `${episode.showTitle} - S${episode.seasonNumber}E${episode.episode_number}`,
+          image: episode.showPoster,
+          onClick: () => {
+            // Find the show and season
+            const show = library.tvShows.find(s => s.id === episode.showId);
+            const season = show?.seasons?.find(s => s.id === episode.seasonId);
+            
+            if (show && season) {
+              setViewMode('tvshows');
+              setSelectedShow(show);
+              setSelectedSeason(season);
+              setSelectedMovie(null);
+              
+              // Scroll to episode or highlight it
+              setTimeout(() => {
+                const episodeElement = document.querySelector(`[data-episode-id="${episode.id}"]`);
+                if (episodeElement) {
+                  episodeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }, 100);
+            }
           }
         });
       });
     }
 
     onSearchResultsChange(results);
-  }, [searchQuery, filteredMovies, filteredTVShows, onSearchResultsChange]);
+  }, [searchQuery, filteredMovies, filteredTVShows, filteredEpisodes, library.tvShows, onSearchResultsChange]);
 
   const formatDuration = (seconds) => {
     if (!seconds) return '';
@@ -997,6 +1066,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                     .map((episode, idx) => (
                     <div
                       key={episode.id}
+                      data-episode-id={episode.id}
                       className="track-row episode-row-item"
                       style={{ display: 'grid', gridTemplateColumns: '40px 60px 1fr 140px', gap: '15px', alignItems: 'center' }}
                     >
