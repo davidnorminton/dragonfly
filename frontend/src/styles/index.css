@@ -7216,8 +7216,46 @@ body {
 }
 
 .database-pagination-button {
-  padding: 6px 12px;
+  padding: 8px 14px;
+  font-size: 1em;
+  min-width: 40px;
+}
+
+.database-pagination-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.database-pagination-page-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.8);
   font-size: 0.9em;
+  padding: 0 8px;
+}
+
+.database-pagination-input {
+  width: 60px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #fff;
+  text-align: center;
+  font-size: 0.9em;
+}
+
+.database-pagination-input:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.database-pagination-input::-webkit-inner-spin-button,
+.database-pagination-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .database-table tr.editing {

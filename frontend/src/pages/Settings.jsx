@@ -2438,26 +2438,60 @@ export function SettingsPage({ onNavigate }) {
                             </div>
 
                             {/* Pagination */}
-                            {tableData.pagination.total_pages > 1 && (
+                            {tableData.pagination && (
                               <div className="database-pagination">
                                 <span className="database-pagination-info">
-                                  Page {tableData.pagination.page} of {tableData.pagination.total_pages}
-                                  {' '}({tableData.pagination.total_rows} total rows)
+                                  Showing {((tableData.pagination.page - 1) * tableLimit) + 1} - {Math.min(tableData.pagination.page * tableLimit, tableData.pagination.total_rows)} of {tableData.pagination.total_rows} rows
                                 </span>
                                 <div className="database-pagination-controls">
+                                  <button
+                                    onClick={() => setTablePage(1)}
+                                    disabled={tableData.pagination.page === 1}
+                                    className="save-button database-pagination-button"
+                                    title="First page"
+                                  >
+                                    ⟪
+                                  </button>
                                   <button
                                     onClick={() => setTablePage(p => Math.max(1, p - 1))}
                                     disabled={tableData.pagination.page === 1}
                                     className="save-button database-pagination-button"
+                                    title="Previous page"
                                   >
-                                    ← Previous
+                                    ‹
                                   </button>
+                                  <div className="database-pagination-page-input">
+                                    <span>Page</span>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max={tableData.pagination.total_pages}
+                                      value={tableData.pagination.page}
+                                      onChange={(e) => {
+                                        const page = parseInt(e.target.value);
+                                        if (page >= 1 && page <= tableData.pagination.total_pages) {
+                                          setTablePage(page);
+                                        }
+                                      }}
+                                      className="database-pagination-input"
+                                    />
+                                    <span>of {tableData.pagination.total_pages}</span>
+                                  </div>
                                   <button
                                     onClick={() => setTablePage(p => Math.min(tableData.pagination.total_pages, p + 1))}
                                     disabled={tableData.pagination.page === tableData.pagination.total_pages}
                                     className="save-button database-pagination-button"
+                                    title="Next page"
                                   >
-                                    Next →
+                                    ›
+                                  </button>
+                                  <button
+                                    onClick={() => setTablePage(tableData.pagination.total_pages)}
+                                    disabled={tableData.pagination.page === tableData.pagination.total_pages}
+                                    className="save-button database-pagination-button"
+                                    title="Last page"
+                                  >
+                                    ⟫
                                   </button>
                                 </div>
                               </div>
