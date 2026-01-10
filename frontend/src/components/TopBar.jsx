@@ -90,28 +90,6 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
             </svg>
           </button>
         </div>
-        <button 
-          onClick={onSwitchAI}
-          style={{
-            background: 'rgb(20, 20, 32)',
-            border: 0,
-            color: '#534e4e',
-            padding: '6px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '0.85em',
-            fontWeight: '500',
-            transition: 'all 0.2s'
-          }}
-          onMouseOver={(e) => {
-            e.target.style.color = '#fff';
-          }}
-          onMouseOut={(e) => {
-            e.target.style.color = '#534e4e';
-          }}
-        >
-          Switch AI
-        </button>
       </div>
       <div className="top-bar-center">
         {activePage === 'music' || activePage === 'music-editor' ? (
@@ -203,9 +181,77 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
               </div>
             )}
           </div>
+        ) : activePage === 'videos' ? (
+          <div className="music-search-box" ref={searchRef}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="search-icon">
+              <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+            </svg>
+            <input
+              type="text"
+              placeholder="Search movies, TV shows, genres, actors..."
+              value={videoSearchQuery}
+              onChange={(e) => {
+                setVideoSearchQuery(e.target.value);
+                if (onVideoSearch) onVideoSearch(e.target.value);
+              }}
+              onFocus={() => {
+                if (videoSearchResults && videoSearchResults.length > 0 && videoSearchQuery.trim()) {
+                  setShowResults(true);
+                }
+              }}
+              className="music-search-input"
+            />
+            {showResults && videoSearchResults && videoSearchResults.length > 0 && (
+              <div className="search-results-dropdown">
+                {videoSearchResults.slice(0, 10).map((result, idx) => (
+                  <div
+                    key={idx}
+                    className="search-result-item"
+                    onClick={() => {
+                      if (result.onClick) result.onClick();
+                      setShowResults(false);
+                      setVideoSearchQuery('');
+                      if (onVideoSearch) onVideoSearch('');
+                    }}
+                  >
+                    {result.image && (
+                      <img src={result.image} alt={result.title} className="search-result-image" onError={(e) => { e.target.style.display = 'none'; }} />
+                    )}
+                    <div className="search-result-content">
+                      <div className="search-result-title">{result.title}</div>
+                      {result.subtitle && <div className="search-result-subtitle">{result.subtitle}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         ) : null}
       </div>
       <div className="top-bar-right">
+        <button 
+          onClick={onSwitchAI}
+          style={{
+            background: 'rgb(20, 20, 32)',
+            border: 0,
+            color: '#534e4e',
+            padding: '6px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '0.85em',
+            fontWeight: '500',
+            transition: 'all 0.2s',
+            marginRight: '12px'
+          }}
+          onMouseOver={(e) => {
+            e.target.style.color = '#fff';
+          }}
+          onMouseOut={(e) => {
+            e.target.style.color = '#534e4e';
+          }}
+        >
+          Switch AI
+        </button>
         <button
           className={`settings-icon-button ${activePage === 'alerts' ? 'active' : ''}`}
           onClick={() => onNavigate?.('alerts')}

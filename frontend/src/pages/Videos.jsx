@@ -466,24 +466,90 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
   }, []);
 
   // Filter library based on search query
+  // Actor search results state
+  const [actorSearchResults, setActorSearchResults] = useState([]);
+
+  // Fetch actor search results when query changes
+  useEffect(() => {
+    const fetchActorResults = async () => {
+      if (!searchQuery || !searchQuery.trim() || searchQuery.length < 2) {
+        setActorSearchResults([]);
+        return;
+      }
+      
+      try {
+        const res = await videoAPI.searchByActor(searchQuery);
+        if (res?.success && res.movies) {
+          setActorSearchResults(res.movies);
+        }
+      } catch (error) {
+        console.error('Error searching by actor:', error);
+        setActorSearchResults([]);
+      }
+    };
+    
+    const debounce = setTimeout(fetchActorResults, 300);
+    return () => clearTimeout(debounce);
+  }, [searchQuery]);
+
   const filteredMovies = useMemo(() => {
     if (!searchQuery || !searchQuery.trim()) return library.movies;
     const query = searchQuery.toLowerCase();
-    return library.movies.filter(movie =>
-      movie.title?.toLowerCase().includes(query) ||
-      movie.description?.toLowerCase().includes(query) ||
-      movie.year?.toString().includes(query)
+    
+    // First, filter by title, description, year, genres
+    const baseFiltered = library.movies.filter(movie => {
+      // Search in title, description, year
+      if (movie.title?.toLowerCase().includes(query)) return true;
+      if (movie.description?.toLowerCase().includes(query)) return true;
+      if (movie.year?.toString().includes(query)) return true;
+      
+      // Search in genres
+      if (movie.extra_metadata?.genres) {
+        const genres = Array.isArray(movie.extra_metadata.genres) 
+          ? movie.extra_metadata.genres 
+          : [];
+        if (genres.some(genre => genre.toLowerCase().includes(query))) return true;
+      }
+      
+      return false;
+    });
+    
+    // Then, add movies from actor search results
+    const actorMovieTitles = new Set(actorSearchResults.map(m => `${m.title}-${m.year}`));
+    const actorMovies = library.movies.filter(movie => 
+      actorMovieTitles.has(`${movie.title}-${movie.year}`)
     );
-  }, [library.movies, searchQuery]);
+    
+    // Combine and deduplicate
+    const allMovies = [...baseFiltered];
+    actorMovies.forEach(actorMovie => {
+      if (!allMovies.find(m => m.id === actorMovie.id)) {
+        allMovies.push(actorMovie);
+      }
+    });
+    
+    return allMovies;
+  }, [library.movies, searchQuery, actorSearchResults]);
 
   const filteredTVShows = useMemo(() => {
     if (!searchQuery || !searchQuery.trim()) return library.tvShows;
     const query = searchQuery.toLowerCase();
-    return library.tvShows.filter(show =>
-      show.title?.toLowerCase().includes(query) ||
-      show.description?.toLowerCase().includes(query) ||
-      show.year?.toString().includes(query)
-    );
+    return library.tvShows.filter(show => {
+      // Search in title, description, year
+      if (show.title?.toLowerCase().includes(query)) return true;
+      if (show.description?.toLowerCase().includes(query)) return true;
+      if (show.year?.toString().includes(query)) return true;
+      
+      // Search in genres
+      if (show.extra_metadata?.genres) {
+        const genres = Array.isArray(show.extra_metadata.genres) 
+          ? show.extra_metadata.genres 
+          : [];
+        if (genres.some(genre => genre.toLowerCase().includes(query))) return true;
+      }
+      
+      return false;
+    });
   }, [library.tvShows, searchQuery]);
 
   // Compute search results for dropdown

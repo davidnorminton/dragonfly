@@ -7924,6 +7924,68 @@ async def stream_video(video_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/video/search-by-actor/{actor_name}")
+async def search_by_actor(actor_name: str):
+    """Search for movies by actor name in cast/crew database."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Search in MovieCastCrew table for movies with this actor
+            result = await session.execute(
+                select(MovieCastCrew)
+            )
+            all_cast_crew = result.scalars().all()
+            
+            matching_movies = []
+            query = actor_name.lower()
+            
+            for cc in all_cast_crew:
+                # Check cast
+                if cc.cast:
+                    for person in cc.cast:
+                        if isinstance(person, dict) and person.get('name', '').lower().find(query) != -1:
+                            matching_movies.append({
+                                'title': cc.movie_title,
+                                'year': cc.movie_year,
+                                'tmdb_id': cc.tmdb_id
+                            })
+                            break
+                
+                # Check director, writer, producer
+                if not matching_movies or matching_movies[-1]['title'] != cc.movie_title:
+                    if cc.director and isinstance(cc.director, dict):
+                        if cc.director.get('name', '').lower().find(query) != -1:
+                            matching_movies.append({
+                                'title': cc.movie_title,
+                                'year': cc.movie_year,
+                                'tmdb_id': cc.tmdb_id
+                            })
+                            continue
+                    if cc.writer and isinstance(cc.writer, dict):
+                        if cc.writer.get('name', '').lower().find(query) != -1:
+                            matching_movies.append({
+                                'title': cc.movie_title,
+                                'year': cc.movie_year,
+                                'tmdb_id': cc.tmdb_id
+                            })
+                            continue
+                    if cc.producer and isinstance(cc.producer, dict):
+                        if cc.producer.get('name', '').lower().find(query) != -1:
+                            matching_movies.append({
+                                'title': cc.movie_title,
+                                'year': cc.movie_year,
+                                'tmdb_id': cc.tmdb_id
+                            })
+            
+            return {
+                "success": True,
+                "movies": matching_movies,
+                "count": len(matching_movies)
+            }
+    except Exception as e:
+        logging.error(f"Error searching by actor: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/video/library")
 async def get_video_library():
     """Get the complete video library (movies and TV shows)."""

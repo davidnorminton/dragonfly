@@ -171,6 +171,12 @@ export const videoAPI = {
     const response = await fetch(`/api/video/actor-filmography/${encodeURIComponent(actorName)}`);
     if (!response.ok) throw new Error('Failed to get saved filmography');
     return response.json();
+  },
+
+  async searchByActor(actorName) {
+    const response = await fetch(`/api/video/search-by-actor/${encodeURIComponent(actorName)}`);
+    if (!response.ok) throw new Error('Failed to search by actor');
+    return response.json();
   }
 };
 
