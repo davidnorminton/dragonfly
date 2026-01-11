@@ -304,10 +304,59 @@ This is essential for natural, focused conversation flow.
             if system_prompt:
                 persona_settings["system"] = system_prompt
             
+            # Override with model if provided (user selection takes precedence)
+            if input_data.get("model"):
+                persona_settings["model"] = input_data["model"]
+                self.logger.info(f"Using model override: {input_data['model']}")
+                
+                # Adjust max_tokens based on model if needed
+                if "claude-4" in input_data["model"] or "claude-3-7" in input_data["model"]:
+                    if persona_settings.get("max_tokens", 1024) < 4096:
+                        persona_settings["max_tokens"] = 4096
+                elif "haiku" in input_data["model"]:
+                    if persona_settings.get("max_tokens", 1024) > 4096:
+                        persona_settings["max_tokens"] = 4096
+            
+            # Some newer models don't allow both temperature and top_p
+            # If both are set, prefer temperature and remove top_p
+            if persona_settings.get("temperature") is not None and persona_settings.get("top_p") is not None:
+                model_name = persona_settings.get("model", "").lower()
+                # Claude 4.5 and newer models don't support both parameters
+                # Check for any 4.5 or 4-5 variants (sonnet, haiku, opus)
+                if any(pattern in model_name for pattern in [
+                    "4.5", "4-5",  # Catch any 4.5 version notation
+                    "sonnet-4", "haiku-4", "opus-4"  # Catch claude-sonnet-4-5-* variants
+                ]):
+                    self.logger.info(f"Removing top_p for {persona_settings['model']} (only temperature or top_p allowed)")
+                    del persona_settings["top_p"]
+            
+            # Sanitize parameters - ensure all values are proper types
+            sanitized_settings = {}
+            for key, value in persona_settings.items():
+                if value is not None and value != "":
+                    # Ensure numeric parameters are actually numbers
+                    if key in ["max_tokens", "temperature", "top_p"]:
+                        try:
+                            if key == "max_tokens":
+                                sanitized_settings[key] = int(value)
+                            else:
+                                sanitized_settings[key] = float(value)
+                        except (ValueError, TypeError):
+                            self.logger.warning(f"Invalid {key} value: {value}, skipping")
+                            continue
+                    else:
+                        sanitized_settings[key] = value
+            
+            # Log the parameters being sent (excluding system prompt content)
+            log_params = {k: v for k, v in sanitized_settings.items() if k != "system"}
+            self.logger.info(f"RAG API parameters: {log_params}")
+            if system_prompt:
+                self.logger.debug(f"System prompt length: {len(system_prompt)} chars")
+            
             # Stream response from Claude API (synchronous iterator)
             with self.client.messages.stream(
                 messages=message_list,
-                **persona_settings
+                **sanitized_settings
             ) as stream:
                 for text in stream.text_stream:
                     yield text

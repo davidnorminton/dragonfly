@@ -5074,7 +5074,7 @@ def get_system_uptime() -> float:
         # psutil.boot_time() returns the system boot time as a timestamp
         boot_time = psutil.boot_time()
         return time.time() - boot_time
-    except (ImportError, AttributeError):
+    except (ImportError, AttributeError, PermissionError, OSError):
         # Fallback: try platform-specific methods
         system = platform.system().lower()
         if system == 'linux':
@@ -6601,8 +6601,13 @@ async def get_remote_ip() -> str:
 @app.get("/api/system/uptime")
 async def get_system_uptime_endpoint():
     """Get system uptime in seconds."""
-    uptime_seconds = get_system_uptime()
-    return {"uptime_seconds": int(uptime_seconds)}
+    try:
+        uptime_seconds = get_system_uptime()
+        return {"uptime_seconds": int(uptime_seconds)}
+    except Exception as e:
+        logger.error(f"Error getting system uptime: {e}")
+        # Return server uptime as fallback
+        return {"uptime_seconds": int(time.time() - server_start_time)}
 
 @app.get("/api/system/ips")
 async def get_system_ips():
@@ -6715,8 +6720,9 @@ async def send_chat_message(request: Request):
         service_name = data.get("service_name")  # Deprecated, use mode instead
         stream = data.get("stream", True)
         preset_id = data.get("preset_id")  # Optional prompt preset ID
+        model_override = data.get("model")  # Optional model override (overrides persona default)
         
-        logger.info(f"Chat request received: message='{message[:50] if message else None}', mode={mode}, stream={stream}, preset_id={preset_id}")
+        logger.info(f"Chat request received: message='{message[:50] if message else None}', mode={mode}, stream={stream}, preset_id={preset_id}, model_override={model_override}")
         
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
@@ -6798,6 +6804,11 @@ async def send_chat_message(request: Request):
             if custom_top_p is not None:
                 input_data["top_p"] = custom_top_p
             
+            # Apply model override if provided
+            if model_override:
+                input_data["model"] = model_override
+                logger.info(f"Using model override: {model_override}")
+            
             async def generate_response():
                 full_response = ""
                 message_id = None
@@ -6861,6 +6872,11 @@ async def send_chat_message(request: Request):
                         "expert_type": expert_type,
                         "messages": conversation_history
                     }
+                    
+                    # Apply model override if provided
+                    if model_override:
+                        input_data["model"] = model_override
+                        logger.info(f"Using model override for RAG: {model_override}")
                     
                     # Consume the synchronous generator directly (it's safe in async context)
                     # The generator yields chunks from the Anthropic API stream

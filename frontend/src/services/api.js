@@ -21,17 +21,19 @@ export const chatAPI = {
     return api.get('/chat', { params }).then(res => res.data);
   },
   sendMessage: async (message, sessionId, mode = 'qa', expertType = 'general', stream = true, presetId = null) => {
+    const body = {
+      message,
+      session_id: sessionId,
+      mode,
+      expert_type: expertType,
+      stream,
+      preset_id: presetId
+    };
+
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        message, 
-        session_id: sessionId, 
-        mode,
-        expert_type: expertType,
-        stream,
-        preset_id: presetId
-      }),
+      body: JSON.stringify(body),
     });
     return response;
   },
