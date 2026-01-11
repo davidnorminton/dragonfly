@@ -15,6 +15,7 @@ import go from 'highlight.js/lib/languages/go';
 import rust from 'highlight.js/lib/languages/rust';
 import ruby from 'highlight.js/lib/languages/ruby';
 import php from 'highlight.js/lib/languages/php';
+import { marked, Renderer } from 'marked';
 
 // Register languages
 hljs.registerLanguage('javascript', javascript);
@@ -42,128 +43,80 @@ hljs.registerLanguage('ruby', ruby);
 hljs.registerLanguage('rb', ruby);
 hljs.registerLanguage('php', php);
 
+// Configure marked with custom renderer for code blocks
+const renderer = new Renderer();
+
+// Custom code block renderer with syntax highlighting and copy button
+renderer.code = function(code, language) {
+  const validLanguage = language && hljs.getLanguage(language) ? language : 'plaintext';
+  
+  let highlightedCode;
+  try {
+    if (validLanguage === 'plaintext') {
+      const div = document.createElement('div');
+      div.textContent = code;
+      highlightedCode = div.innerHTML;
+    } else {
+      highlightedCode = hljs.highlight(code, { language: validLanguage }).value;
+    }
+  } catch (e) {
+    console.error('Highlighting error:', e);
+    const div = document.createElement('div');
+    div.textContent = code;
+    highlightedCode = div.innerHTML;
+  }
+  
+  const languageLabel = validLanguage !== 'plaintext' ? validLanguage : '';
+  const codeId = `code-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const base64Code = btoa(unescape(encodeURIComponent(code)));
+  
+  return `<div class="code-block-wrapper">
+    <div class="code-block-header">
+      ${languageLabel ? `<div class="code-block-language">${languageLabel}</div>` : '<div></div>'}
+      <button class="code-block-copy-btn" data-code-base64="${base64Code}" onclick="copyCodeBlock(this)" title="Copy code">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span class="copy-text">Copy</span>
+      </button>
+    </div>
+    <pre><code class="hljs language-${validLanguage}" id="${codeId}">${highlightedCode}</code></pre>
+  </div>`;
+};
+
+// Custom inline code renderer
+renderer.codespan = function(code) {
+  return `<code class="inline-code">${code}</code>`;
+};
+
+// Configure marked options for v17+
+marked.use({
+  renderer: renderer,
+  breaks: true, // Convert \n to <br>
+  gfm: true, // GitHub Flavored Markdown
+  headerIds: true,
+  mangle: false,
+  pedantic: false,
+  smartLists: true
+});
+
 /**
- * Format a message with code highlighting.
- * Converts markdown-style code blocks to HTML with syntax highlighting.
+ * Format a message with full markdown support and code highlighting.
+ * Converts markdown to HTML with syntax highlighting for code blocks.
  */
 export function formatMessage(text) {
   if (!text) return '';
   
-  // Escape HTML
-  const escapeHtml = (str) => {
+  try {
+    // Use marked to parse the markdown (in v17+, use marked() directly)
+    const html = marked(text);
+    return html;
+  } catch (error) {
+    console.error('Error parsing markdown:', error);
+    // Fallback: escape and return as-is
     const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  };
-  
-  // Process the text by splitting on code blocks
-  const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-  
-  const parts = [];
-  let lastIndex = 0;
-  let match;
-  
-  // Find all code blocks and split text around them
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    // Add text before the code block
-    if (match.index > lastIndex) {
-      const textBefore = text.substring(lastIndex, match.index);
-      parts.push({ type: 'text', content: textBefore });
-    }
-    
-    // Add the code block
-    const language = match[1] || 'plaintext';
-    const code = match[2];
-    parts.push({ type: 'code', language, content: code });
-    
-    lastIndex = match.index + match[0].length;
+    div.textContent = text;
+    return div.innerHTML.replace(/\n/g, '<br>');
   }
-  
-  // Add any remaining text after the last code block
-  if (lastIndex < text.length) {
-    const textAfter = text.substring(lastIndex);
-    parts.push({ type: 'text', content: textAfter });
-  }
-  
-  // Process each part
-  const processedParts = parts.map(part => {
-    if (part.type === 'code') {
-      // Highlight the code
-      let highlightedCode;
-      try {
-        if (part.language === 'plaintext' || !hljs.getLanguage(part.language)) {
-          highlightedCode = escapeHtml(part.content);
-        } else {
-          highlightedCode = hljs.highlight(part.content, { language: part.language }).value;
-        }
-      } catch (e) {
-        console.error('Highlighting error:', e);
-        highlightedCode = escapeHtml(part.content);
-      }
-      
-      const languageLabel = part.language !== 'plaintext' ? part.language : '';
-      const codeId = `code-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      // Store original code content - use base64 encoding to avoid HTML attribute issues
-      const base64Code = btoa(unescape(encodeURIComponent(part.content)));
-      return `<div class="code-block-wrapper">
-        <div class="code-block-header">
-          ${languageLabel ? `<div class="code-block-language">${languageLabel}</div>` : '<div></div>'}
-          <button class="code-block-copy-btn" data-code-base64="${base64Code}" onclick="copyCodeBlock(this)" title="Copy code">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            <span class="copy-text">Copy</span>
-          </button>
-        </div>
-        <pre><code class="hljs language-${part.language}" id="${codeId}">${highlightedCode}</code></pre>
-      </div>`;
-    } else {
-      // Process text: handle inline code, escape HTML, convert newlines
-      let processedText = part.content;
-      
-      // Replace inline code first (preserve backticks content)
-      const inlineCodeParts = [];
-      let inlineLastIndex = 0;
-      const inlineCodeRegex = /`([^`]+)`/g;
-      let inlineMatch;
-      
-      while ((inlineMatch = inlineCodeRegex.exec(part.content)) !== null) {
-        if (inlineMatch.index > inlineLastIndex) {
-          inlineCodeParts.push({
-            type: 'text',
-            content: part.content.substring(inlineLastIndex, inlineMatch.index)
-          });
-        }
-        inlineCodeParts.push({
-          type: 'inline-code',
-          content: inlineMatch[1]
-        });
-        inlineLastIndex = inlineMatch.index + inlineMatch[0].length;
-      }
-      
-      if (inlineLastIndex < part.content.length) {
-        inlineCodeParts.push({
-          type: 'text',
-          content: part.content.substring(inlineLastIndex)
-        });
-      }
-      
-      // If no inline code was found, treat the whole thing as text
-      if (inlineCodeParts.length === 0) {
-        return escapeHtml(part.content).replace(/\n/g, '<br>');
-      }
-      
-      // Process inline code parts
-      return inlineCodeParts.map(p => {
-        if (p.type === 'inline-code') {
-          return `<code class="inline-code">${escapeHtml(p.content)}</code>`;
-        } else {
-          return escapeHtml(p.content).replace(/\n/g, '<br>');
-        }
-      }).join('');
-    }
-  });
-  
-  return processedParts.join('');
 }

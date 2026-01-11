@@ -34,6 +34,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [createPresetExpanded, setCreatePresetExpanded] = useState(false);
   const [sessionPresets, setSessionPresets] = useState({}); // Store preset per session: { sessionId: { presetId: number | null, useSystemContext: boolean } }
   const [deleteError, setDeleteError] = useState(null);
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false); // Track if user has manually scrolled away from bottom
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (baseSessionId && baseSessionId.startsWith('chat-')) {
@@ -304,11 +305,24 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   // Note: reloadHistory is handled by useChat hook when sessionId changes
   // No need to call it here to avoid double-loading
 
+  // Track user scroll position to determine if they've scrolled up
   useEffect(() => {
     const container = chatContainerRef.current;
     if (!container) return;
 
     const handleScroll = () => {
+      // Check if user has scrolled up from the bottom
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+      
+      // If user scrolls to bottom, reset the flag
+      if (isAtBottom) {
+        setUserHasScrolledUp(false);
+      } else {
+        // User is scrolled up
+        setUserHasScrolledUp(true);
+      }
+      
+      // Load more messages when scrolling to top
       if (container.scrollTop < 100 && hasMore && !isLoadingMore) {
         loadMore();
       }
@@ -379,6 +393,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     };
     setPendingUserMessage(tempUserMessage);
     setIsWaiting(true);
+    setUserHasScrolledUp(false); // Reset scroll flag when sending new message
 
     await sendMessage(
       userMessage,
@@ -847,8 +862,14 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   ];
 
   useEffect(() => {
+    // Only auto-scroll if user hasn't manually scrolled up
+    if (userHasScrolledUp) {
+      return; // Don't auto-scroll when user is reading
+    }
+    
+    // Auto-scroll to show new content
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [allMessages.length, streamingMessage?.message]);
+  }, [allMessages.length, streamingMessage?.message, userHasScrolledUp]);
 
   useEffect(() => {
     // Focus input when component mounts or when empty

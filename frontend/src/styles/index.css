@@ -1381,6 +1381,184 @@ body {
   font-size: 0.9em;
 }
 
+/* Markdown element styling in chat messages */
+.chat-message h1,
+.chat-message h2,
+.chat-message h3,
+.chat-message h4,
+.chat-message h5,
+.chat-message h6 {
+  margin: 16px 0 10px 0;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #f0f0f0;
+}
+
+.chat-message h1:first-child,
+.chat-message h2:first-child,
+.chat-message h3:first-child,
+.chat-message h4:first-child,
+.chat-message h5:first-child,
+.chat-message h6:first-child {
+  margin-top: 0;
+}
+
+.chat-message h1 {
+  font-size: 1.75em;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 6px;
+}
+
+.chat-message h2 {
+  font-size: 1.4em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 4px;
+}
+
+.chat-message h3 {
+  font-size: 1.2em;
+}
+
+.chat-message h4 {
+  font-size: 1.05em;
+}
+
+.chat-message h5 {
+  font-size: 0.95em;
+}
+
+.chat-message h6 {
+  font-size: 0.85em;
+  color: #b0b0b0;
+}
+
+.chat-message ul,
+.chat-message ol {
+  margin: 10px 0;
+  padding-left: 24px;
+}
+
+.chat-message li {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.chat-message ul li {
+  list-style-type: disc;
+}
+
+.chat-message ol li {
+  list-style-type: decimal;
+}
+
+.chat-message li > ul,
+.chat-message li > ol {
+  margin: 4px 0;
+}
+
+.chat-message a {
+  color: #60a5fa;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(96, 165, 250, 0.3);
+  transition: all 0.2s ease;
+}
+
+.chat-message a:hover {
+  color: #93c5fd;
+  border-bottom-color: rgba(147, 197, 253, 0.5);
+}
+
+.chat-message blockquote {
+  margin: 12px 0;
+  padding: 10px 16px;
+  border-left: 4px solid rgba(96, 165, 250, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0 4px 4px 0;
+  color: #d0d0d0;
+}
+
+.chat-message blockquote p {
+  margin: 6px 0;
+}
+
+.chat-message blockquote p:first-child {
+  margin-top: 0;
+}
+
+.chat-message blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-message p {
+  margin: 10px 0;
+  line-height: 1.6;
+}
+
+.chat-message p:first-child {
+  margin-top: 0;
+}
+
+.chat-message p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-message strong,
+.chat-message b {
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+.chat-message em,
+.chat-message i {
+  font-style: italic;
+  color: #e8e8e8;
+}
+
+.chat-message hr {
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-message table {
+  margin: 12px 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.chat-message table th,
+.chat-message table td {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: left;
+}
+
+.chat-message table th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+.chat-message table tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-message img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 12px 0;
+}
+
+.chat-message del {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
 /* Scrollbar */
 .left-panel::-webkit-scrollbar,
 .chat-messages::-webkit-scrollbar,
@@ -6127,6 +6305,183 @@ body {
   font-size: 0.9em;
   color: #e0e0e0;
   border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* Markdown element styling in chat messages */
+.chatgpt-message-text h1,
+.chatgpt-message-text h2,
+.chatgpt-message-text h3,
+.chatgpt-message-text h4,
+.chatgpt-message-text h5,
+.chatgpt-message-text h6 {
+  margin: 24px 0 16px 0;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #f0f0f0;
+}
+
+.chatgpt-message-text h1:first-child,
+.chatgpt-message-text h2:first-child,
+.chatgpt-message-text h3:first-child,
+.chatgpt-message-text h4:first-child,
+.chatgpt-message-text h5:first-child,
+.chatgpt-message-text h6:first-child {
+  margin-top: 0;
+}
+
+.chatgpt-message-text h1 {
+  font-size: 2em;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 8px;
+}
+
+.chatgpt-message-text h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 6px;
+}
+
+.chatgpt-message-text h3 {
+  font-size: 1.25em;
+}
+
+.chatgpt-message-text h4 {
+  font-size: 1.1em;
+}
+
+.chatgpt-message-text h5 {
+  font-size: 1em;
+}
+
+.chatgpt-message-text h6 {
+  font-size: 0.9em;
+  color: #b0b0b0;
+}
+
+.chatgpt-message-text ul,
+.chatgpt-message-text ol {
+  margin: 12px 0;
+  padding-left: 28px;
+}
+
+.chatgpt-message-text li {
+  margin: 6px 0;
+  line-height: 1.6;
+}
+
+.chatgpt-message-text ul li {
+  list-style-type: disc;
+}
+
+.chatgpt-message-text ol li {
+  list-style-type: decimal;
+}
+
+.chatgpt-message-text li > ul,
+.chatgpt-message-text li > ol {
+  margin: 4px 0;
+}
+
+.chatgpt-message-text a {
+  color: #60a5fa;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(96, 165, 250, 0.3);
+  transition: all 0.2s ease;
+}
+
+.chatgpt-message-text a:hover {
+  color: #93c5fd;
+  border-bottom-color: rgba(147, 197, 253, 0.5);
+}
+
+.chatgpt-message-text blockquote {
+  margin: 16px 0;
+  padding: 12px 20px;
+  border-left: 4px solid rgba(96, 165, 250, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0 4px 4px 0;
+  color: #d0d0d0;
+}
+
+.chatgpt-message-text blockquote p {
+  margin: 8px 0;
+}
+
+.chatgpt-message-text blockquote p:first-child {
+  margin-top: 0;
+}
+
+.chatgpt-message-text blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.chatgpt-message-text p {
+  margin: 12px 0;
+  line-height: 1.8;
+}
+
+.chatgpt-message-text p:first-child {
+  margin-top: 0;
+}
+
+.chatgpt-message-text p:last-child {
+  margin-bottom: 0;
+}
+
+.chatgpt-message-text strong,
+.chatgpt-message-text b {
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+.chatgpt-message-text em,
+.chatgpt-message-text i {
+  font-style: italic;
+  color: #e8e8e8;
+}
+
+.chatgpt-message-text hr {
+  margin: 24px 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chatgpt-message-text table {
+  margin: 16px 0;
+  border-collapse: collapse;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chatgpt-message-text table th,
+.chatgpt-message-text table td {
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: left;
+}
+
+.chatgpt-message-text table th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: #f0f0f0;
+}
+
+.chatgpt-message-text table tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chatgpt-message-text img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 16px 0;
+}
+
+.chatgpt-message-text del {
+  text-decoration: line-through;
+  opacity: 0.7;
 }
 
 .chatgpt-typing-indicator {

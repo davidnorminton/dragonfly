@@ -3,6 +3,7 @@ import { useChat } from '../hooks/useChat';
 import { ttsAPI, chatAPI } from '../services/api';
 import { usePersonas } from '../hooks/usePersonas';
 import { useExpertTypes } from '../hooks/useExpertTypes';
+import { formatMessage } from '../utils/messageFormatter';
 
 export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue, aiFocusMode, onMicClick, onCollapse }) {
   const [mode, setMode] = useState('qa'); // 'qa' or 'conversational'
@@ -11,6 +12,7 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue, a
   const [streamingMessage, setStreamingMessage] = useState(null);
   const [isWaiting, setIsWaiting] = useState(false);
   const [pendingUserMessage, setPendingUserMessage] = useState(null);
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false); // Track if user has manually scrolled away from bottom
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const { currentPersona } = usePersonas();
@@ -48,15 +50,88 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue, a
     };
   }, [reloadHistory]);
 
+  // Set up copy button functionality
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingMessage, pendingUserMessage]);
+    // Make copy function available globally for onclick handlers
+    window.copyCodeBlock = (button) => {
+      const base64Code = button.getAttribute('data-code-base64');
+      if (!base64Code) return;
+      
+      try {
+        // Decode base64 to get original code
+        const decodedCode = decodeURIComponent(escape(atob(base64Code)));
+        
+        // Copy to clipboard
+        navigator.clipboard.writeText(decodedCode).then(() => {
+          // Visual feedback
+          const copyText = button.querySelector('.copy-text');
+          const originalText = copyText.textContent;
+          copyText.textContent = 'Copied!';
+          button.classList.add('copied');
+          
+          setTimeout(() => {
+            copyText.textContent = originalText;
+            button.classList.remove('copied');
+          }, 2000);
+        }).catch(err => {
+          console.error('Failed to copy code:', err);
+          // Fallback for older browsers
+          const textarea = document.createElement('textarea');
+          textarea.value = decodedCode;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand('copy');
+            const copyText = button.querySelector('.copy-text');
+            copyText.textContent = 'Copied!';
+            setTimeout(() => {
+              copyText.textContent = 'Copy';
+            }, 2000);
+          } catch (e) {
+            console.error('Fallback copy failed:', e);
+          }
+          document.body.removeChild(textarea);
+        });
+      } catch (e) {
+        console.error('Failed to decode code:', e);
+      }
+    };
+    
+    return () => {
+      delete window.copyCodeBlock;
+    };
+  }, []);
 
+  useEffect(() => {
+    // Only auto-scroll if user hasn't manually scrolled up
+    if (userHasScrolledUp) {
+      return; // Don't auto-scroll when user is reading
+    }
+    
+    // Auto-scroll to show new content
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamingMessage, pendingUserMessage, userHasScrolledUp]);
+
+  // Track user scroll position to determine if they've scrolled up
   useEffect(() => {
     const container = chatContainerRef.current;
     if (!container) return;
 
     const handleScroll = () => {
+      // Check if user has scrolled up from the bottom
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+      
+      // If user scrolls to bottom, reset the flag
+      if (isAtBottom) {
+        setUserHasScrolledUp(false);
+      } else {
+        // User is scrolled up
+        setUserHasScrolledUp(true);
+      }
+      
+      // Load more messages when scrolling to top
       if (container.scrollTop < 100 && hasMore && !isLoadingMore) {
         loadMore();
       }
@@ -81,6 +156,7 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue, a
     };
     setPendingUserMessage(tempUserMessage);
     setIsWaiting(true);
+    setUserHasScrolledUp(false); // Reset scroll flag when sending new message
     
     let assistantMessageId = null;
 
@@ -149,12 +225,6 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue, a
       console.error('Error generating TTS:', error);
       alert(`Error generating audio: ${error.message}`);
     }
-  };
-
-  const escapeHtml = (text) => {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
   };
 
   // Combine messages: pending user message, existing messages, streaming message
@@ -238,7 +308,11 @@ export function Chat({ sessionId: baseSessionId, onAudioGenerated, audioQueue, a
                   ) : (
                     <div className="role">You</div>
                   )}
-                  <div dangerouslySetInnerHTML={{ __html: escapeHtml(msg.message) }}></div>
+                  {msg.role === 'assistant' ? (
+                    <div dangerouslySetInnerHTML={{ __html: formatMessage(msg.message) }}></div>
+                  ) : (
+                    <div>{msg.message}</div>
+                  )}
                 </div>
               );
             })}
