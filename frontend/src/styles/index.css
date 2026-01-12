@@ -6160,7 +6160,8 @@ body {
 .chatgpt-message.user {
   background: transparent;
   justify-content: flex-end;
-  padding: 24px;
+  align-items: flex-end;
+  padding: 48px 24px 48px 24px; /* Same padding on both sides - margin on right like SMS */
 }
 
 .chatgpt-message.assistant {
@@ -6187,8 +6188,12 @@ body {
 }
 
 .chatgpt-message.user .chatgpt-message-content {
-  max-width: 50%;
-  margin-left: auto;
+  max-width: 90%;
+  margin-right: auto;
+  margin-left: 0;
+  padding-right: 0;
+  width: fit-content;
+  display: flex;
 }
 
 .chatgpt-message.assistant .chatgpt-message-content {
@@ -6206,6 +6211,8 @@ body {
   word-wrap: break-word;
   display: inline-block;
   max-width: 100%;
+  text-align: left; /* Text left-aligned within bubble */
+  margin-left: auto; /* Bubble aligns to right */
 }
 
 .chatgpt-message.assistant .chatgpt-message-text {
