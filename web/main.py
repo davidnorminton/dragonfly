@@ -985,6 +985,104 @@ async def get_filler_word_audio(persona_name: str, filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/personas/{persona_name}/image")
+async def upload_persona_image(persona_name: str, image: UploadFile = File(...)):
+    """Upload an image for a persona."""
+    from database.models import PersonaConfig
+    
+    # Validate file type
+    allowed_extensions = {'.jpg', '.jpeg', '.png'}
+    filename = getattr(image, 'filename', None) or (hasattr(image, 'name') and image.name) or None
+    if not filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    
+    file_ext = Path(filename).suffix.lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}")
+    
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check if persona exists
+            result = await session.execute(
+                select(PersonaConfig).where(PersonaConfig.name == persona_name)
+            )
+            persona = result.scalar_one_or_none()
+            if not persona:
+                raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
+            
+            # Create persona_images directory if it doesn't exist
+            project_root = Path(__file__).parent.parent
+            images_dir = project_root / "data" / "persona_images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Delete old image if exists
+            if persona.image_path:
+                old_path = project_root / persona.image_path
+                if old_path.exists():
+                    try:
+                        old_path.unlink()
+                    except Exception as e:
+                        logger.warning(f"Could not delete old persona image: {e}")
+            
+            # Generate unique filename
+            unique_filename = f"{persona_name}_{int(time.time())}{file_ext}"
+            file_path = images_dir / unique_filename
+            
+            # Save file
+            content = await image.read()
+            file_path.write_bytes(content)
+            
+            # Update persona with image path
+            persona.image_path = f"data/persona_images/{unique_filename}"
+            await session.commit()
+            
+            logger.info(f"Saved persona image: {persona.image_path} ({len(content)} bytes)")
+            return {"success": True, "image_path": persona.image_path}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading persona image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/personas/{persona_name}/image")
+async def get_persona_image(persona_name: str):
+    """Get a persona's image."""
+    from database.models import PersonaConfig
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(PersonaConfig).where(PersonaConfig.name == persona_name)
+            )
+            persona = result.scalar_one_or_none()
+            
+            if not persona or not persona.image_path:
+                raise HTTPException(status_code=404, detail="Persona image not found")
+            
+            # Check if it's a URL (external)
+            if persona.image_path.startswith('http'):
+                return Response(status_code=302, headers={"Location": persona.image_path})
+            
+            # Local file path
+            file_path = Path(__file__).parent.parent / persona.image_path
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail="Persona image file not found")
+            
+            # Determine content type
+            content_type = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
+            
+            return FileResponse(
+                path=str(file_path),
+                media_type=content_type,
+                filename=file_path.name
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting persona image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/ai/filler-audio")
 async def get_filler_audio(persona: Optional[str] = None):
     """
@@ -1050,42 +1148,63 @@ async def ai_ask_question(request: Request):
     """
     Direct AI question endpoint - bypasses router for faster response.
     Returns text-only response.
+    Accepts optional 'persona' parameter to use a specific persona's context.
     """
     try:
         payload = await request.json()
         question = payload.get("question", "")
+        persona_name = payload.get("persona")  # Optional persona parameter
         
         if not question:
             return {"success": False, "error": "No question provided"}
         
-        logger.info(f"[AI ASK] Question: {question[:100]}...")
+        logger.info(f"[AI ASK] Question: {question[:100]}... Persona: {persona_name or 'current'}")
         
-        from services.ai_service import AIService
-        ai = AIService()
+        # If persona is specified, temporarily set it
+        original_persona = None
+        if persona_name:
+            try:
+                original_persona = await get_current_persona_name()
+                await set_current_persona(persona_name)
+                logger.info(f"[AI ASK] Temporarily set persona to: {persona_name}")
+            except Exception as e:
+                logger.warning(f"[AI ASK] Could not set persona {persona_name}: {e}")
         
-        import time
-        start_time = time.time()
-        
-        result = await ai.execute({"question": question})
-        
-        elapsed = time.time() - start_time
-        logger.info(f"[AI ASK] Response in {elapsed:.2f}s, has_answer={bool(result.get('answer'))}")
-        
-        # AIService returns {"answer": "...", "question": "...", "service": "..."} or {"error": "..."}
-        if result.get("error"):
-            logger.error(f"[AI ASK] Error from AI service: {result.get('error')}")
-            return {"success": False, "error": result.get("error", "AI request failed")}
-        
-        answer = result.get("answer", "")
-        if answer:
-            return {
-                "success": True,
-                "answer": answer,
-                "time": elapsed
-            }
-        else:
-            logger.error("[AI ASK] No answer in AI response")
-            return {"success": False, "error": "No answer returned from AI"}
+        try:
+            from services.ai_service import AIService
+            ai = AIService()
+            
+            import time
+            start_time = time.time()
+            
+            result = await ai.execute({"question": question})
+            
+            elapsed = time.time() - start_time
+            logger.info(f"[AI ASK] Response in {elapsed:.2f}s, has_answer={bool(result.get('answer'))}")
+            
+            # AIService returns {"answer": "...", "question": "...", "service": "..."} or {"error": "..."}
+            if result.get("error"):
+                logger.error(f"[AI ASK] Error from AI service: {result.get('error')}")
+                return {"success": False, "error": result.get("error", "AI request failed")}
+            
+            answer = result.get("answer", "")
+            if answer:
+                return {
+                    "success": True,
+                    "answer": answer,
+                    "time": elapsed
+                }
+            else:
+                logger.error("[AI ASK] No answer in AI response")
+                return {"success": False, "error": "No answer returned from AI"}
+        finally:
+            # Restore original persona if we changed it
+            if persona_name and original_persona:
+                try:
+                    await set_current_persona(original_persona)
+                    logger.info(f"[AI ASK] Restored persona to: {original_persona}")
+                except Exception as e:
+                    logger.warning(f"[AI ASK] Could not restore persona {original_persona}: {e}")
             
     except Exception as e:
         logger.error(f"[AI ASK] Failed: {e}", exc_info=True)
@@ -1184,11 +1303,23 @@ async def ai_ask_question_audio_stream(request: Request):
         logger.info(f"[AI STREAM] Question: {question[:100]}...")
         
         # Get TTS config - use fastest engine for streaming
-        persona_config = await load_persona_config()
-        fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
-        voice_id = fish_cfg.get("voice_id")
-        # Override to use fastest engine for AI focus mode (s1-mini is fastest)
-        voice_engine = "s1-mini"  # Fastest, lowest latency engine
+        # First try voices table, then fall back to persona config
+        from config.voice_loader import get_voice_for_persona
+        from config.persona_loader import get_current_persona_name
+        
+        current_persona = await get_current_persona_name()
+        voice_config = await get_voice_for_persona(current_persona)
+        
+        if voice_config:
+            voice_id, voice_engine_default = voice_config
+            # Override to use fastest engine for AI focus mode (s1-mini is fastest)
+            voice_engine = "s1-mini"  # Fastest, lowest latency engine
+        else:
+            # Fallback to persona config
+            persona_config = await load_persona_config()
+            fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+            voice_id = fish_cfg.get("voice_id")
+            voice_engine = "s1-mini"  # Fastest, lowest latency engine
         
         if not voice_id:
             logger.error("[AI STREAM] No voice ID configured")
@@ -1267,15 +1398,33 @@ async def text_to_audio_stream(request: Request):
         
         logger.info(f"[TEXT-TO-AUDIO] Converting {len(text)} chars to audio")
         
-        # Get TTS config
-        persona_config = await load_persona_config()
-        fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
-        voice_id = fish_cfg.get("voice_id")
-        voice_engine = "s1"  # Use standard engine for quality
+        # Get TTS config - try voices table first, then persona config, then request payload
+        from config.voice_loader import get_voice_for_persona
+        from config.persona_loader import get_current_persona_name
+        
+        current_persona = await get_current_persona_name()
+        voice_config = await get_voice_for_persona(current_persona)
+        
+        if voice_config:
+            voice_id, voice_engine_default = voice_config
+            voice_engine = payload.get("voice_engine", voice_engine_default or "s1")
+            logger.info(f"[TEXT-TO-AUDIO] Using voice_id from voices table for '{current_persona}': {voice_id}")
+        else:
+            # Fallback to persona config
+            persona_config = await load_persona_config()
+            fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+            voice_id = fish_cfg.get("voice_id")
+            voice_engine = fish_cfg.get("voice_engine", payload.get("voice_engine", "s1"))
+            
+            # If still no voice_id, try request payload
+            if not voice_id:
+                voice_id = payload.get("voice_id")
+                if voice_id:
+                    logger.info(f"[TEXT-TO-AUDIO] Using voice_id from request payload: {voice_id}")
         
         if not voice_id:
-            logger.error("[TEXT-TO-AUDIO] No voice ID configured")
-            return JSONResponse(status_code=500, content={"error": "TTS not configured"})
+            logger.error("[TEXT-TO-AUDIO] No voice ID configured and no fallback available")
+            return JSONResponse(status_code=500, content={"error": "TTS not configured: Please configure a voice ID in persona settings (Fish Audio > Voice ID) or voices table"})
         
         # Create async generator for text chunks
         async def text_chunk_generator():
@@ -1424,100 +1573,121 @@ async def ai_ask_question_audio(request: Request):
     """
     Direct AI question with audio response - bypasses router for faster response.
     Can accept either a question (will call AI) or text (will skip AI and go straight to TTS).
+    Accepts optional 'persona' parameter to use a specific persona's context and voice.
     Returns audio blob.
     """
     try:
         payload = await request.json()
         question = payload.get("question", "")
         text = payload.get("text", "")  # Pre-fetched text to skip AI call
+        persona_name = payload.get("persona")  # Optional persona parameter
         
         if not question and not text:
             logger.error("[AI ASK AUDIO] No question or text provided")
             return JSONResponse(status_code=400, content={"error": "No question or text provided"})
         
-        import time
-        start_time = time.time()
-        ai_time = 0
+        # If persona is specified, temporarily set it
+        original_persona = None
+        if persona_name:
+            try:
+                original_persona = await get_current_persona_name()
+                await set_current_persona(persona_name)
+                logger.info(f"[AI ASK AUDIO] Temporarily set persona to: {persona_name}")
+            except Exception as e:
+                logger.warning(f"[AI ASK AUDIO] Could not set persona {persona_name}: {e}")
         
-        # Get text - either from AI or from payload
-        if text:
-            logger.info(f"[AI ASK AUDIO] Using pre-fetched text, length={len(text)}")
-        else:
-            logger.info(f"[AI ASK AUDIO] Question: {question[:100]}...")
-            logger.info("[AI ASK AUDIO] Calling AIService")
-            from services.ai_service import AIService
-            ai = AIService()
+        try:
+            import time
+            start_time = time.time()
+            ai_time = 0
             
-            result = await ai.execute({"question": question})
+            # Get text - either from AI or from payload
+            if text:
+                logger.info(f"[AI ASK AUDIO] Using pre-fetched text, length={len(text)}")
+            else:
+                logger.info(f"[AI ASK AUDIO] Question: {question[:100]}... Persona: {persona_name or 'current'}")
+                logger.info("[AI ASK AUDIO] Calling AIService")
+                from services.ai_service import AIService
+                ai = AIService()
+                
+                result = await ai.execute({"question": question})
+                
+                ai_time = time.time() - start_time
+                logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s, has_answer={bool(result.get('answer'))}")
+                
+                # AIService returns {"answer": "...", "question": "...", "service": "..."} or {"error": "..."}
+                if result.get("error"):
+                    error_msg = result.get("error", "AI request failed")
+                    logger.error(f"[AI ASK AUDIO] AI failed: {error_msg}")
+                    return JSONResponse(status_code=500, content={"error": error_msg})
+                
+                text = result.get("answer", "")
+                if not text:
+                    logger.error("[AI ASK AUDIO] Empty AI response")
+                    return JSONResponse(status_code=500, content={"error": "Empty AI response"})
             
-            ai_time = time.time() - start_time
-            logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s, has_answer={bool(result.get('answer'))}")
+            logger.info(f"[AI ASK AUDIO] Text length={len(text)}")
             
-            # AIService returns {"answer": "...", "question": "...", "service": "..."} or {"error": "..."}
-            if result.get("error"):
-                error_msg = result.get("error", "AI request failed")
-                logger.error(f"[AI ASK AUDIO] AI failed: {error_msg}")
-                return JSONResponse(status_code=500, content={"error": error_msg})
+            # Generate audio
+            logger.info("[AI ASK AUDIO] Loading persona config")
+            persona_config = await load_persona_config(persona_name) if persona_name else await load_persona_config()
+            fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+            voice_id = fish_cfg.get("voice_id")
+            voice_engine = fish_cfg.get("voice_engine", "s1")
             
-            text = result.get("answer", "")
-            if not text:
-                logger.error("[AI ASK AUDIO] Empty AI response")
-                return JSONResponse(status_code=500, content={"error": "Empty AI response"})
-        
-        logger.info(f"[AI ASK AUDIO] Text length={len(text)}")
-        
-        # Generate audio
-        logger.info("[AI ASK AUDIO] Loading persona config")
-        persona_config = load_persona_config()
-        fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
-        voice_id = fish_cfg.get("voice_id")
-        voice_engine = fish_cfg.get("voice_engine", "s1")
-        
-        if not voice_id:
-            logger.error("[AI ASK AUDIO] No voice ID configured")
-            return JSONResponse(status_code=500, content={"error": "TTS not configured"})
-        
-        logger.info(f"[AI ASK AUDIO] Starting TTS with voice_id={voice_id}, engine={voice_engine}")
-        tts_start = time.time()
-        
-        from services.tts_service import TTSService
-        tts = TTSService()
-        
-        # Try simple HTTP method first (more reliable)
-        audio_bytes = await tts.generate_audio_simple(
-            text,
-            voice_id=voice_id,
-            voice_engine=voice_engine
-        )
-        
-        # Fallback to websocket method if HTTP fails
-        if not audio_bytes:
-            logger.warning("[AI ASK AUDIO] HTTP method failed, trying websocket...")
-            audio_bytes, _ = await tts.generate_audio(
+            if not voice_id:
+                logger.error("[AI ASK AUDIO] No voice ID configured")
+                return JSONResponse(status_code=500, content={"error": "TTS not configured"})
+            
+            logger.info(f"[AI ASK AUDIO] Starting TTS with voice_id={voice_id}, engine={voice_engine}")
+            tts_start = time.time()
+            
+            from services.tts_service import TTSService
+            tts = TTSService()
+            
+            # Try simple HTTP method first (more reliable)
+            audio_bytes = await tts.generate_audio_simple(
                 text,
                 voice_id=voice_id,
-                voice_engine=voice_engine,
-                save_to_file=False
+                voice_engine=voice_engine
             )
-        
-        tts_time = time.time() - tts_start
-        total_time = time.time() - start_time
-        
-        if audio_bytes:
-            logger.info(f"[AI ASK AUDIO] Complete - AI: {ai_time:.2f}s, TTS: {tts_time:.2f}s, Total: {total_time:.2f}s, Size: {len(audio_bytes)} bytes")
-            return Response(
-                content=audio_bytes,
-                media_type="audio/mpeg",
-                headers={
-                    "X-AI-Time": f"{ai_time:.2f}",
-                    "X-TTS-Time": f"{tts_time:.2f}",
-                    "X-Total-Time": f"{total_time:.2f}",
-                    "Cache-Control": "no-cache",
-                }
-            )
-        else:
-            logger.error("[AI ASK AUDIO] TTS returned no audio")
-            return JSONResponse(status_code=500, content={"error": "TTS generation failed"})
+            
+            # Fallback to websocket method if HTTP fails
+            if not audio_bytes:
+                logger.warning("[AI ASK AUDIO] HTTP method failed, trying websocket...")
+                audio_bytes, _ = await tts.generate_audio(
+                    text,
+                    voice_id=voice_id,
+                    voice_engine=voice_engine,
+                    save_to_file=False
+                )
+            
+            tts_time = time.time() - tts_start
+            total_time = time.time() - start_time
+            
+            if audio_bytes:
+                logger.info(f"[AI ASK AUDIO] Complete - AI: {ai_time:.2f}s, TTS: {tts_time:.2f}s, Total: {total_time:.2f}s, Size: {len(audio_bytes)} bytes")
+                return Response(
+                    content=audio_bytes,
+                    media_type="audio/mpeg",
+                    headers={
+                        "X-AI-Time": f"{ai_time:.2f}",
+                        "X-TTS-Time": f"{tts_time:.2f}",
+                        "X-Total-Time": f"{total_time:.2f}",
+                        "Cache-Control": "no-cache",
+                    }
+                )
+            else:
+                logger.error("[AI ASK AUDIO] TTS returned no audio")
+                return JSONResponse(status_code=500, content={"error": "TTS generation failed"})
+        finally:
+            # Restore original persona if we changed it
+            if persona_name and original_persona:
+                try:
+                    await set_current_persona(original_persona)
+                    logger.info(f"[AI ASK AUDIO] Restored persona to: {original_persona}")
+                except Exception as e:
+                    logger.warning(f"[AI ASK AUDIO] Could not restore persona {original_persona}: {e}")
             
     except Exception as e:
         logger.error(f"[AI ASK AUDIO] Exception: {e}", exc_info=True)
@@ -8426,15 +8596,182 @@ async def generate_audio_for_message(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/voices")
+async def get_voices():
+    """Get list of all available voices from the voices table."""
+    try:
+        from database.models import Voice
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Voice).order_by(Voice.persona_name))
+            voices = result.scalars().all()
+            return {
+                "success": True,
+                "voices": [
+                    {
+                        "id": voice.id,
+                        "persona_name": voice.persona_name,
+                        "fish_audio_id": voice.fish_audio_id,
+                        "voice_engine": voice.voice_engine or "s1"
+                    }
+                    for voice in voices
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting voices: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/voices")
+async def create_voice(request: Request):
+    """Create a new voice in the voices table."""
+    try:
+        payload = await request.json()
+        persona_name = payload.get("persona_name")
+        fish_audio_id = payload.get("fish_audio_id")
+        voice_engine = payload.get("voice_engine", "s1")
+        
+        if not persona_name or not fish_audio_id:
+            raise HTTPException(status_code=400, detail="persona_name and fish_audio_id are required")
+        
+        from database.models import Voice
+        async with AsyncSessionLocal() as session:
+            # Check if voice with this persona_name already exists
+            existing = await session.execute(
+                select(Voice).where(Voice.persona_name == persona_name)
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail=f"Voice with persona_name '{persona_name}' already exists")
+            
+            # Create new voice
+            voice = Voice(
+                persona_name=persona_name,
+                fish_audio_id=fish_audio_id,
+                voice_engine=voice_engine
+            )
+            session.add(voice)
+            await session.commit()
+            await session.refresh(voice)
+            
+            logger.info(f"Created new voice: {persona_name} with fish_audio_id {fish_audio_id}")
+            
+            return {
+                "success": True,
+                "voice": {
+                    "id": voice.id,
+                    "persona_name": voice.persona_name,
+                    "fish_audio_id": voice.fish_audio_id,
+                    "voice_engine": voice.voice_engine or "s1"
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating voice: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/personas/{persona_name}/voice")
+async def set_persona_voice(persona_name: str, request: Request):
+    """Set the voice for a persona by linking to a voice in the voices table."""
+    try:
+        payload = await request.json()
+        voice_id = payload.get("voice_id")  # This is the Voice.id (foreign key)
+        
+        if voice_id is None:
+            raise HTTPException(status_code=400, detail="voice_id is required")
+        
+        from database.models import PersonaConfig, Voice
+        async with AsyncSessionLocal() as session:
+            # Verify persona exists
+            result = await session.execute(
+                select(PersonaConfig).where(PersonaConfig.name == persona_name)
+            )
+            persona = result.scalar_one_or_none()
+            if not persona:
+                raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
+            
+            # Verify voice exists
+            voice_result = await session.execute(
+                select(Voice).where(Voice.id == voice_id)
+            )
+            voice = voice_result.scalar_one_or_none()
+            if not voice:
+                raise HTTPException(status_code=404, detail=f"Voice with id {voice_id} not found")
+            
+            # Update persona's voice_id
+            persona.voice_id = voice_id
+            await session.commit()
+            
+            logger.info(f"Set voice for persona '{persona_name}' to voice_id {voice_id} ({voice.persona_name})")
+            
+            return {
+                "success": True,
+                "persona": persona_name,
+                "voice_id": voice_id,
+                "voice": {
+                    "id": voice.id,
+                    "persona_name": voice.persona_name,
+                    "fish_audio_id": voice.fish_audio_id
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting persona voice: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/personas")
-async def get_personas():
-    """Get list of available personas and current persona."""
+async def get_personas(user_id: Optional[int] = None):
+    """Get list of available personas and current persona. If user_id is provided, returns that user's preferred persona."""
+    from database.models import PersonaConfig
     personas = await list_available_personas()
-    current = await get_current_persona_name()
+    
+    # If user_id is provided, get that user's preferred persona
+    if user_id:
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                if user and user.preferred_persona:
+                    current = user.preferred_persona
+                    # Also set it as the global current persona
+                    await set_current_persona(current)
+                else:
+                    current = await get_current_persona_name()
+        except Exception as e:
+            logger.error(f"Error getting user preferred persona: {e}", exc_info=True)
+            current = await get_current_persona_name()
+    else:
+        current = await get_current_persona_name()
+    
     current_config = await load_persona_config(current)
     current_title = "CYBER" if current == "default" else (current_config.get("title", current) if current_config else current)
+    
+    # Include image_path for each persona
+    async with AsyncSessionLocal() as session:
+        persona_configs = await session.execute(select(PersonaConfig))
+        persona_configs_dict = {pc.name: pc for pc in persona_configs.scalars().all()}
+        
+        personas_with_images = []
+        for persona in personas:
+            # persona is a dict with "name" and "title" keys from list_available_personas()
+            persona_name = persona.get("name") if isinstance(persona, dict) else persona
+            persona_dict = {
+                "name": persona_name,
+                "title": persona.get("title") if isinstance(persona, dict) else None,
+                "image_path": None
+            }
+            if persona_name in persona_configs_dict:
+                pc = persona_configs_dict[persona_name]
+                persona_dict["title"] = pc.title or persona_dict["title"]
+                persona_dict["image_path"] = pc.image_path
+            personas_with_images.append(persona_dict)
+    
     return {
-        "personas": personas,
+        "personas": personas_with_images,
         "current": current,
         "current_title": current_title
     }
@@ -9740,11 +10077,41 @@ async def get_video_library():
 # Config editing endpoints
 @app.get("/api/config/persona/{persona_name}")
 async def get_persona_config_endpoint(persona_name: str):
-    """Get a specific persona configuration."""
-    config = await load_persona_config(persona_name)
-    if not config:
-        raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
-    return config
+    """Get a specific persona configuration, including voice information."""
+    from database.models import PersonaConfig, Voice
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PersonaConfig).where(PersonaConfig.name == persona_name)
+        )
+        persona = result.scalar_one_or_none()
+        if not persona:
+            raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
+        
+        config = await load_persona_config(persona_name)
+        
+        # Include voice information if linked
+        voice_info = None
+        if persona.voice_id:
+            voice_result = await session.execute(
+                select(Voice).where(Voice.id == persona.voice_id)
+            )
+            voice = voice_result.scalar_one_or_none()
+            if voice:
+                voice_info = {
+                    "id": voice.id,
+                    "persona_name": voice.persona_name,
+                    "fish_audio_id": voice.fish_audio_id,
+                    "voice_engine": voice.voice_engine or "s1"
+                }
+        
+        # Add voice info to response
+        if voice_info:
+            config["_voice"] = voice_info
+        
+        # Add image_path to response
+        config["_image_path"] = persona.image_path
+        
+        return config
 
 
 @app.put("/api/config/persona/{persona_name}")
@@ -12103,9 +12470,10 @@ async def _ensure_wav_16k_mono(raw_bytes: bytes, filename: str) -> bytes:
 
 @app.post("/api/personas/select")
 async def select_persona(request: Request):
-    """Change the current persona."""
+    """Change the current persona. If user_id is provided, saves to user profile."""
     data = await request.json()
     persona_name = data.get("persona")
+    user_id = data.get("user_id")
     
     if not persona_name:
         raise HTTPException(status_code=400, detail="Persona name is required")
@@ -12115,7 +12483,23 @@ async def select_persona(request: Request):
     if not config:
         raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
     
-    # Set the persona
+    # If user_id is provided, save to user profile
+    if user_id:
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                if user:
+                    user.preferred_persona = persona_name
+                    await session.commit()
+                    logger.info(f"Saved persona '{persona_name}' to user {user_id} profile")
+        except Exception as e:
+            logger.error(f"Error saving persona to user profile: {e}", exc_info=True)
+            # Continue even if saving to user fails
+    
+    # Set the persona (global current persona)
     success = await set_current_persona(persona_name)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to set persona")

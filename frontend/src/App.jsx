@@ -3,7 +3,6 @@ import { SideNav } from './components/SideNav';
 import { LeftPanel } from './components/LeftPanel';
 import { OctopusEnergy } from './components/OctopusEnergy';
 import { ApiHealth } from './components/ApiHealth';
-import { PersonaModal } from './components/PersonaModal';
 import { usePersonas } from './hooks/usePersonas';
 import { useAudioQueue } from './hooks/useAudioQueue';
 import { routerAPI, aiAPI } from './services/api';
@@ -20,6 +19,7 @@ import { AddUserPage } from './pages/AddUser';
 import { EditUserPage } from './pages/EditUser';
 import { SearchOverlay } from './components/SearchOverlay';
 import { WaveformMic } from './components/WaveformMic';
+import { AIFocusMic } from './components/AIFocusMic';
 import './styles/index.css';
 
 function App() {
@@ -30,7 +30,6 @@ function App() {
     localStorage.setItem('chatSessionId', newId);
     return newId;
   });
-  const [personaModalOpen, setPersonaModalOpen] = useState(false);
   const [aiFocusActive, setAiFocusActive] = useState(false);
   const [micStream, setMicStream] = useState(null);
   const [micStatus, setMicStatus] = useState('idle'); // idle | listening | processing | playing | error
@@ -105,8 +104,15 @@ function App() {
   const [musicSearchResults, setMusicSearchResults] = useState([]);
   const [chatSearchResults, setChatSearchResults] = useState([]);
   const [videoSearchResults, setVideoSearchResults] = useState([]);
-  const { selectPersona, currentTitle } = usePersonas();
+  const { selectPersona, currentTitle, personas, currentPersona, reload: reloadPersonas } = usePersonas(selectedUser?.id);
   const audioQueue = useAudioQueue();
+
+  // Reload personas when selected user changes
+  useEffect(() => {
+    if (selectedUser?.id) {
+      reloadPersonas();
+    }
+  }, [selectedUser?.id, reloadPersonas]);
 
   useEffect(() => {
     // Initialize session ID in localStorage if not present
@@ -126,14 +132,7 @@ function App() {
 
 
 
-  const handleSwitchAI = () => {
-    setPersonaModalOpen(true);
-  };
-
-  const handlePersonaSelect = async (personaName) => {
-    await selectPersona(personaName);
-    setPersonaModalOpen(false);
-  };
+  // Persona selection moved to Users page - no longer needed here
 
   const toggleAiFocus = () => {
     const newState = !aiFocusActive;
@@ -563,7 +562,6 @@ function App() {
           // Close search overlay when navigating
           setSearchOverlayOpen(false);
         }}
-        onSwitchAI={handleSwitchAI}
         onSettingsClick={() => {
           setActivePage('settings');
           window.location.hash = 'settings';
@@ -646,6 +644,7 @@ function App() {
             setSearchOverlayOpen(false);
           }} 
           user={pageData}
+          selectedUser={selectedUser}
         />
       ) : (
         <div className="main-container">
@@ -694,11 +693,6 @@ function App() {
         />
       )}
       
-      <PersonaModal 
-        open={personaModalOpen}
-        onClose={() => setPersonaModalOpen(false)}
-        onSelect={handlePersonaSelect}
-      />
       {aiFocusActive && (
         <div className="ai-focus-overlay">
           <div className="ai-focus-persona-name">
@@ -714,7 +708,12 @@ function App() {
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
             title="Start microphone"
           >
-            <WaveformMic status={micStatus} />
+            <AIFocusMic 
+              personas={personas}
+              currentPersona={currentPersona}
+              currentTitle={currentTitle}
+              micStatus={micStatus}
+            />
           </div>
           <div className="ai-focus-status">
             {micStatus === 'listening' && 'Listening...'}

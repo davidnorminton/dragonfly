@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePersonas } from '../hooks/usePersonas';
 
-export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage = 'dashboard', onNavigate, onMusicSearch, onChatSearch, onVideoSearch, musicSearchResults, chatSearchResults, videoSearchResults }) {
+export function TopBar({ onSettingsClick, onAiFocusClick, activePage = 'dashboard', onNavigate, onMusicSearch, onChatSearch, onVideoSearch, musicSearchResults, chatSearchResults, videoSearchResults }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [videoSearchQuery, setVideoSearchQuery] = useState('');
@@ -344,29 +344,6 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
         ) : null}
       </div>
       <div className="top-bar-right">
-        <button 
-          onClick={onSwitchAI}
-          style={{
-            background: 'rgb(20, 20, 32)',
-            border: 0,
-            color: '#534e4e',
-            padding: '6px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '0.85em',
-            fontWeight: '500',
-            transition: 'all 0.2s',
-            marginRight: '12px'
-          }}
-          onMouseOver={(e) => {
-            e.target.style.color = '#fff';
-          }}
-          onMouseOut={(e) => {
-            e.target.style.color = '#534e4e';
-          }}
-        >
-          Switch AI
-        </button>
         <button
           onClick={toggleFullscreen}
           className="settings-icon-button"

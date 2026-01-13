@@ -5,6 +5,7 @@ import { useAIModels } from '../hooks/useAIModels';
 import { FolderPicker, FilePicker } from '../components/FolderPicker';
 import { ConversionProgressModal } from '../components/ConversionProgressModal';
 import { CoverArtModal } from '../components/CoverArtModal';
+import { PersonaImageUpload } from '../components/PersonaImageUpload';
 
 function UserManagementPanel({ onNavigate }) {
   const [users, setUsers] = useState([]);
@@ -277,13 +278,21 @@ function UserManagementPanel({ onNavigate }) {
 }
 
 export function SettingsPage({ onNavigate }) {
-  const [activeTab, setActiveTab] = useState('personas');
+  const [activeTab, setActiveTab] = useState('system');
   const [personas, setPersonas] = useState([]);
   const [selectedPersona, setSelectedPersona] = useState(null);
   const [personaConfig, setPersonaConfig] = useState('');
   const [personaFields, setPersonaFields] = useState({});
   const [newPersonaName, setNewPersonaName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [voices, setVoices] = useState([]);
+  const [selectedVoiceId, setSelectedVoiceId] = useState(null);
+  const [isCreatingVoice, setIsCreatingVoice] = useState(false);
+  const [newVoiceFields, setNewVoiceFields] = useState({
+    persona_name: '',
+    fish_audio_id: '',
+    voice_engine: 's1'
+  });
   const [newPersonaFields, setNewPersonaFields] = useState({
     title: '',
     model: 'claude-sonnet-4-5-20250929',
@@ -409,6 +418,7 @@ export function SettingsPage({ onNavigate }) {
 
   useEffect(() => {
     loadPersonas();
+    loadVoices();
     loadLocationConfig();
     loadApiKeysConfig();
     loadSystemConfig();
@@ -452,6 +462,13 @@ export function SettingsPage({ onNavigate }) {
       setPersonaFields(data);
       setSelectedPersona(personaName);
       
+      // Set selected voice if persona has one linked
+      if (data._voice) {
+        setSelectedVoiceId(data._voice.id);
+      } else {
+        setSelectedVoiceId(null);
+      }
+      
       // Load filler words
       await loadFillerWords(personaName);
     } catch (err) {
@@ -459,6 +476,45 @@ export function SettingsPage({ onNavigate }) {
       setError(`Failed to load config for ${personaName}`);
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Reload personas when image is uploaded
+  useEffect(() => {
+    if (activeTab === 'personas') {
+      loadPersonas();
+    }
+  }, [activeTab]);
+  
+  const loadVoices = async () => {
+    try {
+      const result = await personaAPI.getVoices();
+      if (result.success) {
+        setVoices(result.voices || []);
+      }
+    } catch (err) {
+      console.error('Error loading voices:', err);
+    }
+  };
+
+  const handleVoiceChange = async (voiceId) => {
+    if (!selectedPersona) return;
+    
+    setSelectedVoiceId(voiceId);
+    try {
+      await personaAPI.setPersonaVoice(selectedPersona, voiceId);
+      setSuccess(`Voice updated for ${selectedPersona}`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      console.error('Error setting persona voice:', err);
+      setError(err.response?.data?.detail || err.message || 'Failed to set voice');
+      // Revert selection on error
+      const data = await configAPI.getPersonaConfig(selectedPersona);
+      if (data._voice) {
+        setSelectedVoiceId(data._voice.id);
+      } else {
+        setSelectedVoiceId(null);
+      }
     }
   };
 
@@ -1334,6 +1390,92 @@ export function SettingsPage({ onNavigate }) {
                     </option>
                   ))}
                 </select>
+                
+                {/* Create New Voice Section */}
+                <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>Create New Voice</h4>
+                    <button
+                      onClick={() => setIsCreatingVoice(!isCreatingVoice)}
+                      className="save-button"
+                      style={{ 
+                        background: isCreatingVoice ? '#666' : 'rgba(59, 130, 246, 0.8)',
+                        padding: '4px 12px',
+                        fontSize: '12px'
+                      }}
+                    >
+                      {isCreatingVoice ? 'Cancel' : '+ New Voice'}
+                    </button>
+                  </div>
+                  
+                  {isCreatingVoice && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label style={{ fontSize: '12px' }}>Persona Name</label>
+                        <input
+                          type="text"
+                          value={newVoiceFields.persona_name}
+                          onChange={(e) => setNewVoiceFields(prev => ({ ...prev, persona_name: e.target.value }))}
+                          placeholder="e.g., new_voice"
+                          style={{ fontSize: '12px', padding: '6px' }}
+                        />
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label style={{ fontSize: '12px' }}>Fish Audio ID</label>
+                        <input
+                          type="text"
+                          value={newVoiceFields.fish_audio_id}
+                          onChange={(e) => setNewVoiceFields(prev => ({ ...prev, fish_audio_id: e.target.value }))}
+                          placeholder="Enter Fish Audio voice ID"
+                          style={{ fontSize: '12px', padding: '6px' }}
+                        />
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label style={{ fontSize: '12px' }}>Voice Engine</label>
+                        <select
+                          value={newVoiceFields.voice_engine}
+                          onChange={(e) => setNewVoiceFields(prev => ({ ...prev, voice_engine: e.target.value }))}
+                          style={{ fontSize: '12px', padding: '6px' }}
+                        >
+                          <option value="s1">s1 (Standard)</option>
+                          <option value="s1-mini">s1-mini (Fast)</option>
+                        </select>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!newVoiceFields.persona_name.trim() || !newVoiceFields.fish_audio_id.trim()) {
+                            setError('Persona name and Fish Audio ID are required');
+                            return;
+                          }
+                          setSaving(true);
+                          setError(null);
+                          try {
+                            await personaAPI.createVoice(newVoiceFields);
+                            setSuccess('Voice created successfully');
+                            setNewVoiceFields({ persona_name: '', fish_audio_id: '', voice_engine: 's1' });
+                            setIsCreatingVoice(false);
+                            await loadVoices();
+                            setTimeout(() => setSuccess(null), 3000);
+                          } catch (err) {
+                            setError(err.response?.data?.detail || err.message || 'Failed to create voice');
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                        disabled={saving || !newVoiceFields.persona_name.trim() || !newVoiceFields.fish_audio_id.trim()}
+                        className="save-button"
+                        style={{ 
+                          background: (saving || !newVoiceFields.persona_name.trim() || !newVoiceFields.fish_audio_id.trim()) ? '#666' : '#10b981',
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          marginTop: '4px'
+                        }}
+                      >
+                        {saving ? 'Creating...' : 'Create Voice'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {selectedPersona && (
@@ -1376,6 +1518,18 @@ export function SettingsPage({ onNavigate }) {
                             value={personaFields.title || ''}
                             onChange={(e) => updatePersonaField('title', e.target.value)}
                           />
+                        </div>
+                        <div className="form-group">
+                          <label>Persona Image</label>
+                          <PersonaImageUpload 
+                            personaName={selectedPersona}
+                            currentImagePath={personaFields._image_path}
+                            onImageUploaded={async () => {
+                              // Reload persona config to get updated image_path
+                              await loadPersonaConfig(selectedPersona);
+                            }}
+                          />
+                          <span className="form-help">Upload a JPG, JPEG, or PNG image for this persona (max 5MB)</span>
                         </div>
                       </div>
 
@@ -1455,40 +1609,30 @@ export function SettingsPage({ onNavigate }) {
                         </div>
                       )}
 
-                      {/* Fish Audio Section */}
-                      {personaFields.fish_audio && (
-                        <div className="config-section">
-                          <h4 
-                            className="config-section-title collapsible" 
-                            onClick={() => toggleSection('persona-fish')}
-                          >
-                            <span className="collapse-icon">{expandedSections['persona-fish'] ? '▼' : '▶'}</span>
-                            Voice Configuration (Fish Audio)
-                          </h4>
-                          {expandedSections['persona-fish'] && (
-                          <div>
-                          <div className="form-grid">
-                            <div className="form-group">
-                              <label>Voice ID</label>
-                              <input
-                                type="text"
-                                value={personaFields.fish_audio.voice_id || ''}
-                                onChange={(e) => updatePersonaField('fish_audio.voice_id', e.target.value)}
-                              />
-                            </div>
-                            <div className="form-group">
-                              <label>Voice Engine</label>
-                              <input
-                                type="text"
-                                value={personaFields.fish_audio.voice_engine || ''}
-                                onChange={(e) => updatePersonaField('fish_audio.voice_engine', e.target.value)}
-                              />
-                            </div>
+                      {/* Voice Selection Section */}
+                      <div className="config-section">
+                        <h4 className="config-section-title">Voice Selection</h4>
+                        <div>
+                          <div className="form-group">
+                            <label>Select Voice</label>
+                            <select
+                              value={selectedVoiceId || ''}
+                              onChange={(e) => handleVoiceChange(e.target.value ? parseInt(e.target.value) : null)}
+                              className="persona-select"
+                            >
+                              <option value="">No voice selected</option>
+                              {voices.map((voice) => (
+                                <option key={voice.id} value={voice.id}>
+                                  {voice.persona_name} ({voice.fish_audio_id.substring(0, 8)}...)
+                                </option>
+                              ))}
+                            </select>
+                            <span className="field-hint">
+                              Select a voice from the voices table. This will link the persona to a voice configuration.
+                            </span>
                           </div>
-                          </div>
-                          )}
                         </div>
-                      )}
+                      </div>
 
                       {/* Filler Audio Section */}
                       {personaFields.filler && (

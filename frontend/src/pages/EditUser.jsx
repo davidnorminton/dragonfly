@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ProfilePictureSelector } from '../components/ProfilePictureSelector';
 import { getProfileImageUrl } from '../utils/profileImageHelper';
 
-export function EditUserPage({ onNavigate, user }) {
+export function EditUserPage({ onNavigate, user, selectedUser }) {
   const [formData, setFormData] = useState({
     name: user?.name || '',
     birthday: user?.birthday ? user.birthday.split('T')[0] : '',
@@ -14,6 +14,10 @@ export function EditUserPage({ onNavigate, user }) {
   });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  
+  const isAdmin = selectedUser?.is_admin === true;
+  const canDelete = isAdmin && selectedUser && selectedUser.id !== user?.id;
 
   useEffect(() => {
     if (user) {
@@ -87,6 +91,38 @@ export function EditUserPage({ onNavigate, user }) {
       setError(err.message || 'Failed to update user');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!user) return;
+    
+    if (!confirm(`Are you sure you want to delete user "${user.name}"? This action cannot be undone.`)) {
+      return;
+    }
+    
+    setDeleting(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(`/api/users/${user.id}`, {
+        method: 'DELETE'
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        // Navigate back to users page
+        if (onNavigate) {
+          onNavigate('users');
+        }
+      } else {
+        setError(data.error || 'Failed to delete user');
+        setDeleting(false);
+      }
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      setError(err.message || 'Failed to delete user');
+      setDeleting(false);
     }
   };
 
@@ -185,7 +221,7 @@ export function EditUserPage({ onNavigate, user }) {
                 )}
               </div>
               
-              <div style={{ width: '100%' }}>
+              <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
                 <ProfilePictureSelector
                   onSelect={(path, preview) => {
                     setProfilePicturePath(path);
@@ -264,7 +300,7 @@ export function EditUserPage({ onNavigate, user }) {
                 Pass Code
               </label>
               <input
-                type="text"
+                type="password"
                 value={formData.pass_code}
                 onChange={(e) => setFormData({ ...formData, pass_code: e.target.value })}
                 placeholder="Optional pass code"
@@ -281,61 +317,96 @@ export function EditUserPage({ onNavigate, user }) {
             </div>
 
             {/* Submit Buttons */}
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => onNavigate?.('users')}
-                style={{
-                  padding: '12px 24px',
-                  background: 'transparent',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  borderRadius: '8px',
-                  color: '#9da7b8',
-                  cursor: 'pointer',
-                  fontSize: '1rem',
-                  fontWeight: '500',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                  e.currentTarget.style.color = '#fff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.color = '#9da7b8';
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                style={{
-                  padding: '12px 24px',
-                  background: saving ? 'rgba(102, 126, 234, 0.3)' : 'rgba(102, 126, 234, 0.2)',
-                  border: '1px solid rgba(102, 126, 234, 0.4)',
-                  borderRadius: '8px',
-                  color: '#667eea',
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                  fontSize: '1rem',
-                  fontWeight: '500',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  if (!saving) {
-                    e.currentTarget.style.background = 'rgba(102, 126, 234, 0.3)';
-                    e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.6)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!saving) {
-                    e.currentTarget.style.background = 'rgba(102, 126, 234, 0.2)';
-                    e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.4)';
-                  }
-                }}
-              >
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'space-between', alignItems: 'center' }}>
+              {/* Delete button - Only show for admins deleting other users */}
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={handleDeleteUser}
+                  disabled={deleting}
+                  style={{
+                    padding: '12px 24px',
+                    background: deleting ? 'rgba(244, 67, 54, 0.3)' : 'rgba(244, 67, 54, 0.2)',
+                    border: '1px solid rgba(244, 67, 54, 0.4)',
+                    borderRadius: '8px',
+                    color: '#f44336',
+                    cursor: deleting ? 'not-allowed' : 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!deleting) {
+                      e.currentTarget.style.background = 'rgba(244, 67, 54, 0.3)';
+                      e.currentTarget.style.borderColor = 'rgba(244, 67, 54, 0.6)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!deleting) {
+                      e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)';
+                      e.currentTarget.style.borderColor = 'rgba(244, 67, 54, 0.4)';
+                    }
+                  }}
+                >
+                  {deleting ? 'Deleting...' : 'Delete User'}
+                </button>
+              )}
+              <div style={{ display: 'flex', gap: '12px', marginLeft: canDelete ? 'auto' : '0' }}>
+                <button
+                  type="button"
+                  onClick={() => onNavigate?.('users')}
+                  style={{
+                    padding: '12px 24px',
+                    background: 'transparent',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    borderRadius: '8px',
+                    color: '#9da7b8',
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                    e.currentTarget.style.color = '#fff';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = '#9da7b8';
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  style={{
+                    padding: '12px 24px',
+                    background: saving ? 'rgba(102, 126, 234, 0.3)' : 'rgba(102, 126, 234, 0.2)',
+                    border: '1px solid rgba(102, 126, 234, 0.4)',
+                    borderRadius: '8px',
+                    color: '#667eea',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!saving) {
+                      e.currentTarget.style.background = 'rgba(102, 126, 234, 0.3)';
+                      e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.6)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!saving) {
+                      e.currentTarget.style.background = 'rgba(102, 126, 234, 0.2)';
+                      e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.4)';
+                    }
+                  }}
+                >
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
             </div>
           </form>
         </div>

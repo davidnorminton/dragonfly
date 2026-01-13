@@ -244,6 +244,7 @@ class User(Base):
     profile_picture = Column(String, nullable=True)  # Path to profile picture file
     pass_code = Column(String, nullable=True)  # User pass code
     is_admin = Column(Boolean, default=False, nullable=False)
+    preferred_persona = Column(String, nullable=True)  # User's preferred persona name
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -505,6 +506,21 @@ class LocationConfig(Base):
         return f"<LocationConfig {self.display_name}>"
 
 
+class Voice(Base):
+    """Voice configuration for personas."""
+    __tablename__ = "voices"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    persona_name = Column(String, unique=True, nullable=False, index=True)  # e.g., "cortana", "rick", "rick_computer", "holly"
+    fish_audio_id = Column(String, nullable=False)  # Fish Audio voice ID
+    voice_engine = Column(String, nullable=True, default="s1")  # Voice engine (s1, s1-mini, etc.)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<Voice {self.persona_name} - {self.fish_audio_id}>"
+
+
 class PersonaConfig(Base):
     """Persona configuration."""
     __tablename__ = "persona_configs"
@@ -514,8 +530,12 @@ class PersonaConfig(Base):
     title = Column(String, nullable=True)  # Display title
     config_data = Column(JSON, nullable=False)  # Full persona config (anthropic, fish_audio, filler, etc.)
     is_active = Column(String, default="false")  # Whether this is the current persona
+    voice_id = Column(Integer, ForeignKey("voices.id"), nullable=True, index=True)  # Link to voice in voices table
+    image_path = Column(String, nullable=True)  # Path to persona image file
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    voice = relationship("Voice", foreign_keys=[voice_id])
     
     def __repr__(self):
         return f"<PersonaConfig {self.name}>"

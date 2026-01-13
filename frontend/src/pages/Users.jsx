@@ -1,6 +1,251 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { PasscodeModal } from '../components/PasscodeModal';
+import { PersonaTestModal } from '../components/PersonaTestModal';
 import { getProfileImageUrl } from '../utils/profileImageHelper';
+import { getPersonaImageUrl } from '../utils/personaImageHelper';
+import { usePersonas } from '../hooks/usePersonas';
+
+// PersonaSelector component - inline persona selection
+function PersonaSelector({ selectedUser, onTestPersona }) {
+  console.log('[PersonaSelector] Rendering with selectedUser:', selectedUser?.id, selectedUser?.name);
+  const { personas, currentPersona, selectPersona, reload } = usePersonas(selectedUser?.id);
+  const personaScrollRef = useRef(null);
+
+  // The usePersonas hook already handles reloading when selectedUserId changes,
+  // but we can force a reload here if needed when the user changes
+  useEffect(() => {
+    console.log('[PersonaSelector] selectedUser changed, reloading personas for userId:', selectedUser?.id);
+    if (selectedUser?.id) {
+      reload();
+    }
+  }, [selectedUser?.id, reload]);
+
+  // Setup wheel handler for persona scroll
+  useEffect(() => {
+    const el = personaScrollRef.current;
+    if (!el) return;
+    
+    const handler = (e) => {
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
+  const handleSelectPersona = async (personaName) => {
+    await selectPersona(personaName, selectedUser?.id);
+  };
+
+  const handleTestPersona = (e, persona) => {
+    e.stopPropagation(); // Prevent selecting the persona when clicking test button
+    console.log('[PersonaSelector] Opening test modal for persona:', persona);
+    if (onTestPersona) {
+      onTestPersona(persona);
+    }
+  };
+
+  return (
+    <div>
+      <h3 style={{ 
+        color: '#fff', 
+        fontSize: '1.5rem', 
+        fontWeight: '600', 
+        marginBottom: '12px' 
+      }}>
+        Select Persona
+      </h3>
+      <p style={{ 
+        color: '#9da7b8', 
+        fontSize: '0.9rem', 
+        marginBottom: '24px' 
+      }}>
+        Choose an AI personality for your assistant
+      </p>
+      <div 
+        ref={personaScrollRef}
+        style={{ 
+          display: 'flex',
+          gap: '16px',
+          overflowX: 'auto',
+          overflowY: 'visible', // Allow overflow to prevent cut-off
+          paddingBottom: '10px',
+          paddingTop: '4px', // Extra top padding to prevent cut-off
+          paddingLeft: '12px',
+          marginLeft: '12px',
+          scrollBehavior: 'smooth',
+          WebkitOverflowScrolling: 'touch'
+        }}
+        className="persona-scroll-container"
+      >
+        {personas.map((persona) => (
+          <div
+            key={persona.name}
+            onClick={() => handleSelectPersona(persona.name)}
+            style={{
+              flexShrink: 0,
+              width: '200px',
+              padding: '20px',
+              paddingTop: '24px', // Extra top padding to prevent cut-off
+              background: persona.name === currentPersona
+                ? 'rgba(102, 126, 234, 0.2)'
+                : 'rgba(255, 255, 255, 0.03)',
+              border: persona.name === currentPersona
+                ? '2px solid rgba(102, 126, 234, 0.6)'
+                : '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              transform: persona.name === currentPersona ? 'scale(1.02)' : 'scale(1)',
+              boxShadow: persona.name === currentPersona ? '0 4px 12px rgba(102, 126, 234, 0.3)' : 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              textAlign: 'center',
+              overflow: 'visible' // Ensure content isn't clipped
+            }}
+            onMouseEnter={(e) => {
+              if (persona.name !== currentPersona) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (persona.name !== currentPersona) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+              }
+            }}
+          >
+            {getPersonaImageUrl(persona.image_path, persona.name) ? (
+              <div style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                overflow: 'hidden',
+                border: '2px solid rgba(255, 255, 255, 0.1)',
+                background: 'rgba(255, 255, 255, 0.05)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '12px',
+                flexShrink: 0
+              }}>
+                <img
+                  src={getPersonaImageUrl(persona.image_path, persona.name)}
+                  alt={persona.title || persona.name}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover'
+                  }}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.parentElement.innerHTML = '<span style="color: #fff; font-size: 2rem;">👤</span>';
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '2rem',
+                marginBottom: '12px'
+              }}>
+                👤
+              </div>
+            )}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'stretch',
+              width: '100%'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                width: '100%',
+                marginBottom: '4px'
+              }}>
+                <div style={{
+                  color: '#fff',
+                  fontSize: '1.1rem',
+                  fontWeight: '500',
+                  flex: 1,
+                  textAlign: 'left'
+                }}>
+                  {persona.title || persona.name}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTestPersona(e, persona);
+                  }}
+                  title="Test this persona"
+                  style={{
+                    padding: '4px',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: '4px',
+                    color: '#9da7b8',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                    width: '20px',
+                    height: '20px',
+                    opacity: 0.6,
+                    flexShrink: 0
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.opacity = '1';
+                    e.currentTarget.style.color = '#667eea';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = '0.6';
+                    e.currentTarget.style.color = '#9da7b8';
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" y1="19" x2="12" y2="23"></line>
+                    <line x1="8" y1="23" x2="16" y2="23"></line>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            {persona.name === currentPersona && (
+              <div style={{
+                marginTop: '8px',
+                padding: '4px 8px',
+                background: 'rgba(102, 126, 234, 0.3)',
+                color: '#667eea',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                textAlign: 'center'
+              }}>
+                Active
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
   const isAdmin = selectedUser?.is_admin === true;
@@ -10,6 +255,29 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
   const [passcodeModalOpen, setPasscodeModalOpen] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
   const [reloadTrigger, setReloadTrigger] = useState(0);
+  const [testModalOpen, setTestModalOpen] = useState(false);
+  const [testPersona, setTestPersona] = useState(null);
+  const usersGridRef = useRef(null);
+
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log('[UsersPage] testPersona changed:', testPersona);
+    console.log('[UsersPage] testModalOpen changed:', testModalOpen);
+  }, [testPersona, testModalOpen]);
+
+  // Setup wheel handler for users grid scroll
+  useEffect(() => {
+    const el = usersGridRef.current;
+    if (!el) return;
+    
+    const handler = (e) => {
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
 
   // Reload when component mounts or when reloadTrigger changes
   useEffect(() => {
@@ -149,27 +417,6 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
     }
   };
 
-  const handleDeleteUser = async (userId) => {
-    if (!confirm('Are you sure you want to delete this user?')) {
-      return;
-    }
-    
-    try {
-      const response = await fetch(`/api/users/${userId}`, {
-        method: 'DELETE'
-      });
-      
-      const data = await response.json();
-      if (data.success) {
-        await loadUsers();
-      } else {
-        setError('Failed to delete user');
-      }
-    } catch (err) {
-      console.error('Error deleting user:', err);
-      setError(err.message);
-    }
-  };
 
   const getInitials = (name) => {
     if (!name) return '?';
@@ -225,7 +472,7 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
     <div className="settings-page">
       <div className="settings-container">
         <div className="settings-header">
-          <h2>Users</h2>
+          <h2>Users and Personas</h2>
         </div>
 
         <div className="settings-content">
@@ -241,15 +488,21 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
             </div>
           ) : (
             <>
-              <div className="users-grid" style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+              <div 
+                className="users-grid"
+                ref={usersGridRef}
+                style={{ 
+                  display: 'flex',
                   gap: '32px',
                   marginBottom: '40px',
-                  maxWidth: '1200px',
-                  margin: '0 auto 40px auto',
-                  justifyContent: 'center'
-                }}>
+                  overflowX: 'auto',
+                  overflowY: 'visible', // Allow overflow to prevent cut-off
+                  paddingBottom: '10px',
+                  paddingTop: '4px', // Extra top padding to prevent cut-off
+                  scrollBehavior: 'smooth',
+                  WebkitOverflowScrolling: 'touch'
+                }}
+              >
                   {users.map((user) => {
                     const isSelected = selectedUser && selectedUser.id === user.id;
                     return (
@@ -258,10 +511,14 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                       className="user-card"
                       onClick={() => handleUserSelect(user)}
                       style={{
+                        flexShrink: 0,
+                        width: '160px',
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
+                        justifyContent: 'flex-start',
                         padding: '20px',
+                        paddingTop: '24px', // Extra top padding to prevent cut-off
                         background: isSelected 
                           ? 'rgba(102, 126, 234, 0.2)' 
                           : 'rgba(255, 255, 255, 0.03)',
@@ -272,7 +529,9 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                         cursor: 'pointer',
                         transition: 'all 0.2s ease',
                         transform: isSelected ? 'scale(1.05)' : 'scale(1)',
-                        boxShadow: isSelected ? '0 4px 12px rgba(102, 126, 234, 0.3)' : 'none'
+                        boxShadow: isSelected ? '0 4px 12px rgba(102, 126, 234, 0.3)' : 'none',
+                        textAlign: 'center',
+                        overflow: 'visible' // Ensure content isn't clipped
                       }}
                       onMouseEnter={(e) => {
                         if (!isSelected) {
@@ -345,11 +604,55 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                           color: '#fff',
                           fontSize: '1.1rem',
                           fontWeight: '500',
-                          textAlign: 'center',
-                          wordBreak: 'break-word'
+                          textAlign: 'left',
+                          wordBreak: 'break-word',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          width: '100%'
                         }}
                       >
-                        {user.name}
+                        <span style={{ flex: 1 }}>{user.name}</span>
+                        {/* Edit button with minimalist icon - Admin can edit all, users can edit themselves */}
+                        {(isAdmin || (selectedUser && selectedUser.id === user.id)) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditUser(user);
+                            }}
+                            style={{
+                              padding: '4px',
+                              background: 'transparent',
+                              border: 'none',
+                              borderRadius: '4px',
+                              color: '#9da7b8',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'all 0.2s ease',
+                              width: '20px',
+                              height: '20px',
+                              opacity: 0.6,
+                              flexShrink: 0
+                            }}
+                            title="Edit user"
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.opacity = '1';
+                              e.currentTarget.style.color = '#667eea';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.opacity = '0.6';
+                              e.currentTarget.style.color = '#9da7b8';
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                          </button>
+                        )}
                       </div>
                       {user.is_admin && (
                         <div style={{
@@ -364,74 +667,6 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                         Admin
                       </div>
                     )}
-                    {/* Edit/Delete buttons */}
-                    <div style={{
-                      display: 'flex',
-                      gap: '8px',
-                      marginTop: '12px',
-                      justifyContent: 'center'
-                    }}>
-                      {/* Edit button - Admin can edit all, users can edit themselves */}
-                      {(isAdmin || (selectedUser && selectedUser.id === user.id)) && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditUser(user);
-                          }}
-                          style={{
-                            padding: '6px 12px',
-                            background: 'rgba(102, 126, 234, 0.2)',
-                            border: '1px solid rgba(102, 126, 234, 0.4)',
-                            borderRadius: '6px',
-                            color: '#667eea',
-                            cursor: 'pointer',
-                            fontSize: '0.85rem',
-                            fontWeight: '500',
-                            transition: 'all 0.2s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'rgba(102, 126, 234, 0.3)';
-                            e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.6)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = 'rgba(102, 126, 234, 0.2)';
-                            e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.4)';
-                          }}
-                        >
-                          Edit
-                        </button>
-                      )}
-                      {/* Delete button - Only admins can delete, and only other users (not themselves) */}
-                      {isAdmin && selectedUser && selectedUser.id !== user.id && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteUser(user.id);
-                          }}
-                          style={{
-                            padding: '6px 12px',
-                            background: 'rgba(244, 67, 54, 0.2)',
-                            border: '1px solid rgba(244, 67, 54, 0.4)',
-                            borderRadius: '6px',
-                            color: '#f44336',
-                            cursor: 'pointer',
-                            fontSize: '0.85rem',
-                            fontWeight: '500',
-                            transition: 'all 0.2s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'rgba(244, 67, 54, 0.3)';
-                            e.currentTarget.style.borderColor = 'rgba(244, 67, 54, 0.6)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)';
-                            e.currentTarget.style.borderColor = 'rgba(244, 67, 54, 0.4)';
-                          }}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
                   </div>
                     );
                   })}
@@ -441,15 +676,19 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                     className="user-card add-user-card"
                     onClick={handleAddUser}
                     style={{
+                      flexShrink: 0,
+                      width: '160px',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
+                      justifyContent: 'center',
                       padding: '20px',
                       background: 'rgba(255, 255, 255, 0.03)',
                       border: '1px solid rgba(255, 255, 255, 0.1)',
                       borderRadius: '12px',
                       cursor: 'pointer',
-                      transition: 'all 0.2s ease'
+                      transition: 'all 0.2s ease',
+                      textAlign: 'center'
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
@@ -496,6 +735,23 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                 </div>
             </>
               )}
+
+              {/* Persona Selector Section */}
+              <div style={{ 
+                marginTop: '60px', 
+                paddingTop: '40px'
+              }}>
+                <PersonaSelector 
+                  selectedUser={selectedUser}
+                  onTestPersona={(persona) => {
+                    console.log('[UsersPage] Opening test modal for persona:', persona);
+                    console.log('[UsersPage] Setting testPersona and testModalOpen to true');
+                    setTestPersona(persona);
+                    setTestModalOpen(true);
+                    console.log('[UsersPage] State updated');
+                  }}
+                />
+              </div>
         </div>
       </div>
       
@@ -505,6 +761,19 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
         onVerify={handleVerifyPasscode}
         userName={pendingUser?.name || ''}
       />
+      
+      {typeof document !== 'undefined' && testPersona && createPortal(
+        <PersonaTestModal
+          persona={testPersona}
+          isOpen={testModalOpen}
+          onClose={() => {
+            console.log('[UsersPage] Closing test modal');
+            setTestModalOpen(false);
+            setTestPersona(null);
+          }}
+        />,
+        document.body
+      )}
     </div>
   );
 }

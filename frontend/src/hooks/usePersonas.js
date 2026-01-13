@@ -1,15 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { personaAPI } from '../services/api';
 
-export function usePersonas() {
+export function usePersonas(selectedUserId = null) {
   const [personas, setPersonas] = useState([]);
   const [currentPersona, setCurrentPersona] = useState('');
   const [currentTitle, setCurrentTitle] = useState('CYBER');
   const [loading, setLoading] = useState(true);
 
-  const loadPersonas = async () => {
+  const loadPersonas = async (userId = null) => {
     try {
-      const data = await personaAPI.getPersonas();
+      const data = await personaAPI.getPersonas(userId);
       setPersonas(data.personas || []);
       setCurrentPersona(data.current || 'default');
       setCurrentTitle(data.current_title || 'CYBER');
@@ -20,10 +20,10 @@ export function usePersonas() {
     }
   };
 
-  const selectPersona = async (personaName) => {
+  const selectPersona = async (personaName, userId = null) => {
     try {
-      await personaAPI.selectPersona(personaName);
-      await loadPersonas();
+      await personaAPI.selectPersona(personaName, userId);
+      await loadPersonas(userId);
       // Trigger a custom event so other components can refresh
       window.dispatchEvent(new CustomEvent('personaChanged'));
     } catch (error) {
@@ -33,11 +33,13 @@ export function usePersonas() {
   };
 
   useEffect(() => {
-    loadPersonas();
+    console.log('[usePersonas] Loading personas for userId:', selectedUserId);
+    loadPersonas(selectedUserId);
     
     // Listen for persona changes from other components
     const handlePersonaChange = () => {
-      loadPersonas();
+      console.log('[usePersonas] Persona changed event, reloading for userId:', selectedUserId);
+      loadPersonas(selectedUserId);
     };
     
     window.addEventListener('personaChanged', handlePersonaChange);
@@ -45,8 +47,13 @@ export function usePersonas() {
     return () => {
       window.removeEventListener('personaChanged', handlePersonaChange);
     };
-  }, []);
+  }, [selectedUserId]);
 
-  return { personas, currentPersona, currentTitle, loading, selectPersona, reload: loadPersonas };
+  const reload = useCallback(() => {
+    console.log('[usePersonas] Manual reload called for userId:', selectedUserId);
+    loadPersonas(selectedUserId);
+  }, [selectedUserId]);
+
+  return { personas, currentPersona, currentTitle, loading, selectPersona, reload };
 }
 

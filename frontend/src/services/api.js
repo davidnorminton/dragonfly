@@ -63,17 +63,25 @@ export const expertTypesAPI = {
 };
 
 export const personaAPI = {
-  getPersonas: () => api.get('/personas').then(res => res.data),
-  selectPersona: (persona) => 
-    api.post('/personas/select', { persona }).then(res => res.data),
+  getPersonas: (userId) => {
+    const params = userId ? { user_id: userId } : {};
+    return api.get('/personas', { params }).then(res => res.data);
+  },
+  selectPersona: (persona, userId) => 
+    api.post('/personas/select', { persona, user_id: userId }).then(res => res.data),
   getFillerWords: (personaName) => 
-    api.get(`/personas/${personaName}/filler-words`).then(res => res.data),
+    api.get(`/personas/${encodeURIComponent(personaName)}/filler-words`).then(res => res.data),
   createFillerWord: (personaName, text) => 
-    api.post(`/personas/${personaName}/filler-words`, { text }).then(res => res.data),
+    api.post(`/personas/${encodeURIComponent(personaName)}/filler-words`, { text }).then(res => res.data),
   deleteFillerWord: (personaName, filename) => 
-    api.delete(`/personas/${personaName}/filler-words/${filename}`).then(res => res.data),
+    api.delete(`/personas/${encodeURIComponent(personaName)}/filler-words/${encodeURIComponent(filename)}`).then(res => res.data),
   getFillerWordAudio: (personaName, filename) => 
-    `/api/personas/${personaName}/filler-words/${filename}/audio`,
+    `/api/personas/${encodeURIComponent(personaName)}/filler-words/${encodeURIComponent(filename)}/audio`,
+  getVoices: () => api.get('/voices').then(res => res.data),
+  setPersonaVoice: (personaName, voiceId) => 
+    api.put(`/personas/${encodeURIComponent(personaName)}/voice`, { voice_id: voiceId }).then(res => res.data),
+  createVoice: (voiceData) => 
+    api.post('/voices', voiceData).then(res => res.data),
 };
 
 export const locationAPI = {
@@ -324,10 +332,10 @@ export const ttsAPI = {
 
 export const configAPI = {
   getPersonas: () => api.get('/personas').then(res => res.data),
-  getPersonaConfig: (personaName) => api.get(`/config/persona/${personaName}`).then(res => res.data),
-  savePersonaConfig: (personaName, config) => api.put(`/config/persona/${personaName}`, config).then(res => res.data),
-  createPersona: (personaName, config) => api.post(`/config/persona/${personaName}`, config).then(res => res.data),
-  deletePersona: (personaName) => api.delete(`/config/persona/${personaName}`).then(res => res.data),
+  getPersonaConfig: (personaName) => api.get(`/config/persona/${encodeURIComponent(personaName)}`).then(res => res.data),
+  savePersonaConfig: (personaName, config) => api.put(`/config/persona/${encodeURIComponent(personaName)}`, config).then(res => res.data),
+  createPersona: (personaName, config) => api.post(`/config/persona/${encodeURIComponent(personaName)}`, config).then(res => res.data),
+  deletePersona: (personaName) => api.delete(`/config/persona/${encodeURIComponent(personaName)}`).then(res => res.data),
   getLocationConfig: () => api.get('/config/location').then(res => res.data),
   saveLocationConfig: (config) => api.put('/config/location', config).then(res => res.data),
   getApiKeysConfig: () => api.get('/config/api_keys').then(res => res.data),
