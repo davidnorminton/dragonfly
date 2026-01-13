@@ -6,7 +6,7 @@
   width: 100vw;
   height: 100vh;
   background: #000;
-  z-index: 10000;
+  z-index: 10100;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -37,7 +37,7 @@
   border-radius: 50%;
   color: white;
   cursor: pointer;
-  z-index: 10002;
+  z-index: 10102;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -62,7 +62,7 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 10001;
+  z-index: 10101;
 }
 
 .spinner {
@@ -90,7 +90,7 @@
   justify-content: center;
   background: rgba(0, 0, 0, 0.3);
   cursor: pointer;
-  z-index: 10001;
+  z-index: 10101;
 }
 
 .play-icon {
@@ -120,7 +120,7 @@
   right: 0;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.7) 50%, transparent 100%);
   padding: 60px 40px 20px;
-  z-index: 10002;
+  z-index: 10102;
   opacity: 0;
   transform: translateY(20px);
   transition: all 0.3s ease;

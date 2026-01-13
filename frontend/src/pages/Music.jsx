@@ -52,6 +52,8 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
   const [videosLoading, setVideosLoading] = useState(false);
   const [videosError, setVideosError] = useState('');
   const [selectedVideo, setSelectedVideo] = useState(null);
+  const [recentlyPlayed, setRecentlyPlayed] = useState([]);
+  const [recentlyAdded, setRecentlyAdded] = useState([]);
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [playlistModalName, setPlaylistModalName] = useState('');
   const [playlistModalExisting, setPlaylistModalExisting] = useState('');
@@ -299,9 +301,40 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
     }
   };
 
+  const loadRecentlyPlayed = async () => {
+    try {
+      const res = await musicAPI.getRecentlyPlayed();
+      if (res?.success) {
+        setRecentlyPlayed(res.items || []);
+      }
+    } catch (err) {
+      console.error('[Recently Played Music] Failed to load:', err);
+    }
+  };
+
+  const loadRecentlyAdded = async () => {
+    try {
+      const res = await musicAPI.getRecentlyAdded();
+      if (res?.success) {
+        setRecentlyAdded(res.items || []);
+      }
+    } catch (err) {
+      console.error('[Recently Added Music] Failed to load:', err);
+    }
+  };
+
   useEffect(() => {
     loadLibrary();
     loadPlaylists();
+    loadRecentlyPlayed();
+    loadRecentlyAdded();
+    
+    // Refresh recently played list periodically
+    const interval = setInterval(() => {
+      loadRecentlyPlayed();
+    }, 30000); // Refresh every 30 seconds
+    
+    return () => clearInterval(interval);
   }, [selectedUser]); // Reload when selected user changes
 
   // Listen for stopAllAudio event (e.g., when entering AI focus mode)
@@ -1442,7 +1475,7 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
                 onError={(e) => nextImageFallback(e, heroImageCandidates)}
               />
             ) : (
-              <div className="album-hero" style={{ background: 'rgba(0, 0, 0, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+              <div className="album-hero" style={{ background: 'rgba(0, 0, 0, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', borderRadius: '8px' }}>
                 {viewMode === 'playlists' ? (
                   <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M15 14.5H5V13h10v1.5zm0-5.75H5v1.5h10v-1.5zM15 3H5v1.5h10V3zM3 3H1v1.5h2V3zm0 11.5H1V16h2v-1.5zm0-5.75H1v1.5h2v-1.5z"/>
@@ -1500,21 +1533,19 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
                   heroSub
                 )}
               </div>
-              <div className="hero-actions">
+              <div className="hero-actions" style={{ marginTop: '20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
                 <button
-                  className="hero-play"
+                  className="hero-play-btn"
                   onClick={handleHeroToggle}
-                  title={isPlaying ? 'Pause' : 'Play'}
                 >
-                  {isPlaying ? (
-                    <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M2.7 1a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7H2.7zm8 0a.7.7 0 00-.7.7v12.6a.7.7 0 00.7.7h2.6a.7.7 0 00.7-.7V1.7a.7.7 0 00-.7-.7h-2.6z"/>
-                    </svg>
-                  ) : (
-                    <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M3 1.713a.7.7 0 011.05-.607l10.89 6.288a.7.7 0 010 1.212L4.05 14.894A.7.7 0 013 14.288V1.713z"/>
-                    </svg>
-                  )}
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    {isPlaying ? (
+                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                    ) : (
+                      <path d="M8 5v14l11-7z"/>
+                    )}
+                  </svg>
+                  {isPlaying ? 'Pause' : 'Play'}
                 </button>
                 <button 
                   className={`hero-icon ${isShuffled ? 'active' : ''}`} 
@@ -1849,7 +1880,121 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
                         </div>
                       )}
                       
-                      {!sortedAlbums.length && <div className="music-empty">Select an artist to view albums</div>}
+                      {/* Netflix-style sections when no artist/album selected */}
+                      {!selectedArtist && !selectedAlbum && (
+                        <>
+                          {/* Continue Listening Section */}
+                          {recentlyPlayed.length > 0 && (
+                            <div className="recently-played-section">
+                              <div className="recently-played-title">
+                                Continue Listening
+                              </div>
+                              <div className="recently-played-list">
+                                {recentlyPlayed.map((item, idx) => {
+                                  const handleClick = () => {
+                                    // Find artist and album
+                                    const artist = library.find(a => a.name === item.artist_name);
+                                    if (artist) {
+                                      const album = artist.albums?.find(alb => alb.name === item.album_name);
+                                      if (album) {
+                                        setSelectedArtist(item.artist_name);
+                                        setSelectedAlbum(item.album_name);
+                                        setViewMode('albums');
+                                        // Find and play the song
+                                        const songs = sortSongs(album.songs || []);
+                                        const songIdx = songs.findIndex(s => (s.name || s.title) === item.title);
+                                        if (songIdx >= 0 && playIndexRef.current) {
+                                          setTimeout(() => playIndexRef.current(songIdx, songs), 100);
+                                        }
+                                      }
+                                    }
+                                  };
+
+                                  return (
+                                    <div 
+                                      key={idx} 
+                                      className="recently-played-item"
+                                      onClick={handleClick}
+                                    >
+                                      <div className="recently-played-poster-container">
+                                        {item.album_cover && (
+                                          <img 
+                                            src={`/api/music/stream?path=${encodeURIComponent(item.album_cover.replace(/^[.\/\\]+/, ''))}`}
+                                            alt={item.title}
+                                            className="recently-played-poster"
+                                            onError={(e) => { e.target.style.display = 'none'; }}
+                                          />
+                                        )}
+                                      </div>
+                                      <div className="recently-played-info">
+                                        <div className="recently-played-item-title">{item.title}</div>
+                                        <div className="recently-played-time">
+                                          {item.artist_name}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Recently Added Section */}
+                          {recentlyAdded.length > 0 && (
+                            <div className="recently-played-section">
+                              <div className="recently-played-title">
+                                Recently Added
+                              </div>
+                              <div className="recently-played-list">
+                                {recentlyAdded.map((item, idx) => {
+                                  const handleClick = () => {
+                                    // Find artist and select album
+                                    const artist = library.find(a => a.name === item.artist_name);
+                                    if (artist) {
+                                      const album = artist.albums?.find(alb => alb.title === item.title);
+                                      if (album) {
+                                        setSelectedArtist(item.artist_name);
+                                        setSelectedAlbum(item.title);
+                                        setViewMode('albums');
+                                      }
+                                    }
+                                  };
+
+                                  return (
+                                    <div 
+                                      key={idx} 
+                                      className="recently-played-item"
+                                      onClick={handleClick}
+                                    >
+                                      <div className="recently-played-poster-container">
+                                        {item.album_cover && (
+                                          <img 
+                                            src={`/api/music/stream?path=${encodeURIComponent(item.album_cover.replace(/^[.\/\\]+/, ''))}`}
+                                            alt={item.title}
+                                            className="recently-played-poster"
+                                            onError={(e) => { e.target.style.display = 'none'; }}
+                                          />
+                                        )}
+                                      </div>
+                                      <div className="recently-played-info">
+                                        <div className="recently-played-item-title">{item.title}</div>
+                                        <div className="recently-played-time">
+                                          {item.artist_name} • {item.song_count} songs
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Empty state when no sections */}
+                          {recentlyPlayed.length === 0 && recentlyAdded.length === 0 && (
+                            <div className="music-empty">Select an artist to view albums</div>
+                          )}
+                        </>
+                      )}
                     </>
                   )}
                 </>

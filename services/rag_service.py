@@ -107,9 +107,78 @@ class RAGService(BaseService):
             self.logger.error(f"Error loading conversation history: {e}", exc_info=True)
             return []
     
-    def _build_system_prompt(self, expert_type: Optional[str] = None) -> str:
-        """Build system prompt combining persona and expert type."""
+    async def _get_user_name(self, user_id: Optional[int] = None) -> Optional[str]:
+        """Get user name from database using user_id."""
+        if not user_id:
+            return None
+        
+        try:
+            from database.models import User
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import select
+                result = await session.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                if user:
+                    return user.name
+        except Exception as e:
+            self.logger.warning(f"Could not get user name for user_id {user_id}: {e}")
+        return None
+    
+    async def _get_system_pre_context_prompt(self, user_id: Optional[int] = None) -> Optional[str]:
+        """Get pre-context prompt from system config and replace user name placeholder."""
+        try:
+            from database.models import SystemConfig
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import select
+                result = await session.execute(
+                    select(SystemConfig).where(SystemConfig.config_key == "pre_context_prompt")
+                )
+                system_config = result.scalar_one_or_none()
+                if system_config and system_config.config_value:
+                    pre_context_prompt = system_config.config_value
+                    # Handle both string and dict formats (JSON column can store either)
+                    if isinstance(pre_context_prompt, dict):
+                        pre_context_prompt = pre_context_prompt.get("pre_context_prompt") or pre_context_prompt.get("value") or ""
+                    if isinstance(pre_context_prompt, str) and pre_context_prompt.strip():
+                        self.logger.info(f"Found pre-context prompt (length: {len(pre_context_prompt)}), user_id: {user_id}")
+                        if user_id:
+                            # Get user name and replace placeholder
+                            user_name = await self._get_user_name(user_id)
+                            self.logger.info(f"Retrieved user name for user_id {user_id}: {user_name}")
+                            if user_name:
+                                result = pre_context_prompt.replace("{user_name}", user_name)
+                                self.logger.info(f"Pre-context prompt with user name: {result[:100]}...")
+                                return result
+                            else:
+                                self.logger.warning(f"User name not found for user_id {user_id}, using 'the user'")
+                                return pre_context_prompt.replace("{user_name}", "the user")
+                        else:
+                            self.logger.debug("No user_id provided, using 'the user'")
+                            return pre_context_prompt.replace("{user_name}", "the user")
+                    else:
+                        self.logger.info("Pre-context prompt exists but is not a valid string")
+                else:
+                    if system_config:
+                        self.logger.info("No pre-context prompt found in system config (system_config exists but config_value is empty)")
+                    else:
+                        self.logger.info("No pre-context prompt SystemConfig entry found in database")
+        except Exception as e:
+            self.logger.warning(f"Could not get pre-context prompt from system config: {e}", exc_info=True)
+        return None
+    
+    async def _build_system_prompt(self, expert_type: Optional[str] = None, user_id: Optional[int] = None) -> str:
+        """Build system prompt combining pre-context, persona and expert type."""
         system_parts = []
+        
+        # Get pre-context prompt from system config with user name
+        pre_context_prompt = await self._get_system_pre_context_prompt(user_id)
+        if pre_context_prompt:
+            self.logger.info(f"✅ Adding pre-context prompt to system prompt (length: {len(pre_context_prompt)})")
+            system_parts.append(pre_context_prompt)
+        else:
+            self.logger.debug("No pre-context prompt to add")
         
         # Get expert type system prompt
         if expert_type:
@@ -126,9 +195,11 @@ class RAGService(BaseService):
         # Combine prompts
         if system_parts:
             base_prompt = "\n\n".join(system_parts)
+            self.logger.info(f"✅ Combined system prompt has {len(system_parts)} parts, total length: {len(base_prompt)}")
         else:
             # Default prompt if nothing else
             base_prompt = "You are a helpful and engaging conversational assistant. Have natural, flowing conversations with the user. Ask questions to better understand their needs and interests."
+            self.logger.warning("⚠️ Using default system prompt (no parts found)")
         
         # Add STRONG instruction to ask one question at a time
         single_question_instruction = """
@@ -208,10 +279,34 @@ This is essential for natural, focused conversation flow.
                     "max_tokens": 1024
                 }
             
-            # Build system prompt
-            system_prompt = self._build_system_prompt(expert_type)
+            # Get user_id from session if available
+            user_id = input_data.get("user_id")
+            self.logger.info(f"🔍 RAG Service execute - user_id from input: {user_id}, session_id: {session_id}")
+            if not user_id and session_id:
+                # Try to get user_id from ChatSession
+                try:
+                    from database.models import ChatSession
+                    async with AsyncSessionLocal() as session:
+                        from sqlalchemy import select
+                        result = await session.execute(
+                            select(ChatSession).where(ChatSession.session_id == session_id)
+                        )
+                        chat_session = result.scalar_one_or_none()
+                        if chat_session and hasattr(chat_session, 'user_id') and chat_session.user_id:
+                            user_id = chat_session.user_id
+                            self.logger.info(f"✅ Retrieved user_id {user_id} from ChatSession {session_id}")
+                        else:
+                            self.logger.warning(f"⚠️ ChatSession {session_id} found but user_id is {getattr(chat_session, 'user_id', 'N/A') if chat_session else 'session not found'}")
+                except Exception as e:
+                    self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
+            
+            # Build system prompt with user_id
+            system_prompt = await self._build_system_prompt(expert_type, user_id)
             if system_prompt:
                 persona_settings["system"] = system_prompt
+                self.logger.info(f"📤 Adding system prompt to RAG API call (length: {len(system_prompt)}, first 200 chars: {system_prompt[:200]}...)")
+            else:
+                self.logger.warning(f"⚠️ No system prompt to add to RAG API call")
             
             # Call Claude API
             message = await self.async_client.messages.create(
@@ -254,12 +349,15 @@ This is essential for natural, focused conversation flow.
             - query: str - The query/message
             - session_id: str - Session ID to load conversation history
             - expert_type: str (optional) - Type of expert (therapist, engineer, etc.)
+            - user_id: int (optional) - User ID for pre-context prompt
+            - system_prompt: str (optional) - Pre-built system prompt (if provided, skips building)
         
         Yields:
             - str - Chunks of the AI's response
         
         Note: This is a synchronous generator. Conversation history should be loaded
         before calling this, and passed in input_data as 'messages'.
+        System prompt should be pre-built and passed in input_data as 'system_prompt' if user_id is needed.
         """
         self.validate_input(input_data, ["query"])
         
@@ -299,8 +397,22 @@ This is essential for natural, focused conversation flow.
                     "max_tokens": 1024
                 }
             
-            # Build system prompt
-            system_prompt = self._build_system_prompt(expert_type)
+            # Use pre-built system prompt if provided, otherwise build it (without user_id since this is sync)
+            system_prompt = input_data.get("system_prompt")
+            if not system_prompt:
+                # Fallback: build without user_id (for backward compatibility)
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Can't use await in sync context with running loop
+                        system_prompt = None
+                    else:
+                        system_prompt = loop.run_until_complete(self._build_system_prompt(expert_type, input_data.get("user_id")))
+                except Exception as e:
+                    self.logger.warning(f"Could not build system prompt in sync context: {e}")
+                    system_prompt = None
+            
             if system_prompt:
                 persona_settings["system"] = system_prompt
             

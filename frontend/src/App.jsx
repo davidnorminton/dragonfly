@@ -589,6 +589,10 @@ function App() {
         <VideosPage
           searchQuery={videoSearchQuery}
           onSearchResultsChange={setVideoSearchResults}
+          onGenreClick={(genre) => {
+            setVideoSearchQuery(genre);
+            setSearchOverlayOpen(true);
+          }}
         />
       ) : activePage === 'analytics' ? (
         <AnalyticsPage />

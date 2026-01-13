@@ -26,7 +26,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -2109,6 +2109,99 @@ async def get_music_library():
         except Exception as e:
             logger.error(f"Failed to load music library: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+
+
+@app.get("/api/music/recently-played")
+async def get_recently_played_music():
+    """Get recently played songs with album and artist details."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get recent plays with song details
+            result = await session.execute(
+                select(MusicPlay).options(
+                    selectinload(MusicPlay.song).selectinload(MusicSong.album),
+                    selectinload(MusicPlay.song).selectinload(MusicSong.artist)
+                ).order_by(MusicPlay.played_at.desc()).limit(20)
+            )
+            plays = result.scalars().all()
+            
+            items = []
+            seen_songs = set()  # Track unique songs to avoid duplicates
+            
+            for play in plays:
+                if not play.song:
+                    continue
+                    
+                # Skip if we've already added this song
+                if play.song.id in seen_songs:
+                    continue
+                seen_songs.add(play.song.id)
+                
+                song = play.song
+                album = song.album
+                artist = song.artist
+                
+                if album and artist:
+                    items.append({
+                        'type': 'song',
+                        'id': song.id,
+                        'title': song.title,
+                        'artist_name': artist.name,
+                        'album_name': album.title,
+                        'album_cover': album.cover_path,
+                        'file_path': song.file_path,
+                        'duration': song.duration_seconds,
+                        'played_at': play.played_at.isoformat() if play.played_at else None
+                    })
+                    
+                    # Limit to 15 unique songs
+                    if len(items) >= 15:
+                        break
+            
+            return {
+                "success": True,
+                "items": items
+            }
+    except Exception as e:
+        logger.error(f"Error fetching recently played music: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "items": []}
+
+
+@app.get("/api/music/recently-added")
+async def get_recently_added_music():
+    """Get recently added albums (last 15)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get recent albums with artist
+            result = await session.execute(
+                select(MusicAlbum).options(
+                    selectinload(MusicAlbum.artist),
+                    selectinload(MusicAlbum.songs)
+                ).order_by(MusicAlbum.created_at.desc()).limit(15)
+            )
+            albums = result.scalars().all()
+            
+            items = []
+            for album in albums:
+                if album.artist:
+                    items.append({
+                        'type': 'album',
+                        'id': album.id,
+                        'title': album.title,
+                        'artist_name': album.artist.name,
+                        'album_cover': album.cover_path,
+                        'year': album.year,
+                        'song_count': len(album.songs) if album.songs else 0,
+                        'created_at': album.created_at.isoformat() if album.created_at else None
+                    })
+            
+            return {
+                "success": True,
+                "items": items
+            }
+    except Exception as e:
+        logger.error(f"Error fetching recently added music: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "items": []}
 
 
 @app.post("/api/system/detect-directory-path")
@@ -5487,6 +5580,138 @@ async def save_playback_progress(data: dict):
         return {"success": False, "error": str(e)}
 
 
+@app.get("/api/video/recently-played")
+async def get_recently_played():
+    """Get recently played videos with details."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get all progress entries ordered by last_played descending
+            result = await session.execute(
+                select(VideoPlaybackProgress)
+                .order_by(VideoPlaybackProgress.last_played.desc())
+                .limit(20)
+            )
+            progress_entries = result.scalars().all()
+            
+            recently_played = []
+            
+            for progress in progress_entries:
+                if progress.video_type == 'movie':
+                    # Get movie details
+                    movie_result = await session.execute(
+                        select(VideoMovie).where(VideoMovie.id == progress.video_id)
+                    )
+                    movie = movie_result.scalar_one_or_none()
+                    if movie:
+                        recently_played.append({
+                            "type": "movie",
+                            "id": movie.id,
+                            "title": movie.title,
+                            "year": movie.year,
+                            "poster_path": movie.poster_path,
+                            "position": progress.position,
+                            "duration": progress.duration or movie.duration,
+                            "last_played": progress.last_played.isoformat() if progress.last_played else None,
+                            "completed": progress.completed
+                        })
+                
+                elif progress.video_type == 'episode':
+                    # Get episode details
+                    episode_result = await session.execute(
+                        select(VideoTVEpisode).where(VideoTVEpisode.id == progress.video_id)
+                    )
+                    episode = episode_result.scalar_one_or_none()
+                    if episode:
+                        # Get season details
+                        season_result = await session.execute(
+                            select(VideoTVSeason).where(VideoTVSeason.id == episode.season_id)
+                        )
+                        season = season_result.scalar_one_or_none()
+                        
+                        # Get show details from season
+                        show = None
+                        if season:
+                            show_result = await session.execute(
+                                select(VideoTVShow).where(VideoTVShow.id == season.show_id)
+                            )
+                            show = show_result.scalar_one_or_none()
+                        
+                        if episode and show:
+                            recently_played.append({
+                                "type": "episode",
+                                "id": episode.id,
+                                "title": f"{show.title} - S{season.season_number if season else '?'}E{episode.episode_number} - {episode.title or f'Episode {episode.episode_number}'}",
+                                "show_title": show.title,
+                                "season_number": season.season_number if season else None,
+                                "episode_number": episode.episode_number,
+                                "episode_title": episode.title,
+                                "poster_path": show.poster_path,
+                                "position": progress.position,
+                                "duration": progress.duration or episode.duration,
+                                "last_played": progress.last_played.isoformat() if progress.last_played else None,
+                                "completed": progress.completed,
+                                "show_id": show.id,
+                                "season_id": season.id if season else None
+                            })
+            
+            return {"success": True, "items": recently_played}
+    except Exception as e:
+        logger.error(f"Error getting recently played: {e}")
+        return {"success": False, "error": str(e), "items": []}
+
+
+@app.get("/api/video/recently-added")
+async def get_recently_added():
+    """Get recently added movies and TV shows (last 15 items)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get recent movies
+            movies_result = await session.execute(
+                select(VideoMovie).order_by(VideoMovie.created_at.desc()).limit(15)
+            )
+            movies = movies_result.scalars().all()
+            
+            # Get recent TV shows
+            shows_result = await session.execute(
+                select(VideoTVShow).order_by(VideoTVShow.created_at.desc()).limit(15)
+            )
+            shows = shows_result.scalars().all()
+            
+            # Combine and sort by created_at
+            items = []
+            for movie in movies:
+                items.append({
+                    'type': 'movie',
+                    'id': movie.id,
+                    'title': movie.title,
+                    'poster_path': movie.poster_path,
+                    'year': movie.year,
+                    'created_at': movie.created_at.isoformat() if movie.created_at else None
+                })
+            
+            for show in shows:
+                items.append({
+                    'type': 'tvshow',
+                    'id': show.id,
+                    'title': show.title,
+                    'poster_path': show.poster_path,
+                    'year': show.year,
+                    'created_at': show.created_at.isoformat() if show.created_at else None
+                })
+            
+            # Sort by created_at descending and take top 15
+            items.sort(key=lambda x: x['created_at'] or '', reverse=True)
+            items = items[:15]
+            
+            return {
+                "success": True,
+                "items": items
+            }
+    except Exception as e:
+        logger.error(f"Error fetching recently added: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "items": []}
+
+
 @app.post("/api/video/generate-similar")
 async def generate_similar_content(request: Request):
     """Generate similar movies/shows using AI and store in database."""
@@ -7235,6 +7460,27 @@ async def send_chat_message(request: Request):
             logger.error(f"Failed to save user message, continuing without persistence: {e}")
             logger.info(f"Proceeding with chat response without saving user message (service={actual_service_name}, stream={stream})")
         
+        # Get user_id from ChatSession if available
+        user_id = None
+        if session_key and session_key.startswith('chat-'):
+            try:
+                async with AsyncSessionLocal() as db_session:
+                    result = await db_session.execute(
+                        select(ChatSession).where(ChatSession.session_id == session_key)
+                    )
+                    chat_session = result.scalar_one_or_none()
+                    if chat_session:
+                        logger.info(f"Found ChatSession {session_key}, hasattr user_id: {hasattr(chat_session, 'user_id')}")
+                        if hasattr(chat_session, 'user_id') and chat_session.user_id:
+                            user_id = chat_session.user_id
+                            logger.info(f"✅ Retrieved user_id {user_id} from ChatSession {session_key}")
+                        else:
+                            logger.warning(f"⚠️ ChatSession {session_key} exists but user_id is {getattr(chat_session, 'user_id', 'N/A')}")
+                    else:
+                        logger.warning(f"⚠️ No ChatSession found for {session_key}")
+            except Exception as e:
+                logger.error(f"❌ Error getting user_id from ChatSession: {e}", exc_info=True)
+        
         # For streaming responses (AI service - Q&A mode)
         if stream and actual_service_name == "ai_service":
             ai_service = AIService()
@@ -7243,11 +7489,14 @@ async def send_chat_message(request: Request):
             # Load conversation history for context
             conversation_history = await ai_service._load_conversation_history(session_key, limit=50)
             
+            logger.info(f"🔧 Building input for AI service - user_id: {user_id}, session_key: {session_key}")
             input_data = {
                 "question": message,
                 "session_id": session_key,
-                "messages": conversation_history
+                "messages": conversation_history,
+                "user_id": user_id
             }
+            logger.info(f"📤 Sending to AI service - user_id: {user_id}")
             
             # Apply preset overrides if provided
             if custom_context:
@@ -7318,13 +7567,26 @@ async def send_chat_message(request: Request):
                     # Load conversation history (increased limit for better context)
                     conversation_history = await rag_service._load_conversation_history(session_key, limit=50)
                     
+                    # Pre-build system prompt with user_id (since stream_execute is sync)
+                    system_prompt = None
+                    logger.info(f"🔧 Building system prompt for RAG service - user_id: {user_id}, expert_type: {expert_type}")
+                    if user_id or True:  # Always build to get pre-context
+                        try:
+                            system_prompt = await rag_service._build_system_prompt(expert_type, user_id)
+                            logger.info(f"✅ Built system prompt (length: {len(system_prompt) if system_prompt else 0}), first 200 chars: {system_prompt[:200] if system_prompt else 'None'}...")
+                        except Exception as e:
+                            logger.error(f"❌ Could not pre-build system prompt: {e}", exc_info=True)
+                    
                     # Build input data for RAG service
                     input_data = {
                         "query": message,
                         "session_id": session_key,
                         "expert_type": expert_type,
-                        "messages": conversation_history
+                        "messages": conversation_history,
+                        "user_id": user_id,
+                        "system_prompt": system_prompt
                     }
+                    logger.info(f"📤 Sending to RAG service - user_id: {user_id}, has system_prompt: {system_prompt is not None}")
                     
                     # Apply model override if provided
                     if model_override:
@@ -8234,15 +8496,9 @@ async def scan_video_library():
             api_key_config = api_key_result.scalar_one_or_none()
             tmdb_api_key = api_key_config.api_key if api_key_config else None
             
-            # Clear existing video data before scanning
-            logger.info("Clearing existing video data before scan...")
-            from sqlalchemy import delete
-            await session.execute(delete(VideoTVEpisode))
-            await session.execute(delete(VideoTVSeason))
-            await session.execute(delete(VideoTVShow))
-            await session.execute(delete(VideoMovie))
-            await session.commit()
-            logger.info("✓ Video data cleared")
+            # NOTE: We no longer clear video data before scanning
+            # This preserves IDs and maintains playback progress
+            logger.info("Scanning video library (will update existing entries)...")
 
         # Create scanner and scan library
         scanner = VideoScanner(video_dir, tmdb_api_key)
@@ -9976,6 +10232,10 @@ async def save_system_config_endpoint(request: Request):
                     existing.config_value = value
                 else:
                     session.add(SystemConfig(config_key=key, config_value=value))
+                
+                # Log pre-context prompt saves for debugging
+                if key == "pre_context_prompt":
+                    logger.info(f"Saved pre-context prompt: {value[:100] if isinstance(value, str) else 'non-string value'}...")
             
             await session.commit()
             logger.info("System config saved successfully to database")
@@ -9983,6 +10243,56 @@ async def save_system_config_endpoint(request: Request):
     except Exception as e:
         logger.error(f"Error saving system config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/debug/pre-context-prompt")
+async def debug_pre_context_prompt(user_id: Optional[int] = None):
+    """Debug endpoint to check if pre-context prompt is working."""
+    try:
+        from database.base import AsyncSessionLocal
+        from database.models import SystemConfig, User, ChatSession
+        from sqlalchemy import select
+        
+        result = {
+            "pre_context_prompt_set": False,
+            "pre_context_prompt_value": None,
+            "user_id_provided": user_id is not None,
+            "user_id": user_id,
+            "user_name": None,
+            "user_found": False,
+            "final_prompt": None
+        }
+        
+        async with AsyncSessionLocal() as session:
+            # Check if pre-context prompt exists
+            prompt_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "pre_context_prompt")
+            )
+            prompt_config = prompt_result.scalar_one_or_none()
+            
+            if prompt_config and prompt_config.config_value:
+                result["pre_context_prompt_set"] = True
+                prompt_value = prompt_config.config_value
+                if isinstance(prompt_value, dict):
+                    prompt_value = prompt_value.get("pre_context_prompt") or prompt_value.get("value") or ""
+                result["pre_context_prompt_value"] = prompt_value if isinstance(prompt_value, str) else str(prompt_value)
+                
+                # If user_id provided, get user name and build final prompt
+                if user_id:
+                    user_result = await session.execute(
+                        select(User).where(User.id == user_id)
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if user:
+                        result["user_found"] = True
+                        result["user_name"] = user.name
+                        if isinstance(result["pre_context_prompt_value"], str):
+                            result["final_prompt"] = result["pre_context_prompt_value"].replace("{user_name}", user.name)
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}", exc_info=True)
+        return {"error": str(e)}
 
 
 @app.get("/api/config/router")

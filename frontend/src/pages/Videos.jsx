@@ -618,7 +618,7 @@ function SimilarContent({ contentType, contentId, title, year, description, genr
 }
 
 
-export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
+export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreClick }) {
   const [library, setLibrary] = useState({ movies: [], tvShows: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -628,6 +628,8 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
   const [selectedSeason, setSelectedSeason] = useState(null);
   const [playingVideo, setPlayingVideo] = useState(null); // { id, title, type }
   const [isScrolled, setIsScrolled] = useState(false);
+  const [recentlyPlayed, setRecentlyPlayed] = useState([]);
+  const [recentlyAdded, setRecentlyAdded] = useState([]);
   
   const { castAvailable, castVideo } = useChromecast();
   
@@ -656,7 +658,43 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
 
   useEffect(() => {
     loadLibrary();
+    loadRecentlyPlayed();
+    loadRecentlyAdded();
+    
+    // Refresh recently played list when videos are played
+    const interval = setInterval(() => {
+      loadRecentlyPlayed();
+    }, 15000); // Refresh every 15 seconds
+    
+    return () => clearInterval(interval);
   }, []);
+
+  const loadRecentlyPlayed = async () => {
+    try {
+      console.log('[Recently Played] Fetching...');
+      const res = await videoAPI.getRecentlyPlayed();
+      console.log('[Recently Played] Response:', res);
+      if (res?.success) {
+        console.log('[Recently Played] Setting items:', res.items?.length, 'items');
+        setRecentlyPlayed(res.items || []);
+      } else {
+        console.error('[Recently Played] No success in response');
+      }
+    } catch (err) {
+      console.error('[Recently Played] Failed to load:', err);
+    }
+  };
+
+  const loadRecentlyAdded = async () => {
+    try {
+      const res = await videoAPI.getRecentlyAdded();
+      if (res?.success) {
+        setRecentlyAdded(res.items || []);
+      }
+    } catch (err) {
+      console.error('[Recently Added] Failed to load:', err);
+    }
+  };
 
   // Listen for video selection from search overlay
   useEffect(() => {
@@ -974,36 +1012,42 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
     return currentShow.seasons?.find(season => season.id === selectedSeason.id);
   }, [currentShow, selectedSeason]);
 
+  // Get last played item for poster (when nothing selected)
+  const lastPlayed = !selectedMovie && !selectedShow 
+    ? recentlyPlayed.find(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'episode')
+    : null;
+
+  // Get last added item for background (when nothing selected)
+  const lastAdded = !selectedMovie && !selectedShow
+    ? recentlyAdded.find(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'tvshow')
+    : null;
+
   const heroTitle = selectedMovie 
     ? selectedMovie.title 
     : selectedShow 
-      ? currentSeason 
-        ? `${selectedShow.title} - Season ${currentSeason.season_number}`
-        : selectedShow.title
-      : viewMode === 'movies' 
-        ? 'Movies' 
-        : 'TV Shows';
+      ? selectedShow.title
+      : (viewMode === 'movies' ? 'Movies' : 'TV Shows');
 
   const heroSub = selectedMovie
     ? `${selectedMovie.year || ''}${selectedMovie.duration ? ` • ${formatDuration(selectedMovie.duration)}` : ''}`
     : selectedShow
       ? currentSeason
-        ? `${currentSeason.episodes?.length || 0} episodes`
+        ? `Season ${currentSeason.season_number}`
         : `${selectedShow.year || ''}${selectedShow.seasons?.length ? ` • ${selectedShow.seasons.length} ${selectedShow.seasons.length === 1 ? 'season' : 'seasons'}` : ''}`
-      : `${viewMode === 'movies' ? filteredMovies.length : filteredTVShows.length} ${viewMode === 'movies' ? 'movies' : 'shows'}`;
+      : `${viewMode === 'movies' ? filteredMovies.length : filteredTVShows.length} ${viewMode === 'movies' ? 'movies' : 'shows'} added`;
 
   const heroPoster = selectedMovie
     ? selectedMovie.poster_path
     : selectedShow
       ? currentSeason?.poster_path || selectedShow.poster_path
-      : null;
+      : lastPlayed?.poster_path || null;
+
+  // Use same image as poster for background
+  const backgroundImage = heroPoster;
 
   const heroBgStyle = {
-    backgroundImage: heroPoster
-      ? [
-          'linear-gradient(180deg, rgba(11, 139, 230, 0.82) 0%, rgba(5, 47, 107, 0.92) 100%)',
-          `url(${heroPoster})`
-        ].join(', ')
+    backgroundImage: backgroundImage
+      ? `url(${backgroundImage})`
       : 'linear-gradient(180deg, rgba(11, 139, 230, 0.82) 0%, rgba(5, 47, 107, 0.92) 100%)',
     backgroundSize: 'cover',
     backgroundPosition: 'center',
@@ -1011,13 +1055,13 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
   };
 
   return (
-    <div className="music-page video-page">
-      {error && <div className="music-error">{error}</div>}
+    <div className="video-page">
+      {error && <div className="video-error">{error}</div>}
 
-      <div className="music-layout">
+      <div className="video-layout">
         {/* Sidebar */}
-        <div className="music-sidebar">
-          <div className="music-filters">
+        <div className="video-sidebar">
+          <div className="video-filters">
             <button
               className={`filter-pill ${viewMode === 'movies' ? 'active' : ''}`}
               onClick={() => {
@@ -1042,13 +1086,13 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
             </button>
           </div>
 
-          <div className="music-library">
-            {loading && <div className="music-empty">Loading...</div>}
+          <div className="video-library">
+            {loading && <div className="video-empty">Loading...</div>}
             {!loading && viewMode === 'movies' && filteredMovies.length === 0 && (
-              <div className="music-empty">{searchQuery ? 'No movies found' : 'No movies in library yet.'}</div>
+              <div className="video-empty">{searchQuery ? 'No movies found' : 'No movies in library yet.'}</div>
             )}
             {!loading && viewMode === 'tvshows' && filteredTVShows.length === 0 && (
-              <div className="music-empty">{searchQuery ? 'No TV shows found' : 'No TV shows in library yet.'}</div>
+              <div className="video-empty">{searchQuery ? 'No TV shows found' : 'No TV shows in library yet.'}</div>
             )}
 
             {/* Movies List */}
@@ -1056,7 +1100,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
               filteredMovies.map((movie) => (
                 <div
                   key={movie.id}
-                  className={`music-row artist-only ${selectedMovie?.id === movie.id ? 'active' : ''}`}
+                  className={`video-row artist-only ${selectedMovie?.id === movie.id ? 'active' : ''}`}
                   onClick={() => {
                     setSelectedMovie(movie);
                     setSelectedShow(null);
@@ -1073,7 +1117,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                   )}
                   <div>
                     <strong>{movie.title}</strong>
-                    {movie.year && <div className="music-row-sub">{movie.year}</div>}
+                    {movie.year && <div className="video-row-sub">{movie.year}</div>}
                   </div>
                 </div>
               ))}
@@ -1083,7 +1127,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
               filteredTVShows.map((show) => (
                 <div
                   key={show.id}
-                  className={`music-row artist-only ${selectedShow?.id === show.id ? 'active' : ''}`}
+                  className={`video-row artist-only ${selectedShow?.id === show.id ? 'active' : ''}`}
                   onClick={() => {
                     setSelectedShow(show);
                     setSelectedMovie(null);
@@ -1100,7 +1144,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                   )}
                   <div>
                     <strong>{show.title}</strong>
-                    {show.seasons && <div className="music-row-sub">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>}
+                    {show.seasons && <div className="video-row-sub">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>}
                   </div>
                 </div>
               ))}
@@ -1108,10 +1152,10 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
         </div>
 
         {/* Main Content */}
-        <div className="music-main" ref={mainContentRef}>
+        <div className="video-main" ref={mainContentRef}>
           {/* Minimal sticky hero - shows when scrolled */}
           {(selectedMovie || (selectedShow && currentSeason)) && (
-            <div className={`music-hero-minimal ${isScrolled ? 'visible' : ''}`}>
+            <div className={`video-hero-minimal ${isScrolled ? 'visible' : ''}`}>
               {selectedMovie && (
                 <>
                   <button
@@ -1201,14 +1245,53 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
           )}
 
           {/* Main full-size hero - scrolls normally */}
-          <div ref={heroRef} className="music-hero" style={heroBgStyle}>
+          <div ref={heroRef} className="video-hero" style={heroBgStyle}>
             {heroPoster ? (
-              <img
-                src={heroPoster}
-                alt={heroTitle}
-                className="album-hero"
-                style={{ borderRadius: '8px' }}
-              />
+              <div className="hero-poster-container" style={{ position: 'relative', cursor: 'pointer' }}>
+                <img
+                  src={heroPoster}
+                  alt={heroTitle}
+                  className="album-hero"
+                  style={{ borderRadius: '8px' }}
+                />
+                {/* Play button overlay - only show when lastPlayed exists and nothing is selected */}
+                {!selectedMovie && !selectedShow && lastPlayed && (
+                  <div
+                    className="hero-poster-play-overlay"
+                    onClick={() => {
+                      if (lastPlayed.type === 'movie') {
+                        const movie = library.movies.find(m => m.id === lastPlayed.id);
+                        if (movie) {
+                          setPlayingVideo({
+                            id: movie.id,
+                            title: movie.title,
+                            type: 'movie'
+                          });
+                        }
+                      } else if (lastPlayed.type === 'episode') {
+                        const show = library.tvShows.find(s => s.id === lastPlayed.show_id);
+                        if (show) {
+                          const season = show.seasons?.find(s => s.id === lastPlayed.season_id);
+                          if (season) {
+                            const episode = season.episodes?.find(e => e.id === lastPlayed.id);
+                            if (episode) {
+                              setPlayingVideo({
+                                id: episode.id,
+                                title: `${show.title} - S${season.season_number}E${episode.episode_number} - ${episode.title || 'Episode ' + episode.episode_number}`,
+                                type: 'episode'
+                              });
+                            }
+                          }
+                        }
+                      }
+                    }}
+                  >
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="white">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="album-hero" style={{ background: 'rgba(0, 0, 0, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', borderRadius: '8px' }}>
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor">
@@ -1217,18 +1300,50 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
               </div>
             )}
             <div className="hero-text">
-              <div className="album-label">{selectedMovie ? 'Movie' : selectedShow ? (currentSeason ? 'Season' : 'TV Show') : viewMode === 'movies' ? 'Movies' : 'TV Shows'}</div>
-              <h1 className="hero-title">{heroTitle}</h1>
+              <h1 
+                className="hero-title" 
+                style={selectedShow && currentSeason ? { cursor: 'pointer' } : {}}
+                onClick={() => {
+                  if (selectedShow && currentSeason) {
+                    setSelectedSeason(null);
+                  }
+                }}
+              >
+                {heroTitle}
+              </h1>
               <div className="album-artist">{heroSub}</div>
               
-              {/* Genres under title */}
+              {/* Genres under title for movies */}
               {selectedMovie && (
                 (selectedMovie.metadata?.genres && selectedMovie.metadata.genres.length > 0) || 
                 (selectedMovie.extra_metadata?.genres && selectedMovie.extra_metadata.genres.length > 0)
               ) && (
                 <div className="hero-genres">
                   {(selectedMovie.metadata?.genres || selectedMovie.extra_metadata?.genres || []).map((genre, idx) => (
-                    <span key={idx} className="hero-genre-pill">{genre.name || genre}</span>
+                    <span 
+                      key={idx} 
+                      className="hero-genre-pill"
+                      onClick={() => onGenreClick && onGenreClick(genre.name || genre)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {genre.name || genre}
+                    </span>
+                  ))}
+                </div>
+              )}
+              
+              {/* Genres under title for TV shows (both main page and season view) */}
+              {selectedShow && selectedShow.extra_metadata?.genres && selectedShow.extra_metadata.genres.length > 0 && (
+                <div className="hero-genres">
+                  {selectedShow.extra_metadata.genres.map((genre, idx) => (
+                    <span 
+                      key={idx} 
+                      className="hero-genre-pill"
+                      onClick={() => onGenreClick && onGenreClick(genre.name || genre)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {genre.name || genre}
+                    </span>
                   ))}
                 </div>
               )}
@@ -1334,7 +1449,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
           </div>
 
           {/* Content Area */}
-          <div className="music-tracklist">
+          <div className="video-tracklist">
             <div className="tracklist-body">
               {/* Movie Details - Description and Cast */}
               {selectedMovie && (
@@ -1435,15 +1550,15 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                 <div className="album-section">
                   <div className="album-section-title">
                     Episodes
-                    <button 
-                      onClick={() => setSelectedSeason(null)}
-                      style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#4a9eff', cursor: 'pointer', fontSize: '14px' }}
-                    >
-                      ← Back to Seasons
-                    </button>
                   </div>
-                  <div className="tracklist-header" style={{ display: 'grid', gridTemplateColumns: '40px 60px 1fr 140px', gap: '15px' }}>
-                    <span className="col-cast-btn"></span>
+                  <div className="tracklist-header" style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: castAvailable ? '40px 60px 1fr 140px' : '60px 1fr 140px', 
+                    gap: '15px',
+                    padding: '0 16px',
+                    marginBottom: '8px'
+                  }}>
+                    {castAvailable && <span className="col-cast-btn"></span>}
                     <span className="col-index">#</span>
                     <span className="col-title">Title</span>
                     <span className="col-length-wide">Duration</span>
@@ -1455,7 +1570,13 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                       key={episode.id}
                       data-episode-id={episode.id}
                       className="track-row episode-row-item"
-                      style={{ display: 'grid', gridTemplateColumns: '40px 60px 1fr 140px', gap: '15px', alignItems: 'center' }}
+                      style={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: castAvailable ? '40px 60px 1fr 140px' : '60px 1fr 140px', 
+                        gap: '15px', 
+                        alignItems: 'center',
+                        padding: '8px 16px'
+                      }}
                     >
                       {castAvailable && (
                         <span className="col-cast-btn">
@@ -1509,17 +1630,176 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                 </div>
               )}
 
-              {/* Empty State */}
+              {/* Empty State - Recently Played */}
               {!selectedMovie && !selectedShow && (
-                <div className="music-empty">
-                  {viewMode === 'movies' 
-                    ? filteredMovies.length > 0 
-                      ? 'Select a movie to view details' 
-                      : 'No movies in library. Scan your video directory in Settings.'
-                    : filteredTVShows.length > 0
-                      ? 'Select a TV show to view details'
-                      : 'No TV shows in library. Scan your video directory in Settings.'
-                  }
+                <div className="album-section">
+                  {(() => {
+                    // Filter recently played based on current view mode
+                    const filteredRecent = recentlyPlayed.filter(item => {
+                      if (viewMode === 'movies') {
+                        return item.type === 'movie';
+                      } else {
+                        return item.type === 'episode';
+                      }
+                    });
+                    return filteredRecent.length > 0 ? (
+                      <div className="recently-played-section">
+                        <div className="recently-played-title">
+                          Continue Watching
+                        </div>
+                        <div className="recently-played-list">
+                          {filteredRecent.map((item, idx) => {
+                          const progressPercent = item.duration ? (item.position / item.duration) * 100 : 0;
+                          const formatTime = (seconds) => {
+                            if (!seconds) return '0:00';
+                            const hrs = Math.floor(seconds / 3600);
+                            const mins = Math.floor((seconds % 3600) / 60);
+                            const secs = Math.floor(seconds % 60);
+                            if (hrs > 0) {
+                              return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                            }
+                            return `${mins}:${secs.toString().padStart(2, '0')}`;
+                          };
+
+                          const handleClick = () => {
+                            if (item.type === 'movie') {
+                              const movie = library.movies.find(m => m.id === item.id);
+                              if (movie) {
+                                setSelectedMovie(movie);
+                                setSelectedShow(null);
+                                setSelectedSeason(null);
+                                setViewMode('movies');
+                              }
+                            } else if (item.type === 'episode') {
+                              const show = library.tvShows.find(s => s.id === item.show_id);
+                              if (show) {
+                                const season = show.seasons?.find(s => s.id === item.season_id);
+                                setSelectedShow(show);
+                                setSelectedSeason(season || null);
+                                setSelectedMovie(null);
+                                setViewMode('tvshows');
+                              }
+                            }
+                          };
+
+                          return (
+                            <div 
+                              key={idx} 
+                              className="recently-played-item"
+                              onClick={handleClick}
+                            >
+                              <div className="recently-played-poster-container">
+                                {item.poster_path && (
+                                  <img 
+                                    src={item.poster_path} 
+                                    alt={item.title}
+                                    className="recently-played-poster"
+                                  />
+                                )}
+                                <div className="recently-played-progress-overlay">
+                                  <div className="recently-played-progress-bar">
+                                    <div 
+                                      className="recently-played-progress-fill"
+                                      style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="recently-played-info">
+                                <div className="recently-played-item-title">{item.title}</div>
+                                <div className="recently-played-time">
+                                  {formatTime(item.position)} / {formatTime(item.duration)}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null;
+                  })()}
+                  
+                  {/* Recently Added Section - Filtered by view mode */}
+                  {(() => {
+                    const filteredAdded = recentlyAdded.filter(item => {
+                      if (viewMode === 'movies') {
+                        return item.type === 'movie';
+                      } else {
+                        return item.type === 'tvshow';
+                      }
+                    });
+
+                    return !selectedMovie && !selectedShow && filteredAdded.length > 0 ? (
+                      <div className="recently-played-section" style={{ marginTop: recentlyPlayed.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'episode').length > 0 ? '40px' : '0' }}>
+                        <div className="recently-played-title">
+                          Recently Added
+                        </div>
+                        <div className="recently-played-list">
+                          {filteredAdded.map((item, idx) => {
+                            const handleClick = () => {
+                              if (item.type === 'movie') {
+                                const movie = library.movies.find(m => m.id === item.id);
+                                if (movie) {
+                                  setSelectedMovie(movie);
+                                  setSelectedShow(null);
+                                  setSelectedSeason(null);
+                                  setViewMode('movies');
+                                }
+                              } else if (item.type === 'tvshow') {
+                                const show = library.tvShows.find(s => s.id === item.id);
+                                if (show) {
+                                  setSelectedShow(show);
+                                  setSelectedSeason(null);
+                                  setSelectedMovie(null);
+                                  setViewMode('tvshows');
+                                }
+                              }
+                            };
+
+                            return (
+                              <div 
+                                key={idx} 
+                                className="recently-played-item"
+                                onClick={handleClick}
+                              >
+                                <div className="recently-played-poster-container">
+                                  {item.poster_path && (
+                                    <img 
+                                      src={item.poster_path} 
+                                      alt={item.title}
+                                      className="recently-played-poster"
+                                    />
+                                  )}
+                                </div>
+                                <div className="recently-played-info">
+                                  <div className="recently-played-item-title">{item.title}</div>
+                                  {item.year && (
+                                    <div className="recently-played-time">
+                                      {item.year} • {item.type === 'movie' ? 'Movie' : 'TV Show'}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+                  
+                  {/* Empty State */}
+                  {!selectedMovie && !selectedShow && recentlyPlayed.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'episode').length === 0 && recentlyAdded.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'tvshow').length === 0 && (
+                    <div className="video-empty">
+                      {viewMode === 'movies' 
+                        ? filteredMovies.length > 0 
+                          ? 'Select a movie to view details' 
+                          : 'No movies in library. Scan your video directory in Settings.'
+                        : filteredTVShows.length > 0
+                          ? 'Select a TV show to view details'
+                          : 'No TV shows in library. Scan your video directory in Settings.'
+                      }
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1527,7 +1807,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
         </div>
       </div>
 
-      <div className="music-bottom-spacer" />
+      <div className="video-bottom-spacer" />
 
       {/* Video Player */}
       {playingVideo && (

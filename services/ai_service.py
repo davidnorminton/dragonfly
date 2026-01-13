@@ -76,6 +76,90 @@ class AIService(BaseService):
         if self.persona_config is None:
             await self._load_persona_config()
     
+    async def _get_user_name(self, user_id: Optional[int] = None) -> Optional[str]:
+        """Get user name from database using user_id."""
+        if not user_id:
+            return None
+        
+        try:
+            from database.models import User
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import select
+                result = await session.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                if user:
+                    return user.name
+        except Exception as e:
+            self.logger.warning(f"Could not get user name for user_id {user_id}: {e}")
+        return None
+    
+    async def _get_system_pre_context_prompt(self, user_id: Optional[int] = None) -> Optional[str]:
+        """Get pre-context prompt from system config and replace user name placeholder."""
+        try:
+            from database.models import SystemConfig
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import select
+                result = await session.execute(
+                    select(SystemConfig).where(SystemConfig.config_key == "pre_context_prompt")
+                )
+                system_config = result.scalar_one_or_none()
+                if system_config and system_config.config_value:
+                    pre_context_prompt = system_config.config_value
+                    # Handle both string and dict formats (JSON column can store either)
+                    if isinstance(pre_context_prompt, dict):
+                        pre_context_prompt = pre_context_prompt.get("pre_context_prompt") or pre_context_prompt.get("value") or ""
+                    if isinstance(pre_context_prompt, str) and pre_context_prompt.strip():
+                        self.logger.info(f"Found pre-context prompt (length: {len(pre_context_prompt)}), user_id: {user_id}")
+                        if user_id:
+                            # Get user name and replace placeholder
+                            user_name = await self._get_user_name(user_id)
+                            self.logger.info(f"Retrieved user name for user_id {user_id}: {user_name}")
+                            if user_name:
+                                result = pre_context_prompt.replace("{user_name}", user_name)
+                                self.logger.info(f"Pre-context prompt with user name: {result[:100]}...")
+                                return result
+                            else:
+                                self.logger.warning(f"User name not found for user_id {user_id}, using 'the user'")
+                                return pre_context_prompt.replace("{user_name}", "the user")
+                        else:
+                            self.logger.debug("No user_id provided, using 'the user'")
+                            return pre_context_prompt.replace("{user_name}", "the user")
+                    else:
+                        self.logger.info("Pre-context prompt exists but is not a valid string")
+                else:
+                    if system_config:
+                        self.logger.info("No pre-context prompt found in system config (system_config exists but config_value is empty)")
+                    else:
+                        self.logger.info("No pre-context prompt SystemConfig entry found in database")
+        except Exception as e:
+            self.logger.warning(f"Could not get pre-context prompt from system config: {e}", exc_info=True)
+        return None
+    
+    async def _build_system_prompt_with_pre_context(self, user_id: Optional[int] = None) -> Optional[str]:
+        """Build system prompt including pre-context prompt with user name."""
+        system_prompt_parts = []
+        
+        # Get pre-context prompt from system config with user name
+        pre_context_prompt = await self._get_system_pre_context_prompt(user_id)
+        if pre_context_prompt:
+            self.logger.info(f"✅ Pre-context prompt retrieved and added to system prompt (length: {len(pre_context_prompt)})")
+            system_prompt_parts.append(pre_context_prompt)
+        else:
+            self.logger.debug("No pre-context prompt to add")
+        
+        # Get persona system prompt
+        if self.persona_config and "anthropic" in self.persona_config:
+            persona_prompt = self.persona_config["anthropic"].get("prompt_context")
+            if persona_prompt:
+                system_prompt_parts.append(persona_prompt)
+        
+        result = "\n\n".join(system_prompt_parts) if system_prompt_parts else None
+        if result:
+            self.logger.info(f"✅ Final system prompt built with {len(system_prompt_parts)} part(s), total length: {len(result)}")
+        return result
+    
     async def _load_conversation_history(self, session_id: str, limit: int = 50) -> List[Dict[str, str]]:
         """
         Load conversation history for a session with prioritized recent messages.
@@ -211,9 +295,35 @@ class AIService(BaseService):
             if session_id and not conversation_history:
                 conversation_history = await self._load_conversation_history(session_id, limit=50)
             
+            # Check if the last message in history is the same as the current question (avoid duplication)
+            if conversation_history and len(conversation_history) > 0:
+                last_message = conversation_history[-1]
+                if last_message.get("role") == "user" and last_message.get("content") == question:
+                    self.logger.info(f"⚠️ Last message in history matches current question, removing duplicate to avoid sending question twice")
+                    conversation_history = conversation_history[:-1]  # Remove the duplicate
+            
+            # Get user_id from input or session
+            user_id = input_data.get("user_id")
+            self.logger.info(f"🔍 AI Service execute - user_id from input: {user_id}, session_id: {session_id}")
+            if not user_id and session_id:
+                try:
+                    from database.models import ChatSession
+                    async with AsyncSessionLocal() as session:
+                        from sqlalchemy import select
+                        result = await session.execute(
+                            select(ChatSession).where(ChatSession.session_id == session_id)
+                        )
+                        chat_session = result.scalar_one_or_none()
+                        if chat_session and hasattr(chat_session, 'user_id') and chat_session.user_id:
+                            user_id = chat_session.user_id
+                            self.logger.info(f"✅ Retrieved user_id {user_id} from ChatSession {session_id}")
+                        else:
+                            self.logger.warning(f"⚠️ ChatSession {session_id} found but user_id is {getattr(chat_session, 'user_id', 'N/A') if chat_session else 'session not found'}")
+                except Exception as e:
+                    self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
+            
             # Get persona settings or use defaults
             persona_settings = {}
-            system_prompt = None
             if self.persona_config and "anthropic" in self.persona_config:
                 anthropic_cfg = self.persona_config["anthropic"]
                 persona_settings = {
@@ -224,15 +334,19 @@ class AIService(BaseService):
                 }
                 # Filter out None values
                 persona_settings = {k: v for k, v in persona_settings.items() if v is not None}
-                
-                # Get system prompt if present (Anthropic uses top-level system parameter, not message role)
-                system_prompt = anthropic_cfg.get("prompt_context")
             else:
                 # Default behavior without persona
                 persona_settings = {
                     "model": settings.ai_model,
                     "max_tokens": 1024
                 }
+            
+            # Build system prompt with pre-context
+            system_prompt = await self._build_system_prompt_with_pre_context(user_id)
+            if system_prompt:
+                self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
+            else:
+                self.logger.warning(f"⚠️ No system prompt built (user_id: {user_id})")
             
             # Build messages array with conversation history + current question
             messages = conversation_history.copy() if conversation_history else []
@@ -244,8 +358,13 @@ class AIService(BaseService):
             # Add system parameter if we have a system prompt
             if system_prompt:
                 persona_settings["system"] = system_prompt
+                self.logger.info(f"📤 Adding system prompt to API call (length: {len(system_prompt)})")
+                self.logger.info(f"📋 FULL SYSTEM PROMPT:\n---\n{system_prompt}\n---")
+            else:
+                self.logger.warning(f"⚠️ No system prompt to add to API call")
             
             self.logger.debug(f"Sending {len(messages)} messages to Claude API (including {len(conversation_history)} from history)")
+            self.logger.info(f"🔍 API call will include 'system' parameter: {'system' in persona_settings}")
             
             message = await self.async_client.messages.create(
                 messages=messages,
@@ -306,9 +425,35 @@ class AIService(BaseService):
             if session_id and not conversation_history:
                 conversation_history = await self._load_conversation_history(session_id, limit=50)
             
+            # Check if the last message in history is the same as the current question (avoid duplication)
+            if conversation_history and len(conversation_history) > 0:
+                last_message = conversation_history[-1]
+                if last_message.get("role") == "user" and last_message.get("content") == question:
+                    self.logger.info(f"⚠️ Last message in history matches current question, removing duplicate to avoid sending question twice")
+                    conversation_history = conversation_history[:-1]  # Remove the duplicate
+            
+            # Get user_id from input or session
+            user_id = input_data.get("user_id")
+            self.logger.info(f"🔍 AI Service stream_execute - user_id from input: {user_id}, session_id: {session_id}")
+            if not user_id and session_id:
+                try:
+                    from database.models import ChatSession
+                    async with AsyncSessionLocal() as session:
+                        from sqlalchemy import select
+                        result = await session.execute(
+                            select(ChatSession).where(ChatSession.session_id == session_id)
+                        )
+                        chat_session = result.scalar_one_or_none()
+                        if chat_session and hasattr(chat_session, 'user_id') and chat_session.user_id:
+                            user_id = chat_session.user_id
+                            self.logger.info(f"✅ Retrieved user_id {user_id} from ChatSession {session_id}")
+                        else:
+                            self.logger.warning(f"⚠️ ChatSession {session_id} found but user_id is {getattr(chat_session, 'user_id', 'N/A') if chat_session else 'session not found'}")
+                except Exception as e:
+                    self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
+            
             # Get persona settings or use defaults
             persona_settings = {}
-            system_prompt = None
             if self.persona_config and "anthropic" in self.persona_config:
                 anthropic_cfg = self.persona_config["anthropic"]
                 persona_settings = {
@@ -319,15 +464,19 @@ class AIService(BaseService):
                 }
                 # Filter out None values
                 persona_settings = {k: v for k, v in persona_settings.items() if v is not None}
-                
-                # Get system prompt if present (Anthropic uses top-level system parameter, not message role)
-                system_prompt = anthropic_cfg.get("prompt_context")
             else:
                 # Default behavior without persona
                 persona_settings = {
                     "model": settings.ai_model,
                     "max_tokens": 1024
                 }
+            
+            # Build system prompt with pre-context
+            system_prompt = await self._build_system_prompt_with_pre_context(user_id)
+            if system_prompt:
+                self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
+            else:
+                self.logger.warning(f"⚠️ No system prompt built (user_id: {user_id})")
             
             # Build messages array with conversation history + current question
             messages = conversation_history.copy() if conversation_history else []
@@ -339,8 +488,13 @@ class AIService(BaseService):
             # Add system parameter if we have a system prompt
             if system_prompt:
                 persona_settings["system"] = system_prompt
+                self.logger.info(f"📤 Adding system prompt to API call (length: {len(system_prompt)})")
+                self.logger.info(f"📋 FULL SYSTEM PROMPT:\n---\n{system_prompt}\n---")
+            else:
+                self.logger.warning(f"⚠️ No system prompt to add to API call")
             
             self.logger.debug(f"Sending {len(messages)} messages to Claude API (including {len(conversation_history)} from history)")
+            self.logger.info(f"🔍 API call will include 'system' parameter: {'system' in persona_settings}")
             
             # Stream response from Claude API (synchronous iterator)
             with self.client.messages.stream(
@@ -385,9 +539,36 @@ class AIService(BaseService):
             if session_id and not conversation_history:
                 conversation_history = await self._load_conversation_history(session_id, limit=50)
             
+            # Check if the last message in history is the same as the current question (avoid duplication)
+            # This can happen if the user message was saved before loading conversation history
+            if conversation_history and len(conversation_history) > 0:
+                last_message = conversation_history[-1]
+                if last_message.get("role") == "user" and last_message.get("content") == question:
+                    self.logger.info(f"⚠️ Last message in history matches current question, removing duplicate to avoid sending question twice")
+                    conversation_history = conversation_history[:-1]  # Remove the duplicate
+            
+            # Get user_id from input or session
+            user_id = input_data.get("user_id")
+            self.logger.info(f"🔍 AI Service async_stream_execute - user_id from input: {user_id}, session_id: {session_id}")
+            if not user_id and session_id:
+                try:
+                    from database.models import ChatSession
+                    async with AsyncSessionLocal() as session:
+                        from sqlalchemy import select
+                        result = await session.execute(
+                            select(ChatSession).where(ChatSession.session_id == session_id)
+                        )
+                        chat_session = result.scalar_one_or_none()
+                        if chat_session and hasattr(chat_session, 'user_id') and chat_session.user_id:
+                            user_id = chat_session.user_id
+                            self.logger.info(f"✅ Retrieved user_id {user_id} from ChatSession {session_id}")
+                        else:
+                            self.logger.warning(f"⚠️ ChatSession {session_id} found but user_id is {getattr(chat_session, 'user_id', 'N/A') if chat_session else 'session not found'}")
+                except Exception as e:
+                    self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
+            
             # Get persona settings or use defaults
             persona_settings = {}
-            system_prompt = None
             if self.persona_config and "anthropic" in self.persona_config:
                 anthropic_cfg = self.persona_config["anthropic"]
                 persona_settings = {
@@ -398,17 +579,22 @@ class AIService(BaseService):
                 }
                 # Filter out None values
                 persona_settings = {k: v for k, v in persona_settings.items() if v is not None}
-                
-                # Get system prompt if present
-                system_prompt = anthropic_cfg.get("prompt_context")
             else:
                 persona_settings = {
                     "model": settings.ai_model,
                     "max_tokens": 1024
                 }
             
-            # Override with preset values if provided
+            # Build system prompt with pre-context
+            system_prompt = await self._build_system_prompt_with_pre_context(user_id)
+            if system_prompt:
+                self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
+            else:
+                self.logger.warning(f"⚠️ No system prompt built (user_id: {user_id})")
+            
+            # Override with preset values if provided (preset takes precedence)
             if input_data.get("system_prompt"):
+                self.logger.info(f"⚠️ Overriding system prompt with preset (preset takes precedence over pre-context)")
                 system_prompt = input_data["system_prompt"]
             if input_data.get("temperature") is not None:
                 persona_settings["temperature"] = input_data["temperature"]
@@ -454,6 +640,12 @@ class AIService(BaseService):
             # Add system parameter if we have a system prompt
             if system_prompt:
                 persona_settings["system"] = system_prompt
+                self.logger.info(f"📤 Adding system prompt to API call (length: {len(system_prompt)})")
+                self.logger.info(f"📋 FULL SYSTEM PROMPT:\n---\n{system_prompt}\n---")
+            else:
+                self.logger.warning(f"⚠️ No system prompt to add to API call")
+            
+            self.logger.info(f"🔍 API call will include 'system' parameter: {'system' in persona_settings}")
             
             # Sanitize parameters - ensure all values are proper types
             sanitized_settings = {}
@@ -476,16 +668,35 @@ class AIService(BaseService):
             log_params = {k: v for k, v in sanitized_settings.items() if k != "system"}
             self.logger.info(f"API parameters: {log_params}")
             if system_prompt:
+                self.logger.info(f"✅ System parameter present in sanitized_settings: {'system' in sanitized_settings}")
+                self.logger.info(f"✅ System value in sanitized_settings: {sanitized_settings.get('system', 'MISSING')[:100] if sanitized_settings.get('system') else 'MISSING'}...")
                 self.logger.debug(f"System prompt length: {len(system_prompt)} chars")
             self.logger.debug(f"Sending {len(messages)} messages to Claude API (including {len(conversation_history)} from history)")
             
+            # Verify system is in the final call
+            if system_prompt and "system" not in sanitized_settings:
+                self.logger.error(f"❌ CRITICAL: system prompt was built but NOT in sanitized_settings! Keys: {list(sanitized_settings.keys())}")
+            
             # Stream response from Claude API (async iterator)
-            async with self.async_client.messages.stream(
-                messages=messages,
-                **sanitized_settings
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield text
+            try:
+                async with self.async_client.messages.stream(
+                    messages=messages,
+                    **sanitized_settings
+                ) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+            except anthropic.APIStatusError as e:
+                self.logger.error(f"❌ Anthropic API error: {e}")
+                # If it's an internal server error, provide a helpful message
+                if "Internal server error" in str(e):
+                    yield "I'm experiencing a temporary issue with the AI service. Please try again in a moment."
+                else:
+                    yield f"I encountered an error: {str(e)}. Please try again."
+                raise
+            except Exception as e:
+                self.logger.error(f"❌ Unexpected error during streaming: {e}", exc_info=True)
+                yield f"I encountered an unexpected error. Please try again."
+                raise
                     
         except Exception as e:
             self.logger.error(f"Error calling Anthropic API: {e}", exc_info=True)

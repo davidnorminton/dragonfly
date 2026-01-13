@@ -228,11 +228,25 @@ export const videoAPI = {
       throw new Error(`Failed to generate similar content: ${response.status} ${errorText}`);
     }
     return response.json();
+  },
+
+  async getRecentlyPlayed() {
+    const response = await fetch('/api/video/recently-played');
+    if (!response.ok) throw new Error('Failed to get recently played');
+    return response.json();
+  },
+  
+  async getRecentlyAdded() {
+    const response = await fetch('/api/video/recently-added');
+    if (!response.ok) throw new Error('Failed to get recently added');
+    return response.json();
   }
 };
 
 export const musicAPI = {
   getLibrary: () => api.get('/music/library').then(res => res.data),
+  getRecentlyPlayed: () => api.get('/music/recently-played').then(res => res.data),
+  getRecentlyAdded: () => api.get('/music/recently-added').then(res => res.data),
   scanMusic: () => api.get('/music/scan').then(res => res.data),
   clearMusic: () => api.post('/music/clear').then(res => res.data),
   getMetadata: (path) => api.get('/music/metadata', { params: { path } }).then(res => res.data),

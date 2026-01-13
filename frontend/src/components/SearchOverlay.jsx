@@ -351,6 +351,39 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
         padding: '40px'
       }}
     >
+      {/* Close Button */}
+      <button
+        onClick={onClose}
+        style={{
+          position: 'absolute',
+          top: '20px',
+          right: '20px',
+          background: 'rgba(255, 255, 255, 0.1)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          borderRadius: '50%',
+          width: '40px',
+          height: '40px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          color: '#fff',
+          fontSize: '1.2rem',
+          transition: 'all 0.2s ease',
+          zIndex: 10001
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+          e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.6)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+        }}
+      >
+        ✕
+      </button>
+
       {/* Search Input */}
       <div style={{ marginBottom: '40px' }}>
         <input

@@ -621,6 +621,12 @@ export function SettingsPage({ onNavigate }) {
       const data = await configAPI.getSystemConfig();
       setSystemConfig(JSON.stringify(data, null, 2));
       setSystemFields(data);
+      
+      // Expand pre-context section by default
+      setExpandedSections(prev => ({
+        ...prev,
+        'pre-context': true
+      }));
     } catch (err) {
       console.error('Error loading system config:', err);
     }
@@ -1376,8 +1382,8 @@ export function SettingsPage({ onNavigate }) {
                       {/* Anthropic AI Section */}
                       {personaFields.anthropic && (
                         <div className="config-section">
-                          <h4 
-                            className="config-section-title collapsible" 
+                          <h4
+                            className="config-section-title collapsible"
                             onClick={() => toggleSection('persona-anthropic')}
                           >
                             <span className="collapse-icon">{expandedSections['persona-anthropic'] ? '▼' : '▶'}</span>
@@ -2309,6 +2315,39 @@ export function SettingsPage({ onNavigate }) {
                       placeholder="postgresql+asyncpg://user:pass@localhost:5432/dragonfly"
                     />
                     <span className="form-help">PostgreSQL or SQLite database connection string</span>
+                  </div>
+                  </div>
+                  )}
+                </div>
+
+                {/* Pre-Context Prompt Section */}
+                <div className="config-section">
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('pre-context')}
+                  >
+                    <span className="collapse-icon">{expandedSections['pre-context'] ? '▼' : '▶'}</span>
+                    Pre-Context System Prompt (All Personas)
+                  </h4>
+                  {expandedSections['pre-context'] && (
+                  <div>
+                  <div className="form-group">
+                    <label>
+                      Pre-Context Prompt (Optional)
+                      <span className="field-hint">
+                        This prompt is added before the main system prompt for ALL personas. Use {"{user_name}"} as a placeholder for the user's name.
+                      </span>
+                    </label>
+                    <textarea
+                      value={systemFields.pre_context_prompt || ''}
+                      onChange={(e) => updateSystemField('pre_context_prompt', e.target.value)}
+                      className="config-textarea"
+                      rows={6}
+                      placeholder="Example: You are chatting with {user_name}. Address them by name when appropriate."
+                    />
+                    <span className="form-help">
+                      This prompt will be prepended to all persona system prompts. The {"{user_name}"} placeholder will be automatically replaced with the actual user's name from the database.
+                    </span>
                   </div>
                   </div>
                   )}

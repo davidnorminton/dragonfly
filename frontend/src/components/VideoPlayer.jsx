@@ -364,17 +364,31 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
     loadProgress();
   }, [videoId, type]);
 
-  // Save progress periodically during playback
+  // Save progress immediately on play start and periodically during playback
   useEffect(() => {
     if (!isPlaying || !duration) return;
     
+    // Save immediately when play starts
+    if (currentTime > 0) {
+      videoProgressAPI.saveProgress(type, videoId, currentTime, duration);
+    }
+    
+    // Then save every 10 seconds
     const interval = setInterval(() => {
       if (currentTime > 0) {
         videoProgressAPI.saveProgress(type, videoId, currentTime, duration);
       }
-    }, 10000); // Save every 10 seconds
+    }, 10000);
     
     return () => clearInterval(interval);
+  }, [isPlaying, currentTime, duration, type, videoId]);
+  
+  // Save progress when pausing
+  useEffect(() => {
+    if (!isPlaying && currentTime > 0 && duration) {
+      // Save progress when video is paused
+      videoProgressAPI.saveProgress(type, videoId, currentTime, duration);
+    }
   }, [isPlaying, currentTime, duration, type, videoId]);
 
   // Save progress when video ends
@@ -424,24 +438,27 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
     }
   }, [videoId, type]);
 
-  // Track Chromecast playback and auto-play next episode
+  // Track Chromecast playback progress and auto-play next episode
   useEffect(() => {
-    if (!casting || !playbackInfo || !type || type !== 'episode') return;
+    if (!casting || !playbackInfo || !type) return;
     
     const { playerState, currentTime, duration: castDuration, hasEnded, isIdle } = playbackInfo;
     
-    // Use currently casting episode ID for progress tracking
-    const episodeIdToTrack = currentlyCastingEpisodeId || videoId;
+    // Use currently casting episode ID for progress tracking (for TV shows)
+    const contentIdToTrack = type === 'episode' ? (currentlyCastingEpisodeId || videoId) : videoId;
     
-    // Save progress for Chromecast playback every update
+    // Save progress for Chromecast playback every update (both movies and episodes)
     if (currentTime > 0 && castDuration) {
       // Throttle saves - only save if position changed by more than 5 seconds
       const lastSaved = window.__lastSavedPosition || 0;
       if (Math.abs(currentTime - lastSaved) > 5) {
-        videoProgressAPI.saveProgress(type, episodeIdToTrack, currentTime, castDuration);
+        videoProgressAPI.saveProgress(type, contentIdToTrack, currentTime, castDuration);
         window.__lastSavedPosition = currentTime;
       }
     }
+    
+    // Auto-play next episode only for TV shows
+    if (type !== 'episode') return;
     
     // Better detection: episode ended if:
     // 1. hasEnded flag is true (from media update listener)

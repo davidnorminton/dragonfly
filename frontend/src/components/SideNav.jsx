@@ -60,53 +60,13 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
   };
 
   return (
-    <div className="side-nav" style={{
-      position: 'fixed',
-      left: 0,
-      top: 0,
-      bottom: 0,
-      width: '60px',
-      background: 'rgba(20, 20, 32, 0.95)',
-      borderRight: '1px solid rgba(255, 255, 255, 0.1)',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'flex-start',
-      gap: '8px',
-      zIndex: 10001, // Above music controls (5000)
-      padding: '12px 0'
-    }}>
+    <div className="side-nav">
       {/* Home - Admin only */}
       {isAdmin && (
         <button
           className={`side-nav-button ${activePage === 'dashboard' ? 'active' : ''}`}
           onClick={() => onNavigate?.('dashboard')}
           title="Home"
-          style={{
-            width: '44px',
-            height: '44px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: activePage === 'dashboard' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            color: activePage === 'dashboard' ? '#fff' : '#9da7b8',
-            transition: 'all 0.2s ease'
-          }}
-          onMouseEnter={(e) => {
-            if (activePage !== 'dashboard') {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-              e.currentTarget.style.color = '#fff';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (activePage !== 'dashboard') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = '#9da7b8';
-            }
-          }}
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
             <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
@@ -263,99 +223,33 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
       {(activePage === 'chat' || activePage === 'music' || activePage === 'videos') && (
         <>
           {/* Separator bar above */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 'calc(50% - 38px)',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: '32px',
-              height: '1px',
-              background: 'rgba(255, 255, 255, 0.1)',
-              zIndex: 1
-            }}
-          />
-          <button
-            className="side-nav-button"
-            onClick={() => {
-              // Toggle search overlay (don't close if clicking search icon)
-              if (onSearchClick) {
-                onSearchClick();
-              }
-            }}
-            title="Search"
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: '44px',
-              height: '44px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'transparent',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              color: '#9da7b8',
-              transition: 'all 0.2s ease',
-              zIndex: 2
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-              e.currentTarget.style.color = '#fff';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = '#9da7b8';
-            }}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-            </svg>
-          </button>
+          <div className="side-nav-separator top" />
+          <div className="side-nav-search-container">
+            <button
+              className="side-nav-button"
+              onClick={() => {
+                // Toggle search overlay (don't close if clicking search icon)
+                if (onSearchClick) {
+                  onSearchClick();
+                }
+              }}
+              title="Search"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+              </svg>
+            </button>
+          </div>
           {/* Separator bar below */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 'calc(50% + 38px)',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: '32px',
-              height: '1px',
-              background: 'rgba(255, 255, 255, 0.1)',
-              zIndex: 1
-            }}
-          />
+          <div className="side-nav-separator bottom" />
         </>
       )}
 
       {/* Available to all users */}
       <button
+        className="side-nav-button"
         onClick={onSwitchAI}
         title="Switch AI"
-        style={{
-          width: '44px',
-          height: '44px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          color: '#9da7b8',
-          transition: 'all 0.2s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-          e.currentTarget.style.color = '#fff';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = '#9da7b8';
-        }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
@@ -363,29 +257,9 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
       </button>
 
       <button
+        className="side-nav-button"
         onClick={toggleFullscreen}
         title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-        style={{
-          width: '44px',
-          height: '44px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          color: '#9da7b8',
-          transition: 'all 0.2s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-          e.currentTarget.style.color = '#fff';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = '#9da7b8';
-        }}
       >
         {isFullscreen ? (
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
@@ -399,29 +273,9 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
       </button>
 
       <button
+        className="side-nav-button"
         onClick={onAiFocusClick || (() => {})}
         title="AI Focus Mode"
-        style={{
-          width: '44px',
-          height: '44px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          color: '#9da7b8',
-          transition: 'all 0.2s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-          e.currentTarget.style.color = '#fff';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = '#9da7b8';
-        }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
@@ -435,31 +289,6 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
             className={`side-nav-button ${activePage === 'alerts' ? 'active' : ''}`}
             onClick={() => onNavigate?.('alerts')}
             title="Alerts"
-            style={{
-              width: '44px',
-              height: '44px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: activePage === 'alerts' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              color: activePage === 'alerts' ? '#fff' : '#9da7b8',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              if (activePage !== 'alerts') {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                e.currentTarget.style.color = '#fff';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activePage !== 'alerts') {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#9da7b8';
-              }
-            }}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
@@ -467,34 +296,9 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
           </button>
 
           <button
-            onClick={onSettingsClick}
             className={`side-nav-button ${activePage === 'settings' ? 'active' : ''}`}
+            onClick={onSettingsClick}
             title="Settings"
-            style={{
-              width: '44px',
-              height: '44px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: activePage === 'settings' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              color: activePage === 'settings' ? '#fff' : '#9da7b8',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              if (activePage !== 'settings') {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                e.currentTarget.style.color = '#fff';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activePage !== 'settings') {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#9da7b8';
-              }
-            }}
           >
             <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 4.754a3.246 3.246 0 100 6.492 3.246 3.246 0 000-6.492zM5.754 8a2.246 2.246 0 114.492 0 2.246 2.246 0 01-4.492 0z"/>
@@ -506,34 +310,8 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
 
       {/* Selected User Profile Picture at Bottom */}
       <div
+        className="side-nav-profile"
         onClick={() => onNavigate?.('users')}
-        style={{
-          width: '44px',
-          height: '44px',
-          borderRadius: '50%',
-          background: selectedUser?.profile_picture 
-            ? 'transparent' 
-            : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
-          fontSize: '1.2rem',
-          fontWeight: '600',
-          cursor: 'pointer',
-          border: '2px solid rgba(255, 255, 255, 0.2)',
-          overflow: 'hidden',
-          transition: 'all 0.2s ease',
-          marginTop: '8px'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-          e.currentTarget.style.transform = 'scale(1.1)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-          e.currentTarget.style.transform = 'scale(1)';
-        }}
         title={selectedUser ? `${selectedUser.name} - Click to go to Users` : 'No user selected - Click to go to Users'}
       >
         {(() => {

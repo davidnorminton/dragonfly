@@ -500,7 +500,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     console.log('[Chat] Set currentSessionId to:', newSessionId, 'with title:', tempTitle);
     
     // Try to create session in database (but don't wait for it)
-    chatAPI.createSession(newSessionId).then(result => {
+    chatAPI.createSession(newSessionId, selectedUser?.id).then(result => {
       if (result.success && result.title) {
         // Update title if API returns a different one
         setSessionTitles(prev => ({
