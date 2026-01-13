@@ -55,7 +55,7 @@ function PersonaSelector({ selectedUser, onTestPersona }) {
         fontWeight: '600', 
         marginBottom: '12px' 
       }}>
-        Select Persona
+        Switch Persona
       </h3>
       <p style={{ 
         color: '#9da7b8', 
@@ -73,8 +73,7 @@ function PersonaSelector({ selectedUser, onTestPersona }) {
           overflowY: 'visible', // Allow overflow to prevent cut-off
           paddingBottom: '10px',
           paddingTop: '4px', // Extra top padding to prevent cut-off
-          paddingLeft: '12px',
-          marginLeft: '12px',
+          paddingLeft: '6px',
           scrollBehavior: 'smooth',
           WebkitOverflowScrolling: 'touch'
         }}
@@ -166,80 +165,58 @@ function PersonaSelector({ selectedUser, onTestPersona }) {
             <div style={{
               display: 'flex',
               flexDirection: 'column',
-              alignItems: 'stretch',
+              alignItems: 'center',
               width: '100%'
             }}>
               <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '8px',
-                width: '100%',
-                marginBottom: '4px'
-              }}>
-                <div style={{
-                  color: '#fff',
-                  fontSize: '1.1rem',
-                  fontWeight: '500',
-                  flex: 1,
-                  textAlign: 'left'
-                }}>
-                  {persona.title || persona.name}
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTestPersona(e, persona);
-                  }}
-                  title="Test this persona"
-                  style={{
-                    padding: '4px',
-                    background: 'transparent',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#9da7b8',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.2s ease',
-                    width: '20px',
-                    height: '20px',
-                    opacity: 0.6,
-                    flexShrink: 0
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.opacity = '1';
-                    e.currentTarget.style.color = '#667eea';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.opacity = '0.6';
-                    e.currentTarget.style.color = '#9da7b8';
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            {persona.name === currentPersona && (
-              <div style={{
-                marginTop: '8px',
-                padding: '4px 8px',
-                background: 'rgba(102, 126, 234, 0.3)',
-                color: '#667eea',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
+                color: '#fff',
+                fontSize: '1.1rem',
                 fontWeight: '500',
-                textAlign: 'center'
+                textAlign: 'center',
+                width: '100%',
+                marginBottom: '8px'
               }}>
-                Active
+                {persona.title || persona.name}
               </div>
-            )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTestPersona(e, persona);
+                }}
+                title="Test this persona"
+                style={{
+                  padding: '4px',
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: '#9da7b8',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                  width: '20px',
+                  height: '20px',
+                  opacity: 0.6,
+                  margin: '0 auto'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = '1';
+                  e.currentTarget.style.color = '#667eea';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = '0.6';
+                  e.currentTarget.style.color = '#9da7b8';
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -472,7 +449,7 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
     <div className="settings-page">
       <div className="settings-container">
         <div className="settings-header">
-          <h2>Users and Personas</h2>
+          <h2>Switch User</h2>
         </div>
 
         <div className="settings-content">
@@ -564,7 +541,9 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                           marginBottom: '16px',
                           flexShrink: 0,
                           overflow: 'hidden',
-                          border: '2px solid rgba(255, 255, 255, 0.1)'
+                          border: user.is_admin 
+                            ? '3px solid #4caf50' 
+                            : '2px solid rgba(255, 255, 255, 0.1)'
                         }}
                       >
                         {(() => {
@@ -604,69 +583,53 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
                           color: '#fff',
                           fontSize: '1.1rem',
                           fontWeight: '500',
-                          textAlign: 'left',
+                          textAlign: 'center',
                           wordBreak: 'break-word',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '8px',
-                          width: '100%'
+                          width: '100%',
+                          marginBottom: '8px'
                         }}
                       >
-                        <span style={{ flex: 1 }}>{user.name}</span>
-                        {/* Edit button with minimalist icon - Admin can edit all, users can edit themselves */}
-                        {(isAdmin || (selectedUser && selectedUser.id === user.id)) && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditUser(user);
-                            }}
-                            style={{
-                              padding: '4px',
-                              background: 'transparent',
-                              border: 'none',
-                              borderRadius: '4px',
-                              color: '#9da7b8',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              transition: 'all 0.2s ease',
-                              width: '20px',
-                              height: '20px',
-                              opacity: 0.6,
-                              flexShrink: 0
-                            }}
-                            title="Edit user"
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.opacity = '1';
-                              e.currentTarget.style.color = '#667eea';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.opacity = '0.6';
-                              e.currentTarget.style.color = '#9da7b8';
-                            }}
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                            </svg>
-                          </button>
-                        )}
+                        {user.name}
                       </div>
-                      {user.is_admin && (
-                        <div style={{
-                          marginTop: '8px',
-                          padding: '2px 8px',
-                          background: 'rgba(76, 175, 80, 0.2)',
-                          color: '#4caf50',
-                          borderRadius: '12px',
-                          fontSize: '0.75rem',
-                          fontWeight: '500'
-                        }}>
-                        Admin
-                      </div>
-                    )}
+                      {/* Edit button with minimalist icon - Admin can edit all, users can edit themselves */}
+                      {(isAdmin || (selectedUser && selectedUser.id === user.id)) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditUser(user);
+                          }}
+                          style={{
+                            padding: '4px',
+                            background: 'transparent',
+                            border: 'none',
+                            borderRadius: '4px',
+                            color: '#9da7b8',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s ease',
+                            width: '20px',
+                            height: '20px',
+                            opacity: 0.6,
+                            margin: '0 auto'
+                          }}
+                          title="Edit user"
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.opacity = '1';
+                            e.currentTarget.style.color = '#667eea';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.opacity = '0.6';
+                            e.currentTarget.style.color = '#9da7b8';
+                          }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                          </svg>
+                        </button>
+                      )}
                   </div>
                     );
                   })}
