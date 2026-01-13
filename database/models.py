@@ -91,6 +91,7 @@ class ChatSession(Base):
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     session_id = Column(String, unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)  # Link to user
     title = Column(String, nullable=True)
     pinned = Column(Boolean, default=False, nullable=False)
     preset_id = Column(Integer, ForeignKey('prompt_presets.id'), nullable=True)
@@ -216,6 +217,38 @@ class VideoTVEpisode(Base):
 
     def __repr__(self):
         return f"<VideoTVEpisode S{self.season.season_number if self.season else '?'}E{self.episode_number}>"
+
+
+class VideoSimilarContent(Base):
+    """Store AI-generated similar movies/shows recommendations."""
+    __tablename__ = "video_similar_content"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    content_type = Column(String, nullable=False, index=True)  # 'movie' or 'tv_show'
+    content_id = Column(Integer, nullable=False, index=True)  # ID of movie or TV show
+    similar_items = Column(JSON, nullable=False)  # List of similar movies/shows with titles, years, reasons
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<VideoSimilarContent {self.content_type} {self.content_id}>"
+
+
+class User(Base):
+    """User profile model."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, nullable=False, index=True)
+    birthday = Column(DateTime(timezone=True), nullable=True)
+    profile_picture = Column(String, nullable=True)  # Path to profile picture file
+    pass_code = Column(String, nullable=True)  # User pass code
+    is_admin = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<User {self.name} (Admin: {self.is_admin})>"
 
 
 class VideoPlaybackProgress(Base):
@@ -383,7 +416,8 @@ class MusicPlaylist(Base):
     __tablename__ = "music_playlists"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    name = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)  # Removed unique constraint, now unique per user
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)  # Link to user
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     songs = relationship("MusicPlaylistSong", back_populates="playlist", cascade="all, delete-orphan")

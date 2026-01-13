@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TopBar } from './components/TopBar';
+import { SideNav } from './components/SideNav';
 import { LeftPanel } from './components/LeftPanel';
 import { OctopusEnergy } from './components/OctopusEnergy';
 import { ApiHealth } from './components/ApiHealth';
@@ -15,6 +15,10 @@ import { ChatPage } from './pages/Chat';
 import { NewsPage } from './pages/News';
 import { SettingsPage } from './pages/Settings';
 import { AlertsPage } from './pages/Alerts';
+import { UsersPage } from './pages/Users';
+import { AddUserPage } from './pages/AddUser';
+import { EditUserPage } from './pages/EditUser';
+import { SearchOverlay } from './components/SearchOverlay';
 import { WaveformMic } from './components/WaveformMic';
 import './styles/index.css';
 
@@ -38,8 +42,63 @@ function App() {
   const [fillerAudioObj, setFillerAudioObj] = useState(null); // Filler audio for immediate feedback
   const [micRestartKey, setMicRestartKey] = useState(0);
   const [aiFocusMode, setAiFocusMode] = useState('question'); // 'question' or 'task'
-  const [activePage, setActivePage] = useState('dashboard');
+  // Initialize activePage from URL or localStorage
+  const [activePage, setActivePage] = useState(() => {
+    // Check URL hash first
+    const hash = window.location.hash.slice(1);
+    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor'].includes(hash)) {
+      return hash;
+    }
+    // Fallback to localStorage
+    const stored = localStorage.getItem('activePage');
+    return stored || 'dashboard';
+  });
+  const [pageData, setPageData] = useState(null); // For passing data to pages like edit-user
+  const [searchOverlayOpen, setSearchOverlayOpen] = useState(false);
   const [showLeft, setShowLeft] = useState(true);
+  const [selectedUser, setSelectedUser] = useState(() => {
+    // Load selected user from localStorage if available
+    const stored = localStorage.getItem('selectedUser');
+    return stored ? JSON.parse(stored) : null;
+  });
+  
+  // Persist selected user to localStorage
+  useEffect(() => {
+    if (selectedUser) {
+      localStorage.setItem('selectedUser', JSON.stringify(selectedUser));
+    } else {
+      localStorage.removeItem('selectedUser');
+    }
+  }, [selectedUser]);
+
+  // Listen for user updates and refresh selectedUser if it's the same user
+  useEffect(() => {
+    const handleUserUpdate = (event) => {
+      const updatedUser = event.detail;
+      if (selectedUser && selectedUser.id === updatedUser.id) {
+        console.log('Updating selected user with new data:', updatedUser);
+        setSelectedUser(updatedUser);
+      }
+    };
+    
+    window.addEventListener('userUpdated', handleUserUpdate);
+    return () => window.removeEventListener('userUpdated', handleUserUpdate);
+  }, [selectedUser]);
+
+  // Listen for hash changes (browser back/forward)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.slice(1);
+      if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor'].includes(hash)) {
+        setActivePage(hash);
+        localStorage.setItem('activePage', hash);
+        setSearchOverlayOpen(false);
+      }
+    };
+    
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [videoSearchQuery, setVideoSearchQuery] = useState('');
@@ -493,18 +552,27 @@ function App() {
 
   return (
     <div className={`app-shell ${aiFocusActive ? 'ai-focus' : ''}`}>
-      <TopBar 
-        onSwitchAI={handleSwitchAI}
-        onSettingsClick={() => setActivePage('settings')}
-        onAiFocusClick={toggleAiFocus}
+      <SideNav
         activePage={activePage}
-        onNavigate={(page) => setActivePage(page)}
-        onMusicSearch={(query) => setMusicSearchQuery(query)}
-        onChatSearch={(query) => setChatSearchQuery(query)}
-        onVideoSearch={(query) => setVideoSearchQuery(query)}
-        musicSearchResults={musicSearchResults}
-        chatSearchResults={chatSearchResults}
-        videoSearchResults={videoSearchResults}
+        onNavigate={(page) => {
+          setActivePage(page);
+          // Update URL hash
+          window.location.hash = page;
+          // Save to localStorage
+          localStorage.setItem('activePage', page);
+          // Close search overlay when navigating
+          setSearchOverlayOpen(false);
+        }}
+        onSwitchAI={handleSwitchAI}
+        onSettingsClick={() => {
+          setActivePage('settings');
+          window.location.hash = 'settings';
+          localStorage.setItem('activePage', 'settings');
+          setSearchOverlayOpen(false);
+        }}
+        onAiFocusClick={toggleAiFocus}
+        selectedUser={selectedUser}
+        onSearchClick={() => setSearchOverlayOpen(true)}
       />
       {activePage === 'music' ? (
         <MusicPage 
@@ -513,6 +581,7 @@ function App() {
           onMicClick={toggleAiFocus}
           searchQuery={musicSearchQuery}
           onSearchResultsChange={setMusicSearchResults}
+          selectedUser={selectedUser}
         />
       ) : activePage === 'music-editor' ? (
         <MusicEditor />
@@ -529,13 +598,51 @@ function App() {
           onMicClick={toggleAiFocus}
           searchQuery={chatSearchQuery}
           onSearchResultsChange={setChatSearchResults}
+          selectedUser={selectedUser}
         />
       ) : activePage === 'news' ? (
         <NewsPage />
       ) : activePage === 'settings' ? (
-        <SettingsPage onNavigate={(page) => setActivePage(page)} />
+        <SettingsPage onNavigate={(page) => {
+          setActivePage(page);
+          window.location.hash = page;
+          localStorage.setItem('activePage', page);
+          setSearchOverlayOpen(false);
+        }} />
       ) : activePage === 'alerts' ? (
         <AlertsPage />
+      ) : activePage === 'users' ? (
+        <UsersPage 
+          key={`users-${Date.now()}`}
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setPageData(data);
+            setSearchOverlayOpen(false);
+          }}
+          selectedUser={selectedUser}
+          onSelectUser={setSelectedUser}
+        />
+      ) : activePage === 'add-user' ? (
+        <AddUserPage onNavigate={(page, data) => {
+          setActivePage(page);
+          window.location.hash = page;
+          localStorage.setItem('activePage', page);
+          setPageData(data);
+          setSearchOverlayOpen(false);
+        }} />
+      ) : activePage === 'edit-user' ? (
+        <EditUserPage 
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setPageData(data);
+            setSearchOverlayOpen(false);
+          }} 
+          user={pageData}
+        />
       ) : (
         <div className="main-container">
           {showLeft && (
@@ -558,6 +665,31 @@ function App() {
           ▶
         </div>
       )}
+      {/* Search Overlay */}
+      {searchOverlayOpen && (activePage === 'chat' || activePage === 'music' || activePage === 'videos') && (
+        <SearchOverlay
+          activePage={activePage}
+          onClose={() => {
+            setSearchOverlayOpen(false);
+            // Clear search query when closing
+            if (activePage === 'music') setMusicSearchQuery('');
+            if (activePage === 'chat') setChatSearchQuery('');
+            if (activePage === 'videos') setVideoSearchQuery('');
+          }}
+          searchQuery={
+            activePage === 'music' ? musicSearchQuery :
+            activePage === 'chat' ? chatSearchQuery :
+            activePage === 'videos' ? videoSearchQuery : ''
+          }
+          onSearchChange={(query) => {
+            if (activePage === 'music') setMusicSearchQuery(query);
+            if (activePage === 'chat') setChatSearchQuery(query);
+            if (activePage === 'videos') setVideoSearchQuery(query);
+          }}
+          selectedUser={selectedUser}
+        />
+      )}
+      
       <PersonaModal 
         open={personaModalOpen}
         onClose={() => setPersonaModalOpen(false)}

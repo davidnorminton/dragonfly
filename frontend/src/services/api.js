@@ -37,13 +37,25 @@ export const chatAPI = {
     });
     return response;
   },
-  getSessions: () => api.get('/chat/sessions').then(res => res.data),
-  createSession: (sessionId) => api.post('/chat/sessions', { session_id: sessionId }).then(res => res.data),
+  getSessions: (userId) => {
+    const params = userId ? { user_id: userId } : {};
+    return api.get('/chat/sessions', { params }).then(res => res.data);
+  },
+  createSession: (sessionId, userId) => {
+    const body = { session_id: sessionId };
+    if (userId) body.user_id = userId;
+    return api.post('/chat/sessions', body).then(res => res.data);
+  },
   deleteSession: (sessionId) => api.delete(`/chat/sessions/${sessionId}`).then(res => res.data),
   getSessionTitle: (sessionId) => api.get(`/chat/sessions/${sessionId}/title`).then(res => res.data),
   updateSessionTitle: (sessionId, title) => api.put(`/chat/sessions/${sessionId}/title`, { title }).then(res => res.data),
   togglePin: (sessionId, pinned) => api.put(`/chat/sessions/${sessionId}/pin`, { pinned }).then(res => res.data),
   updateSessionPreset: (sessionId, presetId) => api.put(`/chat/sessions/${sessionId}/preset`, { preset_id: presetId }).then(res => res.data),
+  searchMessages: (query, userId, limit = 50) => {
+    const params = { query, limit };
+    if (userId) params.user_id = userId;
+    return api.get('/chat/search', { params }).then(res => res.data);
+  },
 };
 
 export const expertTypesAPI = {
@@ -189,6 +201,33 @@ export const videoAPI = {
     });
     if (!response.ok) throw new Error('Failed to get TV show cast and crew');
     return response.json();
+  },
+
+  async getSimilarContent(contentType, contentId) {
+    const response = await fetch(`/api/video/similar/${contentType}/${contentId}`);
+    if (!response.ok) throw new Error('Failed to get similar content');
+    return response.json();
+  },
+
+  async generateSimilarContent(contentType, contentId, title, year, description, genres) {
+    const response = await fetch('/api/video/generate-similar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: contentType,
+        content_id: contentId,
+        title,
+        year,
+        description,
+        genres
+      })
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Failed to generate similar content:', response.status, errorText);
+      throw new Error(`Failed to generate similar content: ${response.status} ${errorText}`);
+    }
+    return response.json();
   }
 };
 
@@ -206,7 +245,15 @@ export const musicAPI = {
   getVideos: (artist) => api.get('/music/artist/videos', { params: { artist } }).then(res => res.data),
   generateVideos: (artist) => api.post('/music/artist/videos', { artist }).then(res => res.data),
   clearAllVideos: () => api.delete('/music/artist/videos').then(res => res.data),
-  getPlaylists: () => api.get('/music/playlists').then(res => res.data),
+  getPlaylists: (userId) => {
+    const params = userId ? { user_id: userId } : {};
+    return api.get('/music/playlists', { params }).then(res => res.data);
+  },
+  listPlaylists: (userId) => {
+    // Alias for getPlaylists
+    const params = userId ? { user_id: userId } : {};
+    return api.get('/music/playlists', { params }).then(res => res.data);
+  },
   createPlaylist: (name) => api.post('/music/playlists', { name }).then(res => res.data),
   addToPlaylist: (payload) => api.post('/music/playlists/add', payload).then(res => res.data),
   removeFromPlaylist: (playlistName, songPath) => api.delete('/music/playlists/remove', { params: { playlist_name: playlistName, song_path: songPath } }).then(res => res.data),
@@ -296,6 +343,13 @@ export const actionsAPI = {
 export const audioAPI = {
   playLastMessage: (sessionId) => api.post('/audio/last-message', { session_id: sessionId }).then(res => res.data),
   generateAudioForMessage: (sessionId, messageId) => api.post('/audio/message', { session_id: sessionId, message_id: messageId }).then(res => res.data),
+};
+
+export const usersAPI = {
+  getUsers: () => api.get('/users').then(res => res.data),
+  createUser: (userData) => api.post('/users', userData).then(res => res.data),
+  updateUser: (userId, userData) => api.put(`/users/${userId}`, userData).then(res => res.data),
+  deleteUser: (userId) => api.delete(`/users/${userId}`).then(res => res.data),
 };
 
 export const octopusAPI = {

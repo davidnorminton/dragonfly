@@ -9,6 +9,16 @@ export const useChromecast = () => {
   const [castSession, setCastSession] = useState(null);
   const [currentMedia, setCurrentMedia] = useState(null);
   const [playbackInfo, setPlaybackInfo] = useState(null);
+  const [savedDeviceId, setSavedDeviceId] = useState(null);
+
+  // Load saved cast device from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('chromecast_device_id');
+    if (saved) {
+      setSavedDeviceId(saved);
+      console.log('📱 Loaded saved cast device:', saved);
+    }
+  }, []);
 
   useEffect(() => {
     let initAttempts = 0;
@@ -32,7 +42,8 @@ export const useChromecast = () => {
         
         castContext.setOptions({
           receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-          autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+          autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+          resumeSavedSession: true // Resume previous session if available
         });
 
         castContext.addEventListener(
@@ -68,6 +79,16 @@ export const useChromecast = () => {
                 sessionId: session?.getSessionId(),
                 receiver: session?.getCastDevice()?.friendlyName
               });
+              // Save device ID when session starts
+              if (session) {
+                const device = session.getCastDevice();
+                if (device) {
+                  const deviceId = device.deviceId || device.friendlyName;
+                  localStorage.setItem('chromecast_device_id', deviceId);
+                  setSavedDeviceId(deviceId);
+                  console.log('💾 Auto-saved cast device:', deviceId, device.friendlyName);
+                }
+              }
               break;
             case window.cast.framework.SessionState.SESSION_START_FAILED:
               console.error('❌ SESSION_START_FAILED - Could not connect');
@@ -113,25 +134,36 @@ export const useChromecast = () => {
     }
   }, []);
 
-  const castVideo = useCallback((videoUrl, title, posterUrl = null, currentTime = 0) => {
+  const castVideo = useCallback((videoUrl, title, posterUrl = null, currentTime = 0, deviceId = null) => {
     if (!window.cast?.framework) return;
 
     const castContext = window.cast.framework.CastContext.getInstance();
     const session = castContext.getCurrentSession();
 
     if (!session) {
+      // Request a new session (will show device selection dialog)
+      // The SDK will auto-reconnect to saved session if available due to autoJoinPolicy
       castContext.requestSession().then(() => {
         const newSession = castContext.getCurrentSession();
         if (newSession) {
+          // Save the device ID for future use
+          const device = newSession.getCastDevice();
+          if (device) {
+            const deviceId = device.deviceId || device.friendlyName;
+            localStorage.setItem('chromecast_device_id', deviceId);
+            setSavedDeviceId(deviceId);
+            console.log('💾 Saved cast device:', deviceId, device.friendlyName);
+          }
           loadMedia(newSession, videoUrl, title, posterUrl, currentTime);
         }
       }).catch((error) => {
         console.error('Failed to start Cast session:', error.code);
       });
     } else {
+      // Session already exists, just load media
       loadMedia(session, videoUrl, title, posterUrl, currentTime);
     }
-  }, []);
+  }, [savedDeviceId]);
 
   const loadMedia = (session, videoUrl, title, posterUrl, currentTime) => {
     try {
@@ -157,33 +189,63 @@ export const useChromecast = () => {
             // Store media reference for updates
             window.__currentCastMedia = media;
             
-            // Listen for playback completion
+            // Listen for playback completion and status changes
             media.addUpdateListener((isAlive) => {
               if (!isAlive) return;
               
               const playerState = media.playerState;
               const currentTime = media.getEstimatedTime();
               const duration = media.media?.duration;
+              const session = window.cast.framework.CastContext.getInstance().getCurrentSession();
+              const volume = session?.getVolume()?.level ?? 1;
+              
+              // Better end detection: episode ended if IDLE state after playing
+              // or if we're very close to the end (within 1 second)
+              const isAtEnd = duration && currentTime > 0 && (duration - currentTime) <= 1;
+              const hasEnded = (playerState === 'IDLE' && currentTime > 10) || 
+                              (playerState === 'IDLE' && isAtEnd) ||
+                              (isAtEnd && playerState !== 'PLAYING');
               
               // Store current playback info
               window.__currentPlaybackInfo = {
                 currentTime,
                 duration,
                 playerState,
+                volume,
                 isIdle: playerState === 'IDLE',
-                hasEnded: currentTime > 0 && duration && currentTime >= duration - 2
+                hasEnded: hasEnded,
+                isAtEnd: isAtEnd
               };
               
               // Log when episode is ending or has ended
-              if (playerState === 'IDLE' || (currentTime && duration && currentTime >= duration - 2)) {
+              if (hasEnded || isAtEnd) {
                 console.log('🎬 Episode ending/ended:', { 
                   playerState, 
                   currentTime: Math.floor(currentTime), 
                   duration: Math.floor(duration),
-                  remaining: duration ? Math.floor(duration - currentTime) : 0
+                  remaining: duration ? Math.floor(duration - currentTime) : 0,
+                  hasEnded,
+                  isAtEnd
                 });
               }
             });
+            
+            // Also listen for media status changes
+            const mediaStatusListener = (event) => {
+              const playerState = event.playerState;
+              if (playerState === 'IDLE' && window.__currentPlaybackInfo) {
+                const { currentTime, duration } = window.__currentPlaybackInfo;
+                if (currentTime > 10 && duration && currentTime >= duration - 1) {
+                  window.__currentPlaybackInfo.hasEnded = true;
+                  console.log('🎬 Media status: Episode ended (IDLE at end)');
+                }
+              }
+            };
+            
+            // Add status listener if available
+            if (media.addMediaStatusListener) {
+              media.addMediaStatusListener(mediaStatusListener);
+            }
           }
         },
         (error) => console.error('Failed to cast:', error.code)
@@ -204,6 +266,42 @@ export const useChromecast = () => {
       console.log('⏹️ Cast session ended');
     }
   }, []);
+
+  // Control functions for casting
+  const playCast = useCallback(() => {
+    if (!window.__currentCastMedia) return;
+    const media = window.__currentCastMedia;
+    if (media.playerState === 'PAUSED') {
+      media.play();
+      console.log('▶️ Cast play');
+    }
+  }, []);
+
+  const pauseCast = useCallback(() => {
+    if (!window.__currentCastMedia) return;
+    const media = window.__currentCastMedia;
+    if (media.playerState === 'PLAYING') {
+      media.pause();
+      console.log('⏸️ Cast pause');
+    }
+  }, []);
+
+  const seekCast = useCallback((timeInSeconds) => {
+    if (!window.__currentCastMedia) return;
+    const media = window.__currentCastMedia;
+    const seekRequest = new window.chrome.cast.media.SeekRequest();
+    seekRequest.currentTime = timeInSeconds;
+    media.seek(seekRequest);
+    console.log('⏩ Cast seek to:', timeInSeconds);
+  }, []);
+
+  const setCastVolume = useCallback((volume) => {
+    if (!castSession) return;
+    const volumeRequest = new window.chrome.cast.VolumeRequest();
+    volumeRequest.volume = Math.max(0, Math.min(1, volume));
+    castSession.setVolume(volumeRequest);
+    console.log('🔊 Cast volume set to:', volumeRequest.volume);
+  }, [castSession]);
 
   // Poll for playback info updates
   useEffect(() => {
@@ -228,7 +326,12 @@ export const useChromecast = () => {
     currentMedia,
     playbackInfo,
     castVideo,
-    stopCasting
+    stopCasting,
+    playCast,
+    pauseCast,
+    seekCast,
+    setCastVolume,
+    savedDeviceId
   };
 };
 

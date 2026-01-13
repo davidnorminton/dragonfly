@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { musicAPI } from '../services/api';
 import { useMusicPlayer } from '../contexts/MusicPlayerContext';
 
-export function MusicPage({ searchQuery = '', onSearchResultsChange }) {
+export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUser }) {
   const [library, setLibrary] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -288,7 +288,7 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange }) {
   const loadPlaylists = async () => {
     setPlaylistLoading(true);
     try {
-      const res = await musicAPI.getPlaylists();
+      const res = await musicAPI.listPlaylists(selectedUser?.id);
       if (res?.success) {
         setPlaylists(res.playlists || []);
       }
@@ -302,7 +302,7 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange }) {
   useEffect(() => {
     loadLibrary();
     loadPlaylists();
-  }, []);
+  }, [selectedUser]); // Reload when selected user changes
 
   // Listen for stopAllAudio event (e.g., when entering AI focus mode)
   // stopAllAudio is now handled by MusicPlayerContext
@@ -741,7 +741,7 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange }) {
     } else {
       try {
         setPlaylistModalError('');
-        await musicAPI.createPlaylist(name);
+        await musicAPI.createPlaylist(name, selectedUser?.id);
         await loadPlaylists();
       } catch (e) {
         console.error('Failed to create playlist', e);

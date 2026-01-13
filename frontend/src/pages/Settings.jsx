@@ -1,10 +1,280 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { configAPI, systemAPI, routerAPI, musicAPI, videoAPI, personaAPI, databaseAPI } from '../services/api';
+import { configAPI, systemAPI, routerAPI, musicAPI, videoAPI, personaAPI, databaseAPI, usersAPI } from '../services/api';
 import { useRouterConfig } from '../hooks/useRouterConfig';
 import { useAIModels } from '../hooks/useAIModels';
 import { FolderPicker, FilePicker } from '../components/FolderPicker';
 import { ConversionProgressModal } from '../components/ConversionProgressModal';
 import { CoverArtModal } from '../components/CoverArtModal';
+
+function UserManagementPanel({ onNavigate }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [editingPassCode, setEditingPassCode] = useState({});
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await usersAPI.getUsers();
+      if (result.success) {
+        console.log('Loaded users:', result.users);
+        result.users.forEach(user => {
+          console.log(`User ${user.id} (${user.name}): pass_code =`, user.pass_code, 'type:', typeof user.pass_code);
+        });
+        setUsers(result.users);
+      } else {
+        setError('Failed to load users');
+      }
+    } catch (err) {
+      console.error('Error loading users:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleAdmin = async (userId, currentAdminStatus) => {
+    try {
+      setError(null);
+      const result = await usersAPI.updateUser(userId, { is_admin: !currentAdminStatus });
+      if (result.success) {
+        setSuccess(`User ${result.user.is_admin ? 'promoted to admin' : 'removed from admin'}`);
+        await loadUsers();
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        setError('Failed to update user');
+      }
+    } catch (err) {
+      console.error('Error updating user:', err);
+      setError(err.message);
+    }
+  };
+
+  const handlePassCodeChange = (userId, value) => {
+    setEditingPassCode({ ...editingPassCode, [userId]: value });
+  };
+
+  const handlePassCodeBlur = async (userId) => {
+    const newPassCode = editingPassCode[userId];
+    const user = users.find(u => u.id === userId);
+    const currentPassCode = user?.pass_code || '';
+    
+    // Only update if the value has changed
+    if (newPassCode !== undefined && newPassCode !== currentPassCode) {
+      try {
+        setError(null);
+        // Use FormData to match backend expectations
+        const formData = new FormData();
+        // Send the pass_code value, or null if empty string
+        formData.append('pass_code', newPassCode || '');
+        
+        const response = await fetch(`/api/users/${userId}`, {
+          method: 'PUT',
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+          const errorMsg = result.detail || result.error || `HTTP ${response.status}`;
+          throw new Error(errorMsg);
+        }
+        
+        if (result.success) {
+          console.log('Update successful, response:', result);
+          console.log('Updated user pass_code:', result.user?.pass_code);
+          setSuccess('Pass code updated');
+          // Clear editing state first
+          const newEditing = { ...editingPassCode };
+          delete newEditing[userId];
+          setEditingPassCode(newEditing);
+          // Update the user in the local state immediately with the response data
+          if (result.user) {
+            setUsers(prevUsers => prevUsers.map(u => 
+              u.id === userId ? { ...u, pass_code: result.user.pass_code } : u
+            ));
+          }
+          // Then reload users to get the updated data from server
+          await loadUsers();
+          setTimeout(() => setSuccess(null), 3000);
+        } else {
+          setError(result.error || result.detail || 'Failed to update pass code');
+        }
+      } catch (err) {
+        console.error('Error updating pass code:', err);
+        setError(err.message || 'Failed to update pass code');
+      }
+    } else {
+      // Clear editing state if no change
+      const newEditing = { ...editingPassCode };
+      delete newEditing[userId];
+      setEditingPassCode(newEditing);
+    }
+  };
+
+  const handlePassCodeKeyDown = (e, userId) => {
+    if (e.key === 'Enter') {
+      e.target.blur();
+    } else if (e.key === 'Escape') {
+      // Cancel editing
+      const newEditing = { ...editingPassCode };
+      delete newEditing[userId];
+      setEditingPassCode(newEditing);
+      // Reset to original value
+      const user = users.find(u => u.id === userId);
+      if (user) {
+        setEditingPassCode({ ...editingPassCode, [userId]: user.pass_code || '' });
+      }
+    }
+  };
+
+  return (
+    <div className="settings-panel">
+      <div className="settings-panel-header">
+        <h3>User Management</h3>
+        <button
+          onClick={() => onNavigate?.('users')}
+          className="save-button"
+        >
+          Go to Users Page
+        </button>
+      </div>
+      <div className="settings-panel-content">
+        {error && (
+          <div className="settings-message error" style={{ marginBottom: '16px' }}>
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="settings-message success" style={{ marginBottom: '16px' }}>
+            {success}
+          </div>
+        )}
+        
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#9da7b8' }}>
+            Loading users...
+          </div>
+        ) : users.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#9da7b8' }}>
+            No users found. Go to Users page to add users.
+          </div>
+        ) : (
+          <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'rgba(255, 255, 255, 0.05)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.85rem', fontWeight: '600', color: '#9da7b8', textTransform: 'uppercase' }}>Name</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.85rem', fontWeight: '600', color: '#9da7b8', textTransform: 'uppercase' }}>Pass Code</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.85rem', fontWeight: '600', color: '#9da7b8', textTransform: 'uppercase' }}>Status</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '0.85rem', fontWeight: '600', color: '#9da7b8', textTransform: 'uppercase' }}>Admin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => {
+                  const isEditing = editingPassCode.hasOwnProperty(user.id);
+                  // Get the current pass_code value - handle null, undefined, and empty string
+                  const currentPassCode = (user.pass_code != null && user.pass_code !== undefined) ? String(user.pass_code) : '';
+                  const displayValue = isEditing ? (editingPassCode[user.id] !== undefined ? editingPassCode[user.id] : currentPassCode) : currentPassCode;
+                  
+                  // Debug: log user data for all users
+                  console.log(`User ${user.id} (${user.name}): pass_code =`, user.pass_code, 'type:', typeof user.pass_code, 'truthy:', !!user.pass_code);
+                  
+                  return (
+                    <tr key={user.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      <td style={{ padding: '16px', color: '#fff', fontSize: '0.95rem' }}>{user.name}</td>
+                      <td style={{ padding: '16px' }}>
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={displayValue}
+                            onChange={(e) => handlePassCodeChange(user.id, e.target.value)}
+                            onBlur={() => handlePassCodeBlur(user.id)}
+                            onKeyDown={(e) => handlePassCodeKeyDown(e, user.id)}
+                            autoFocus
+                            style={{
+                              width: '100%',
+                              padding: '6px 10px',
+                              background: 'rgba(255, 255, 255, 0.1)',
+                              border: '1px solid rgba(102, 126, 234, 0.5)',
+                              borderRadius: '4px',
+                              color: '#fff',
+                              fontSize: '0.85rem',
+                              outline: 'none'
+                            }}
+                          />
+                        ) : (
+                          <div
+                            onClick={() => {
+                              console.log('Clicking pass_code for user', user.id, 'current value:', user.pass_code);
+                              setEditingPassCode({ ...editingPassCode, [user.id]: (user.pass_code || '') });
+                            }}
+                            style={{
+                              color: (user.pass_code && String(user.pass_code).trim()) ? '#fff' : '#9da7b8',
+                              fontSize: '0.85rem',
+                              cursor: 'pointer',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              transition: 'background 0.2s ease',
+                              minHeight: '24px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'transparent';
+                            }}
+                            title={user.pass_code ? `Pass code: ${user.pass_code}` : 'Click to set pass code'}
+                          >
+                            {(() => {
+                              const code = user.pass_code;
+                              console.log('Rendering pass_code for user', user.id, 'value:', code, 'type:', typeof code, 'truthy:', !!code);
+                              if (code != null && code !== undefined && String(code).trim()) {
+                                return String(code);
+                              }
+                              return '-';
+                            })()}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        {user.is_admin ? (
+                          <span style={{ padding: '4px 8px', background: 'rgba(76, 175, 80, 0.2)', color: '#4caf50', borderRadius: '4px', fontSize: '0.85rem' }}>Admin</span>
+                        ) : (
+                          <span style={{ color: '#9da7b8', fontSize: '0.85rem' }}>User</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '16px', textAlign: 'right' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={user.is_admin}
+                            onChange={() => handleToggleAdmin(user.id, user.is_admin)}
+                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                          />
+                          <span style={{ fontSize: '0.85rem', color: '#9da7b8' }}>Admin</span>
+                        </label>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function SettingsPage({ onNavigate }) {
   const [activeTab, setActiveTab] = useState('personas');
@@ -145,6 +415,7 @@ export function SettingsPage({ onNavigate }) {
     if (activeTab === 'database') {
       loadDatabaseTables();
     }
+    // Users tab doesn't need to load data here - it's handled by UsersPage
   }, [activeTab]);
   
   useEffect(() => {
@@ -721,6 +992,12 @@ export function SettingsPage({ onNavigate }) {
             onClick={() => setActiveTab('database')}
           >
             Database
+          </button>
+          <button
+            className={activeTab === 'users' ? 'active' : ''}
+            onClick={() => setActiveTab('users')}
+          >
+            Users
           </button>
         </div>
 
@@ -2506,6 +2783,10 @@ export function SettingsPage({ onNavigate }) {
                 </div>
               )}
             </div>
+          )}
+
+          {activeTab === 'users' && (
+            <UserManagementPanel onNavigate={onNavigate} />
           )}
         </div>
       </div>

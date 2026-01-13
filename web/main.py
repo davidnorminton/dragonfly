@@ -1,5 +1,5 @@
 """FastAPI application for the web GUI."""
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse, JSONResponse, Response
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +13,7 @@ import re
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import time
 from core.processor import Processor
 from services.ai_service import AIService
 import tempfile
@@ -24,9 +25,9 @@ import os.path
 from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
-from database.base import AsyncSessionLocal, engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig
-from sqlalchemy import select, desc, func, or_, delete, and_
+from database.base import AsyncSessionLocal, engine as db_engine
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User
+from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import OperationalError
@@ -4597,7 +4598,7 @@ async def _verify_youtube_video(video_id: str) -> bool:
 
 async def _ensure_playlist_tables():
     # Ensure playlist tables exist (lightweight guard)
-    async with engine.begin() as conn:
+    async with db_engine.begin() as conn:
         await conn.run_sync(MusicPlaylist.__table__.create, checkfirst=True)
         await conn.run_sync(MusicPlaylistSong.__table__.create, checkfirst=True)
 
@@ -4618,11 +4619,29 @@ class PlaylistAddSong(BaseModel):
 
 
 @app.get("/api/music/playlists")
-async def list_playlists():
+async def list_playlists(user_id: int = None):
+    """Get all playlists, filtered by user_id if provided."""
     try:
         await _ensure_playlist_tables()
         async with AsyncSessionLocal() as session:
-            playlists = await session.execute(select(MusicPlaylist))
+            query = select(MusicPlaylist)
+            
+            # Always filter by user_id if provided, or return empty if column exists and user_id is None
+            try:
+                # Check if user_id column exists
+                test_query = text("SELECT user_id FROM music_playlists LIMIT 1")
+                await session.execute(test_query)
+                # Column exists - filter by user_id
+                if user_id is not None:
+                    query = query.where(MusicPlaylist.user_id == user_id)
+                else:
+                    # If user_id is None and column exists, return empty (no user selected)
+                    query = query.where(MusicPlaylist.user_id == -1)  # Impossible condition = empty result
+            except Exception:
+                # Column doesn't exist yet - return all playlists (backward compatibility)
+                pass
+            
+            playlists = await session.execute(query)
             playlists = playlists.scalars().all()
             result = []
             for pl in playlists:
@@ -4680,17 +4699,39 @@ async def list_playlists():
 
 
 @app.post("/api/music/playlists")
-async def create_playlist(payload: PlaylistCreate):
+async def create_playlist(payload: PlaylistCreate, user_id: int = None):
+    """Create a new playlist, optionally linked to a user."""
     await _ensure_playlist_tables()
     name = payload.name.strip()
     if not name:
         return {"success": False, "error": "name is required"}
     async with AsyncSessionLocal() as session:
         try:
-            exists = await session.scalar(select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower()))
+            # Check if playlist exists - filter by user_id if provided
+            query = select(MusicPlaylist).where(func.lower(MusicPlaylist.name) == name.lower())
+            if user_id is not None:
+                try:
+                    test_query = text("SELECT user_id FROM music_playlists LIMIT 1")
+                    await session.execute(test_query)
+                    query = query.where(MusicPlaylist.user_id == user_id)
+                except Exception:
+                    pass  # Column doesn't exist yet
+            
+            exists = await session.scalar(query)
             if exists:
                 return {"success": True, "playlist": {"id": exists.id, "name": exists.name}}
-            pl = MusicPlaylist(name=name)
+            
+            # Create playlist - check if user_id column exists
+            playlist_data = {"name": name}
+            if user_id is not None:
+                try:
+                    test_query = text("SELECT user_id FROM music_playlists LIMIT 1")
+                    await session.execute(test_query)
+                    playlist_data["user_id"] = user_id
+                except Exception:
+                    pass  # Column doesn't exist yet
+            
+            pl = MusicPlaylist(**playlist_data)
             session.add(pl)
             await session.commit()
             await session.refresh(pl)
@@ -5444,6 +5485,319 @@ async def save_playback_progress(data: dict):
     except Exception as e:
         logger.error(f"Error saving playback progress: {e}")
         return {"success": False, "error": str(e)}
+
+
+@app.post("/api/video/generate-similar")
+async def generate_similar_content(request: Request):
+    """Generate similar movies/shows using AI and store in database."""
+    data = await request.json()
+    content_type = data.get("content_type")  # 'movie' or 'tv_show'
+    content_id = data.get("content_id")
+    title = data.get("title")
+    year = data.get("year")
+    description = data.get("description", "")
+    genres = data.get("genres", [])
+    
+    if not content_type or content_id is None or not title:
+        raise HTTPException(status_code=400, detail="content_type, content_id, and title are required")
+    
+    if content_type not in ['movie', 'tv_show']:
+        raise HTTPException(status_code=400, detail="content_type must be 'movie' or 'tv_show'")
+    
+    logger.info(f"🎬 Generating similar {content_type}s for: {title} ({year})")
+    
+    try:
+        # Build AI prompt
+        content_type_label = "movies" if content_type == "movie" else "TV shows"
+        genres_text = ", ".join([g.get("name", g) if isinstance(g, dict) else str(g) for g in genres]) if genres else "unknown genres"
+        description_text = description[:500] if description else "no description available"
+        
+        prompt = f"""List 10 {content_type_label} similar to "{title}" ({year if year else 'unknown year'}).
+
+Consider:
+- Genre(s): {genres_text}
+- Description: {description_text}
+
+For each similar {content_type_label[:-1]}, provide:
+- Title
+- Year (if known)
+- Brief reason why it's similar (1-2 sentences)
+
+Format your response as a JSON array of objects with keys: "title", "year" (can be null), and "reason".
+Example format:
+[
+  {{"title": "Movie Title", "year": 2020, "reason": "Similar themes and genre"}},
+  {{"title": "Another Movie", "year": null, "reason": "Shared director and style"}}
+]
+
+Return ONLY the JSON array, no additional text or markdown formatting."""
+
+        # Call AI service
+        from services.ai_service import AIService
+        ai_service = AIService()
+        
+        logger.info(f"🤖 Calling AI to generate similar {content_type_label}...")
+        ai_result = await ai_service.execute_with_system_prompt(
+            question=prompt,
+            system_prompt="You are a helpful assistant that provides movie and TV show recommendations. Always return valid JSON arrays.",
+            max_tokens=2048
+        )
+        
+        ai_answer = ai_result.get("answer", "") if isinstance(ai_result, dict) else ""
+        
+        if not ai_answer:
+            raise HTTPException(status_code=500, detail="AI service returned empty response")
+        
+        # Parse JSON from AI response
+        import json
+        import re
+        
+        # Try to extract JSON array from response
+        json_match = re.search(r'\[.*\]', ai_answer, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+        else:
+            # Try parsing the whole response
+            json_str = ai_answer.strip()
+            # Remove markdown code fences if present
+            json_str = re.sub(r'^```(?:json)?\s*', '', json_str, flags=re.MULTILINE)
+            json_str = re.sub(r'\s*```$', '', json_str, flags=re.MULTILINE)
+        
+        try:
+            similar_items = json.loads(json_str)
+            if not isinstance(similar_items, list):
+                raise ValueError("AI response is not a list")
+            
+            # Validate and clean items
+            cleaned_items = []
+            for item in similar_items[:10]:  # Limit to 10
+                if isinstance(item, dict) and item.get("title"):
+                    cleaned_items.append({
+                        "title": str(item.get("title", "")).strip(),
+                        "year": item.get("year") if item.get("year") else None,
+                        "reason": str(item.get("reason", "")).strip()
+                    })
+            
+            if not cleaned_items:
+                raise ValueError("No valid similar items found in AI response")
+            
+            logger.info(f"✅ AI generated {len(cleaned_items)} similar {content_type_label}")
+            
+            # Enrich items with database data, then TMDB for missing items
+            async with AsyncSessionLocal() as session:
+                # Get TMDB API key
+                config_result = await session.execute(
+                    select(ApiKeysConfig).where(ApiKeysConfig.service_name == "tmdb")
+                )
+                config = config_result.scalar_one_or_none()
+                tmdb_api_key = config.api_key if config else None
+                
+                tmdb = None
+                if tmdb_api_key:
+                    from services.tmdb_service import TMDBService
+                    tmdb = TMDBService(tmdb_api_key)
+                
+                enriched_items = []
+                for item in cleaned_items:
+                    item_title = item["title"]
+                    item_year = item.get("year")
+                    
+                    # Try to find matching movie or TV show in database first
+                    found_item = None
+                    db_id = None
+                    poster_path = None
+                    description = None
+                    db_title = None
+                    
+                    if content_type == "movie":
+                        # Search for movie by title (case-insensitive, partial match)
+                        query = select(VideoMovie).where(
+                            func.lower(VideoMovie.title).like(f"%{item_title.lower()}%")
+                        )
+                        if item_year:
+                            query = query.where(VideoMovie.year == item_year)
+                        
+                        result = await session.execute(query)
+                        found_movie = result.scalar_one_or_none()
+                        
+                        if found_movie:
+                            # Extract poster_path from various sources
+                            poster_path = found_movie.poster_path
+                            if not poster_path and found_movie.metadata and isinstance(found_movie.metadata, dict):
+                                poster_path = found_movie.metadata.get("poster_path")
+                            if not poster_path and found_movie.extra_metadata and isinstance(found_movie.extra_metadata, dict):
+                                poster_path = found_movie.extra_metadata.get("poster_path")
+                            
+                            # Extract description from various sources
+                            description = found_movie.description
+                            if not description and found_movie.metadata and isinstance(found_movie.metadata, dict):
+                                description = found_movie.metadata.get("overview")
+                            if not description and found_movie.extra_metadata and isinstance(found_movie.extra_metadata, dict):
+                                description = found_movie.extra_metadata.get("overview")
+                            
+                            found_item = {
+                                "id": found_movie.id,
+                                "title": found_movie.title,
+                                "year": found_movie.year,
+                                "poster_path": poster_path,
+                                "description": description
+                            }
+                            db_id = found_movie.id
+                            db_title = found_movie.title
+                    else:  # tv_show
+                        # Search for TV show by title (case-insensitive, partial match)
+                        query = select(VideoTVShow).where(
+                            func.lower(VideoTVShow.title).like(f"%{item_title.lower()}%")
+                        )
+                        if item_year:
+                            query = query.where(VideoTVShow.year == item_year)
+                        
+                        result = await session.execute(query)
+                        found_show = result.scalar_one_or_none()
+                        
+                        if found_show:
+                            # Extract poster_path from various sources
+                            poster_path = found_show.poster_path
+                            if not poster_path and found_show.extra_metadata and isinstance(found_show.extra_metadata, dict):
+                                poster_path = found_show.extra_metadata.get("poster_path")
+                            
+                            # Extract description from various sources
+                            description = found_show.description
+                            if not description and found_show.extra_metadata and isinstance(found_show.extra_metadata, dict):
+                                description = found_show.extra_metadata.get("overview")
+                            
+                            found_item = {
+                                "id": found_show.id,
+                                "title": found_show.title,
+                                "year": found_show.year,
+                                "poster_path": poster_path,
+                                "description": description
+                            }
+                            db_id = found_show.id
+                            db_title = found_show.title
+                    
+                    # If not found in database, try TMDB
+                    if not found_item and tmdb:
+                        try:
+                            logger.info(f"🔍 Searching TMDB for: {item_title} ({item_year})")
+                            if content_type == "movie":
+                                tmdb_data = tmdb.search_movie(item_title, item_year)
+                            else:
+                                tmdb_data = tmdb.search_tv_show(item_title, item_year)
+                            
+                            if tmdb_data:
+                                poster_path = tmdb_data.get("poster_path")
+                                description = tmdb_data.get("description") or tmdb_data.get("overview")
+                                db_title = tmdb_data.get("title")
+                                logger.info(f"✅ Found in TMDB: {db_title or item_title}")
+                            else:
+                                logger.info(f"⚠️ Not found in TMDB: {item_title}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error fetching from TMDB for {item_title}: {e}")
+                    
+                    # Create enriched item
+                    enriched_item = {
+                        "title": item["title"],
+                        "year": item.get("year"),
+                        "reason": item.get("reason", ""),
+                        "db_id": db_id,
+                        "db_title": db_title or item["title"],
+                        "poster_path": poster_path,
+                        "description": description,
+                        "in_library": db_id is not None
+                    }
+                    enriched_items.append(enriched_item)
+                    
+                    if found_item:
+                        logger.info(f"✅ Found match in database: {found_item['title']} (ID: {db_id})")
+                    elif poster_path or description:
+                        logger.info(f"✅ Enriched from TMDB: {item_title}")
+                    else:
+                        logger.info(f"⚠️ No match found for: {item_title}")
+                
+                db_matches = len([i for i in enriched_items if i['in_library']])
+                tmdb_enriched = len([i for i in enriched_items if (i['poster_path'] or i['description']) and not i['in_library']])
+                logger.info(f"📊 Enriched {db_matches} from database, {tmdb_enriched} from TMDB, {len(enriched_items)} total items")
+            
+            # Store enriched items in database
+            async with AsyncSessionLocal() as session:
+                # Check if exists
+                result = await session.execute(
+                    select(VideoSimilarContent).where(
+                        VideoSimilarContent.content_type == content_type,
+                        VideoSimilarContent.content_id == content_id
+                    )
+                )
+                existing = result.scalar_one_or_none()
+                
+                if existing:
+                    existing.similar_items = enriched_items
+                    existing.updated_at = datetime.now(timezone.utc)
+                    logger.info(f"💾 Updated existing similar content record")
+                else:
+                    new_record = VideoSimilarContent(
+                        content_type=content_type,
+                        content_id=content_id,
+                        similar_items=enriched_items
+                    )
+                    session.add(new_record)
+                    logger.info(f"💾 Created new similar content record")
+                
+                await session.commit()
+            
+            return {
+                "success": True,
+                "similar_items": enriched_items,
+                "count": len(enriched_items)
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse AI response as JSON: {e}")
+            logger.error(f"AI response: {ai_answer[:500]}")
+            raise HTTPException(status_code=500, detail=f"Failed to parse AI response: {str(e)}")
+        except ValueError as e:
+            logger.error(f"❌ Invalid AI response format: {e}")
+            logger.error(f"AI response: {ai_answer[:500]}")
+            raise HTTPException(status_code=500, detail=f"Invalid AI response format: {str(e)}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating similar content: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/video/similar/{content_type}/{content_id}")
+async def get_similar_content(content_type: str, content_id: int):
+    """Get similar movies/shows for a given movie or TV show."""
+    if content_type not in ['movie', 'tv_show']:
+        raise HTTPException(status_code=400, detail="content_type must be 'movie' or 'tv_show'")
+    
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(VideoSimilarContent).where(
+                    VideoSimilarContent.content_type == content_type,
+                    VideoSimilarContent.content_id == content_id
+                )
+            )
+            similar_content = result.scalar_one_or_none()
+            
+            if similar_content:
+                return {
+                    "success": True,
+                    "similar_items": similar_content.similar_items or [],
+                    "from_cache": True
+                }
+            
+            return {
+                "success": True,
+                "similar_items": [],
+                "from_cache": False
+            }
+    except Exception as e:
+        logger.error(f"Error getting similar content: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/video/next-episode/{episode_id}")
@@ -6679,6 +7033,105 @@ async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optiona
         }
 
 
+@app.get("/api/chat/search")
+async def search_chat_messages(query: str, user_id: Optional[int] = None, limit: int = 50):
+    """
+    Search chat messages by content across all sessions for a user.
+    Returns sessions that contain matching messages.
+    """
+    try:
+        if not query or not query.strip():
+            return {
+                "success": True,
+                "sessions": []
+            }
+        
+        search_term = query.strip()
+        async with AsyncSessionLocal() as session:
+            # Build query to search messages
+            # For chat sessions, we need to filter by user_id if provided
+            # Use case-insensitive search - PostgreSQL uses ILIKE, SQLite uses LIKE with LOWER
+            if db_engine.url.drivername.startswith('postgresql'):
+                base_query = select(ChatMessage).where(
+                    ChatMessage.message.ilike(f"%{search_term}%")
+                )
+            else:  # SQLite
+                search_lower = search_term.lower()
+                base_query = select(ChatMessage).where(
+                    func.lower(ChatMessage.message).like(f"%{search_lower}%")
+                )
+            
+            # If user_id is provided, filter by sessions belonging to that user
+            if user_id is not None:
+                # Get session IDs for this user
+                sessions_query = select(ChatSession.session_id).where(
+                    ChatSession.user_id == user_id
+                )
+                sessions_result = await session.execute(sessions_query)
+                user_session_ids = [s[0] for s in sessions_result.fetchall()]
+                
+                if user_session_ids:
+                    base_query = base_query.where(
+                        ChatMessage.session_id.in_(user_session_ids)
+                    )
+                else:
+                    # No sessions for this user, return empty
+                    return {
+                        "success": True,
+                        "sessions": []
+                    }
+            
+            # Only search in chat sessions (starting with 'chat-')
+            base_query = base_query.where(ChatMessage.session_id.like('chat-%'))
+            
+            # Get matching messages
+            result = await session.execute(base_query.limit(limit * 10))  # Get more to find unique sessions
+            messages = result.scalars().all()
+            
+            # Group messages by session and collect snippets
+            session_data = {}  # {session_id: [message_snippets]}
+            for msg in messages:
+                if msg.session_id and msg.message:
+                    if msg.session_id not in session_data:
+                        session_data[msg.session_id] = []
+                    # Extract snippet around the search term (up to 100 chars)
+                    message_text = msg.message
+                    search_lower = search_term.lower()
+                    message_lower = message_text.lower()
+                    idx = message_lower.find(search_lower)
+                    
+                    if idx >= 0:
+                        # Get context around the match (50 chars before and after)
+                        start = max(0, idx - 50)
+                        end = min(len(message_text), idx + len(search_term) + 50)
+                        snippet = message_text[start:end]
+                        if start > 0:
+                            snippet = '...' + snippet
+                        if end < len(message_text):
+                            snippet = snippet + '...'
+                        session_data[msg.session_id].append(snippet)
+            
+            # Convert to list of objects with session_id and snippets
+            session_list = []
+            for session_id, snippets in list(session_data.items())[:limit]:
+                session_list.append({
+                    "session_id": session_id,
+                    "snippets": snippets[:3]  # Limit to 3 snippets per session
+                })
+            
+            return {
+                "success": True,
+                "sessions": session_list
+            }
+    except Exception as e:
+        logger.error(f"Error searching chat messages: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "sessions": []
+        }
+
+
 @app.post("/api/chat")
 async def send_chat_message(request: Request):
     """Send a chat message and get AI response (streaming)."""
@@ -6932,6 +7385,7 @@ async def create_chat_session(request: Request):
     try:
         data = await request.json()
         session_id = data.get("session_id")
+        user_id = data.get("user_id")  # Optional user_id
         
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
@@ -6944,6 +7398,13 @@ async def create_chat_session(request: Request):
             existing = result.scalar_one_or_none()
             
             if existing:
+                # Update user_id if provided and column exists
+                if user_id is not None:
+                    try:
+                        existing.user_id = user_id
+                        await session.commit()
+                    except Exception:
+                        pass  # Column might not exist yet
                 return {
                     "success": True,
                     "session_id": existing.session_id,
@@ -6955,11 +7416,23 @@ async def create_chat_session(request: Request):
             timestamp = session_id.replace('chat-', '') if session_id.startswith('chat-') else str(int(datetime.now(timezone.utc).timestamp() * 1000))
             temp_title = f"{session_id} {timestamp}"
             
-            # Create new session
-            chat_session = ChatSession(
-                session_id=session_id,
-                title=temp_title
-            )
+            # Create new session - check if user_id column exists
+            session_data = {
+                "session_id": session_id,
+                "title": temp_title
+            }
+            
+            if user_id is not None:
+                try:
+                    # Try to check if column exists
+                    test_query = text("SELECT user_id FROM chat_sessions LIMIT 1")
+                    await session.execute(test_query)
+                    session_data["user_id"] = user_id
+                except Exception:
+                    # Column doesn't exist yet, ignore user_id
+                    pass
+            
+            chat_session = ChatSession(**session_data)
             session.add(chat_session)
             await session.commit()
             
@@ -6974,14 +7447,29 @@ async def create_chat_session(request: Request):
 
 
 @app.get("/api/chat/sessions")
-async def get_chat_sessions():
-    """Get all chat sessions with their titles."""
+async def get_chat_sessions(user_id: int = None):
+    """Get all chat sessions with their titles, filtered by user_id if provided."""
     try:
         async with AsyncSessionLocal() as session:
+            query = select(ChatSession).where(ChatSession.session_id.like('chat-%'))
+            
+            # Always filter by user_id if provided, or return empty if column exists and user_id is None
+            try:
+                # Check if user_id column exists
+                test_query = text("SELECT user_id FROM chat_sessions LIMIT 1")
+                await session.execute(test_query)
+                # Column exists - filter by user_id
+                if user_id is not None:
+                    query = query.where(ChatSession.user_id == user_id)
+                else:
+                    # If user_id is None and column exists, return empty (no user selected)
+                    query = query.where(ChatSession.user_id == -1)  # Impossible condition = empty result
+            except Exception:
+                # Column doesn't exist yet - return all sessions (backward compatibility)
+                pass
+            
             result = await session.execute(
-                select(ChatSession)
-                .where(ChatSession.session_id.like('chat-%'))
-                .order_by(ChatSession.pinned.desc(), desc(ChatSession.updated_at))
+                query.order_by(ChatSession.pinned.desc(), desc(ChatSession.updated_at))
             )
             sessions = result.scalars().all()
             
@@ -6993,6 +7481,7 @@ async def get_chat_sessions():
                         "title": s.title,
                         "pinned": getattr(s, 'pinned', False),
                         "preset_id": getattr(s, 'preset_id', None),
+                        "user_id": getattr(s, 'user_id', None),
                         "created_at": s.created_at.isoformat() if s.created_at else None,
                         "updated_at": s.updated_at.isoformat() if s.updated_at else None
                     }
@@ -8139,6 +8628,765 @@ async def search_by_actor(actor_name: str):
             }
     except Exception as e:
         logging.error(f"Error searching by actor: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users")
+async def get_users():
+    """Get all users."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check if profile_picture column exists
+            column_exists = False
+            try:
+                if db_engine.url.drivername.startswith('postgresql'):
+                    check_query = text("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name='users' AND column_name='profile_picture'
+                    """)
+                    result = await session.execute(check_query)
+                    column_exists = result.scalar() is not None
+                else:  # SQLite
+                    check_query = text("PRAGMA table_info(users)")
+                    result = await session.execute(check_query)
+                    columns = result.fetchall()
+                    column_exists = any(len(col) > 1 and col[1] == 'profile_picture' for col in columns)
+            except Exception as e:
+                logger.warning(f"Could not check for profile_picture column: {e}")
+                column_exists = False
+            
+            # Check if pass_code column exists
+            pass_code_column_exists = False
+            try:
+                if db_engine.url.drivername.startswith('postgresql'):
+                    check_query = text("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name='users' AND column_name='pass_code'
+                    """)
+                    result = await session.execute(check_query)
+                    pass_code_column_exists = result.scalar() is not None
+                else:  # SQLite
+                    check_query = text("PRAGMA table_info(users)")
+                    result = await session.execute(check_query)
+                    columns = result.fetchall()
+                    pass_code_column_exists = any(len(col) > 1 and col[1] == 'pass_code' for col in columns)
+            except Exception as e:
+                logger.warning(f"Could not check for pass_code column: {e}")
+                pass_code_column_exists = False
+            
+            if not column_exists:
+                # Use raw SQL to fetch users without profile_picture column
+                if pass_code_column_exists:
+                    fetch_query = text("SELECT id, name, birthday, pass_code, is_admin, created_at, updated_at FROM users ORDER BY created_at DESC")
+                else:
+                    fetch_query = text("SELECT id, name, birthday, is_admin, created_at, updated_at FROM users ORDER BY created_at DESC")
+                result = await session.execute(fetch_query)
+                rows = result.fetchall()
+                
+                users_list = []
+                for row in rows:
+                    if pass_code_column_exists:
+                        users_list.append({
+                            "id": row[0],
+                            "name": row[1],
+                            "birthday": row[2].isoformat() if row[2] else None,
+                            "profile_picture": None,
+                            "pass_code": row[3] if len(row) > 3 else None,  # pass_code is at index 3
+                            "is_admin": row[4] if len(row) > 4 else False,  # is_admin is at index 4 when pass_code exists
+                            "created_at": row[5].isoformat() if len(row) > 5 and row[5] else None,
+                            "updated_at": row[6].isoformat() if len(row) > 6 and row[6] else None
+                        })
+                    else:
+                        users_list.append({
+                            "id": row[0],
+                            "name": row[1],
+                            "birthday": row[2].isoformat() if row[2] else None,
+                            "profile_picture": None,
+                            "pass_code": None,  # Column doesn't exist
+                            "is_admin": row[3],
+                            "created_at": row[4].isoformat() if row[4] else None,
+                            "updated_at": row[5].isoformat() if row[5] else None
+                        })
+                
+                return {
+                    "success": True,
+                    "users": users_list
+                }
+            else:
+                # Column exists - use normal ORM
+                result = await session.execute(select(User).order_by(User.created_at.desc()))
+                users = result.scalars().all()
+
+                return {
+                    "success": True,
+                    "users": [
+                        {
+                            "id": user.id,
+                            "name": user.name,
+                            "birthday": user.birthday.isoformat() if user.birthday else None,
+                            "profile_picture": getattr(user, 'profile_picture', None),
+                            "pass_code": getattr(user, 'pass_code', None),
+                            "is_admin": user.is_admin,
+                            "created_at": user.created_at.isoformat() if user.created_at else None,
+                            "updated_at": user.updated_at.isoformat() if user.updated_at else None
+                        }
+                        for user in users
+                    ]
+                }
+    except Exception as e:
+        logger.error(f"Error getting users: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/users")
+async def create_user(
+    name: str = Form(...),
+    birthday: str = Form(None),
+    pass_code: str = Form(None),
+    profile_picture: UploadFile = File(None),
+    profile_picture_url: Optional[str] = Form(None)
+):
+    """Create a new user with optional profile picture upload."""
+    try:
+        # Handle multipart/form-data
+        if not name:
+            # Try to get from form data if JSON parsing failed
+            raise HTTPException(status_code=400, detail="Name is required")
+        
+        profile_picture_path = None
+
+        # Handle profile picture - prefer URL over file upload
+        if profile_picture_url:
+            # Store the URL directly
+            profile_picture_path = profile_picture_url
+            logger.info(f"Using profile picture URL: {profile_picture_url}")
+        elif profile_picture:
+            logger.info(f"Profile picture file received: filename={getattr(profile_picture, 'filename', 'NO_FILENAME')}, size={getattr(profile_picture, 'size', 'unknown')}, content_type={getattr(profile_picture, 'content_type', 'unknown')}")
+            # Check if it's a file-like object with filename attribute
+            filename = getattr(profile_picture, 'filename', None) or (hasattr(profile_picture, 'name') and profile_picture.name) or None
+            if filename:
+                try:
+                    # Create user_profiles directory if it doesn't exist
+                    project_root = Path(__file__).parent.parent
+                    profiles_dir = project_root / "data" / "user_profiles"
+                    profiles_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Generate unique filename
+                    file_ext = Path(filename).suffix or ".svg"
+                    unique_filename = f"{int(time.time())}_{filename}"
+                    file_path = profiles_dir / unique_filename
+                    
+                    # Save file
+                    content = await profile_picture.read()
+                    file_path.write_bytes(content)
+                    
+                    # Store relative path
+                    profile_picture_path = f"data/user_profiles/{unique_filename}"
+                    logger.info(f"Saved profile picture: {profile_picture_path} ({len(content)} bytes)")
+                except Exception as e:
+                    logger.error(f"Error saving profile picture: {e}", exc_info=True)
+                    # Don't fail user creation if picture upload fails
+                    profile_picture_path = None
+            else:
+                logger.warning("Profile picture received but has no filename")
+        
+        # Parse birthday if provided
+        birthday_dt = None
+        if birthday:
+            try:
+                from datetime import datetime
+                birthday_dt = datetime.fromisoformat(birthday.replace('Z', '+00:00'))
+            except Exception as e:
+                logger.warning(f"Invalid date format: {birthday}, ignoring")
+        
+        async with AsyncSessionLocal() as session:
+            # Check if profile_picture column exists
+            column_exists = False
+            try:
+                if db_engine.url.drivername.startswith('postgresql'):
+                    check_query = text("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name='users' AND column_name='profile_picture'
+                    """)
+                    result = await session.execute(check_query)
+                    column_exists = result.scalar() is not None
+                else:  # SQLite
+                    check_query = text("PRAGMA table_info(users)")
+                    result = await session.execute(check_query)
+                    columns = result.fetchall()
+                    # SQLite PRAGMA returns: (cid, name, type, notnull, dflt_value, pk)
+                    column_exists = any(len(col) > 1 and col[1] == 'profile_picture' for col in columns)
+                logger.info(f"profile_picture column exists: {column_exists}")
+            except Exception as e:
+                logger.warning(f"Could not check for profile_picture column: {e}, assuming it doesn't exist")
+                column_exists = False
+            
+            # Check if pass_code column exists
+            pass_code_column_exists = False
+            try:
+                if db_engine.url.drivername.startswith('postgresql'):
+                    check_query = text("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name='users' AND column_name='pass_code'
+                    """)
+                    result = await session.execute(check_query)
+                    pass_code_column_exists = result.scalar() is not None
+                else:  # SQLite
+                    check_query = text("PRAGMA table_info(users)")
+                    result = await session.execute(check_query)
+                    columns = result.fetchall()
+                    pass_code_column_exists = any(len(col) > 1 and col[1] == 'pass_code' for col in columns)
+            except Exception as e:
+                logger.warning(f"Could not check for pass_code column: {e}, assuming it doesn't exist")
+                pass_code_column_exists = False
+            
+            # Create user - handle missing profile_picture column
+            new_user = None
+            new_user_dict = None
+            if not column_exists:
+                # Column doesn't exist - use raw SQL to insert without it
+                logger.info("profile_picture column not found, using raw SQL insert")
+                try:
+                    if pass_code_column_exists:
+                        if db_engine.url.drivername.startswith('postgresql'):
+                            insert_query = text("""
+                                INSERT INTO users (name, birthday, pass_code, is_admin, created_at, updated_at)
+                                VALUES (:name, :birthday, :pass_code, :is_admin, NOW(), NOW())
+                                RETURNING id
+                            """)
+                            result = await session.execute(
+                                insert_query,
+                                {"name": name, "birthday": birthday_dt, "pass_code": pass_code, "is_admin": False}
+                            )
+                            await session.commit()
+                            user_id = result.scalar()
+                        else:  # SQLite
+                            insert_query = text("""
+                                INSERT INTO users (name, birthday, pass_code, is_admin, created_at, updated_at)
+                                VALUES (:name, :birthday, :pass_code, :is_admin, datetime('now'), datetime('now'))
+                            """)
+                            result = await session.execute(
+                                insert_query,
+                                {"name": name, "birthday": birthday_dt, "pass_code": pass_code, "is_admin": False}
+                            )
+                            await session.commit()
+                            user_id = result.lastrowid
+                        
+                        # Fetch the created user - use raw SQL to avoid SQLAlchemy trying to access profile_picture
+                        fetch_query = text("SELECT id, name, birthday, pass_code, is_admin, created_at, updated_at FROM users WHERE id = :user_id")
+                        result = await session.execute(fetch_query, {"user_id": user_id})
+                        row = result.fetchone()
+                        
+                        if not row:
+                            raise HTTPException(status_code=500, detail="Failed to fetch created user")
+                        
+                        # Create a dict instead of using the model to avoid profile_picture column access
+                        new_user_dict = {
+                            "id": row[0],
+                            "name": row[1],
+                            "birthday": row[2],
+                            "pass_code": row[3],
+                            "is_admin": row[4],
+                            "created_at": row[5],
+                            "updated_at": row[6]
+                        }
+                    else:
+                        if db_engine.url.drivername.startswith('postgresql'):
+                            insert_query = text("""
+                                INSERT INTO users (name, birthday, is_admin, created_at, updated_at)
+                                VALUES (:name, :birthday, :is_admin, NOW(), NOW())
+                                RETURNING id
+                            """)
+                            result = await session.execute(
+                                insert_query,
+                                {"name": name, "birthday": birthday_dt, "is_admin": False}
+                            )
+                            await session.commit()
+                            user_id = result.scalar()
+                        else:  # SQLite
+                            insert_query = text("""
+                                INSERT INTO users (name, birthday, is_admin, created_at, updated_at)
+                                VALUES (:name, :birthday, :is_admin, datetime('now'), datetime('now'))
+                            """)
+                            result = await session.execute(
+                                insert_query,
+                                {"name": name, "birthday": birthday_dt, "is_admin": False}
+                            )
+                            await session.commit()
+                            user_id = result.lastrowid
+                        
+                        # Fetch the created user - use raw SQL to avoid SQLAlchemy trying to access profile_picture
+                        fetch_query = text("SELECT id, name, birthday, is_admin, created_at, updated_at FROM users WHERE id = :user_id")
+                        result = await session.execute(fetch_query, {"user_id": user_id})
+                        row = result.fetchone()
+                        
+                        if not row:
+                            raise HTTPException(status_code=500, detail="Failed to fetch created user")
+                        
+                        # Create a dict instead of using the model to avoid profile_picture column access
+                        new_user_dict = {
+                            "id": row[0],
+                            "name": row[1],
+                            "birthday": row[2],
+                            "pass_code": None,
+                            "is_admin": row[3],
+                            "created_at": row[4],
+                            "updated_at": row[5]
+                        }
+                    profile_picture_path = None
+                except Exception as sql_error:
+                    await session.rollback()
+                    logger.error(f"Raw SQL insert failed: {sql_error}", exc_info=True)
+                    error_msg = str(sql_error)
+                    raise HTTPException(status_code=500, detail=f"Failed to create user: {error_msg}")
+            else:
+                # Column exists - use normal ORM insert
+                user_data = {
+                    "name": name,
+                    "birthday": birthday_dt,
+                    "is_admin": False
+                }
+                
+                if pass_code:
+                    user_data["pass_code"] = pass_code
+                
+                if profile_picture_path is not None:
+                    user_data["profile_picture"] = profile_picture_path
+                
+                new_user = User(**user_data)
+                session.add(new_user)
+                await session.commit()
+                await session.refresh(new_user)
+            
+            # Return response - handle both ORM object and dict
+            if new_user_dict:
+                return {
+                    "success": True,
+                    "user": {
+                        "id": new_user_dict["id"],
+                        "name": new_user_dict["name"],
+                        "birthday": new_user_dict["birthday"].isoformat() if new_user_dict["birthday"] else None,
+                        "profile_picture": None,
+                        "pass_code": new_user_dict.get("pass_code"),
+                        "is_admin": new_user_dict["is_admin"],
+                        "created_at": new_user_dict["created_at"].isoformat() if new_user_dict["created_at"] else None
+                    }
+                }
+            else:
+                return {
+                    "success": True,
+                    "user": {
+                        "id": new_user.id,
+                        "name": new_user.name,
+                        "birthday": new_user.birthday.isoformat() if new_user.birthday else None,
+                        "profile_picture": getattr(new_user, 'profile_picture', None),
+                        "pass_code": getattr(new_user, 'pass_code', None),
+                        "is_admin": new_user.is_admin,
+                        "created_at": new_user.created_at.isoformat() if new_user.created_at else None
+                    }
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating user: {e}", exc_info=True)
+        error_detail = str(e)
+        # Provide helpful error message
+        if "profile_picture" in error_detail.lower() or "column" in error_detail.lower() or "no such column" in error_detail.lower():
+            error_detail = f"Database schema error: {error_detail}. Run: ALTER TABLE users ADD COLUMN profile_picture VARCHAR;"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
+@app.put("/api/users/{user_id}")
+async def update_user(
+    user_id: int,
+    name: str = Form(None),
+    birthday: str = Form(None),
+    pass_code: str = Form(None),
+    is_admin: bool = Form(None),
+    profile_picture: UploadFile = File(None),
+    profile_picture_url: Optional[str] = Form(None)
+):
+    """Update a user with optional profile picture upload."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check if profile_picture column exists
+            profile_picture_column_exists = False
+            try:
+                if db_engine.url.drivername.startswith('postgresql'):
+                    check_query = text("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name='users' AND column_name='profile_picture'
+                    """)
+                    result_check = await session.execute(check_query)
+                    profile_picture_column_exists = result_check.scalar() is not None
+                else:  # SQLite
+                    check_query = text("PRAGMA table_info(users)")
+                    result_check = await session.execute(check_query)
+                    columns = result_check.fetchall()
+                    profile_picture_column_exists = any(len(col) > 1 and col[1] == 'profile_picture' for col in columns)
+            except Exception as e:
+                logger.warning(f"Could not check for profile_picture column: {e}")
+                profile_picture_column_exists = False
+            
+            # Check if pass_code column exists
+            pass_code_column_exists = False
+            try:
+                if db_engine.url.drivername.startswith('postgresql'):
+                    check_query = text("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name='users' AND column_name='pass_code'
+                    """)
+                    result_check = await session.execute(check_query)
+                    pass_code_column_exists = result_check.scalar() is not None
+                else:  # SQLite
+                    check_query = text("PRAGMA table_info(users)")
+                    result_check = await session.execute(check_query)
+                    columns = result_check.fetchall()
+                    pass_code_column_exists = any(len(col) > 1 and col[1] == 'pass_code' for col in columns)
+            except Exception as e:
+                logger.warning(f"Could not check for pass_code column: {e}")
+                pass_code_column_exists = False
+            
+            # Fetch user - use raw SQL if profile_picture column doesn't exist
+            if not profile_picture_column_exists:
+                # Use raw SQL to avoid ORM trying to access profile_picture
+                if pass_code_column_exists:
+                    fetch_query = text("SELECT id, name, birthday, pass_code, is_admin, created_at, updated_at FROM users WHERE id = :user_id")
+                else:
+                    fetch_query = text("SELECT id, name, birthday, is_admin, created_at, updated_at FROM users WHERE id = :user_id")
+                result = await session.execute(fetch_query, {"user_id": user_id})
+                row = result.fetchone()
+                
+                if not row:
+                    raise HTTPException(status_code=404, detail="User not found")
+                
+                # Use raw SQL for updates
+                update_fields = []
+                update_params = {"user_id": user_id}
+                
+                if name is not None:
+                    update_fields.append("name = :name")
+                    update_params["name"] = name
+                
+                if birthday is not None:
+                    if birthday:
+                        try:
+                            from datetime import datetime
+                            birthday_dt = datetime.fromisoformat(birthday.replace('Z', '+00:00'))
+                            update_fields.append("birthday = :birthday")
+                            update_params["birthday"] = birthday_dt
+                        except Exception:
+                            pass
+                    else:
+                        update_fields.append("birthday = NULL")
+                
+                if pass_code is not None and pass_code_column_exists:
+                    if pass_code and isinstance(pass_code, str) and pass_code.strip():
+                        update_fields.append("pass_code = :pass_code")
+                        update_params["pass_code"] = pass_code.strip()
+                    else:
+                        update_fields.append("pass_code = NULL")
+                
+                if is_admin is not None:
+                    if isinstance(is_admin, str):
+                        is_admin_bool = is_admin.lower() in ('true', '1', 'yes')
+                    else:
+                        is_admin_bool = bool(is_admin)
+                    update_fields.append("is_admin = :is_admin")
+                    update_params["is_admin"] = is_admin_bool
+                
+                # Handle profile picture - prefer URL over file upload
+                profile_picture_path = None
+                if profile_picture_url:
+                    # Store the URL directly
+                    profile_picture_path = profile_picture_url
+                    logger.info(f"Using profile picture URL for update: {profile_picture_url}")
+                    if profile_picture_column_exists:
+                        update_fields.append("profile_picture = :profile_picture")
+                        update_params["profile_picture"] = profile_picture_path
+                elif profile_picture:
+                    filename = getattr(profile_picture, 'filename', None) or (hasattr(profile_picture, 'name') and profile_picture.name) or None
+                    logger.info(f"Profile picture file received for update: filename={filename}, size={getattr(profile_picture, 'size', 'unknown')}, content_type={getattr(profile_picture, 'content_type', 'unknown')}")
+                    if filename and profile_picture_column_exists:
+                        try:
+                            # Create user_profiles directory if it doesn't exist
+                            project_root = Path(__file__).parent.parent
+                            profiles_dir = project_root / "data" / "user_profiles"
+                            profiles_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            # Generate unique filename
+                            file_ext = Path(filename).suffix or ".svg"
+                            unique_filename = f"{int(time.time())}_{filename}"
+                            file_path = profiles_dir / unique_filename
+                            
+                            # Save file
+                            content = await profile_picture.read()
+                            file_path.write_bytes(content)
+                            
+                            # Store relative path
+                            profile_picture_path = f"data/user_profiles/{unique_filename}"
+                            update_fields.append("profile_picture = :profile_picture")
+                            update_params["profile_picture"] = profile_picture_path
+                            logger.info(f"Updated profile picture: {profile_picture_path} ({len(content)} bytes)")
+                        except Exception as e:
+                            logger.error(f"Error updating profile picture: {e}", exc_info=True)
+                    else:
+                        if not filename:
+                            logger.warning(f"Profile picture received but has no filename. Object type: {type(profile_picture)}, attributes: {dir(profile_picture)}")
+                        if not profile_picture_column_exists:
+                            logger.warning("Profile picture column does not exist in database")
+                
+                if update_fields:
+                    if db_engine.url.drivername.startswith('postgresql'):
+                        update_query = text(f"""
+                            UPDATE users 
+                            SET {', '.join(update_fields)}, updated_at = NOW()
+                            WHERE id = :user_id
+                        """)
+                    else:  # SQLite
+                        update_query = text(f"""
+                            UPDATE users 
+                            SET {', '.join(update_fields)}, updated_at = datetime('now')
+                            WHERE id = :user_id
+                        """)
+                    await session.execute(update_query, update_params)
+                    await session.commit()
+                
+                # Fetch updated user
+                if pass_code_column_exists:
+                    fetch_query = text("SELECT id, name, birthday, pass_code, is_admin, created_at, updated_at FROM users WHERE id = :user_id")
+                else:
+                    fetch_query = text("SELECT id, name, birthday, is_admin, created_at, updated_at FROM users WHERE id = :user_id")
+                result = await session.execute(fetch_query, {"user_id": user_id})
+                row = result.fetchone()
+                
+                # Fetch profile_picture from database if it exists
+                profile_picture_from_db = None
+                if profile_picture_column_exists:
+                    try:
+                        fetch_profile_query = text("SELECT profile_picture FROM users WHERE id = :user_id")
+                        profile_result = await session.execute(fetch_profile_query, {"user_id": user_id})
+                        profile_row = profile_result.fetchone()
+                        if profile_row and profile_row[0]:
+                            profile_picture_from_db = profile_row[0]
+                    except Exception as e:
+                        logger.warning(f"Could not fetch profile_picture from database: {e}")
+                
+                # Use the updated path if available, otherwise use what's in the database
+                final_profile_picture = profile_picture_path if profile_picture_path else profile_picture_from_db
+                
+                # Build response based on which columns exist
+                user_response = {
+                    "id": row[0],
+                    "name": row[1],
+                    "birthday": row[2].isoformat() if row[2] else None,
+                    "profile_picture": final_profile_picture,
+                    "is_admin": row[4] if pass_code_column_exists else row[3],
+                    "updated_at": (row[6].isoformat() if pass_code_column_exists and len(row) > 6 and row[6] else None) or (row[5].isoformat() if not pass_code_column_exists and len(row) > 5 and row[5] else None)
+                }
+                
+                if pass_code_column_exists:
+                    user_response["pass_code"] = row[3] if len(row) > 3 else None
+                else:
+                    user_response["pass_code"] = None
+                
+                logger.info(f"Returning user update response with profile_picture: {final_profile_picture}")
+                return {
+                    "success": True,
+                    "user": user_response
+                }
+            else:
+                # Column exists - use normal ORM
+                result = await session.execute(select(User).where(User.id == user_id))
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    raise HTTPException(status_code=404, detail="User not found")
+            
+                if name is not None:
+                    user.name = name
+                if birthday is not None:
+                    try:
+                        from datetime import datetime
+                        if birthday:
+                            user.birthday = datetime.fromisoformat(birthday.replace('Z', '+00:00'))
+                        else:
+                            user.birthday = None
+                    except Exception:
+                        pass
+                if pass_code is not None:
+                    if pass_code_column_exists:
+                        # Handle empty string as None
+                        if pass_code and isinstance(pass_code, str) and pass_code.strip():
+                            user.pass_code = pass_code.strip()
+                        else:
+                            user.pass_code = None
+                    else:
+                        logger.warning("pass_code column does not exist, skipping update")
+                if is_admin is not None:
+                    # Handle string "true"/"false" from form data
+                    if isinstance(is_admin, str):
+                        user.is_admin = is_admin.lower() in ('true', '1', 'yes')
+                    else:
+                        user.is_admin = bool(is_admin)
+                
+                # Handle profile picture - prefer URL over file upload
+                if profile_picture_url:
+                    # Store the URL directly
+                    user.profile_picture = profile_picture_url
+                    logger.info(f"Updated profile picture URL: {profile_picture_url}")
+                elif profile_picture:
+                    filename = getattr(profile_picture, 'filename', None) or (hasattr(profile_picture, 'name') and profile_picture.name) or None
+                    if filename:
+                        try:
+                            # Delete old picture if exists (only if it's a local file, not a URL)
+                            if user.profile_picture and not user.profile_picture.startswith('http'):
+                                old_path = Path(__file__).parent.parent / user.profile_picture
+                                if old_path.exists():
+                                    old_path.unlink()
+                            
+                            # Create user_profiles directory if it doesn't exist
+                            project_root = Path(__file__).parent.parent
+                            profiles_dir = project_root / "data" / "user_profiles"
+                            profiles_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            # Generate unique filename
+                            file_ext = Path(filename).suffix or ".svg"
+                            unique_filename = f"{int(time.time())}_{filename}"
+                            file_path = profiles_dir / unique_filename
+                            
+                            # Save file
+                            content = await profile_picture.read()
+                            file_path.write_bytes(content)
+                            
+                            # Store relative path
+                            user.profile_picture = f"data/user_profiles/{unique_filename}"
+                            logger.info(f"Updated profile picture: {user.profile_picture}")
+                        except Exception as e:
+                            logger.error(f"Error updating profile picture: {e}", exc_info=True)
+                            # Don't fail user update if picture upload fails
+                
+                user.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+                await session.refresh(user)
+                
+                return {
+                    "success": True,
+                    "user": {
+                        "id": user.id,
+                        "name": user.name,
+                        "birthday": user.birthday.isoformat() if user.birthday else None,
+                        "profile_picture": user.profile_picture,
+                        "pass_code": getattr(user, 'pass_code', None),
+                        "is_admin": user.is_admin,
+                        "updated_at": user.updated_at.isoformat() if user.updated_at else None
+                    }
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/avatars/{filename}")
+async def get_avatar(filename: str):
+    """Get an AI avatar image."""
+    try:
+        # Security: only allow SVG files with expected naming pattern
+        if not filename.endswith('.svg') or not filename.startswith('ai-avatar-'):
+            raise HTTPException(status_code=400, detail="Invalid avatar filename")
+        
+        project_root = Path(__file__).parent.parent
+        avatar_path = project_root / "data" / "user_profiles" / "avatars" / filename
+        
+        if not avatar_path.exists():
+            raise HTTPException(status_code=404, detail="Avatar not found")
+        
+        return FileResponse(
+            path=str(avatar_path),
+            media_type="image/svg+xml"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving avatar: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error serving avatar")
+
+@app.get("/api/users/{user_id}/profile-picture")
+async def get_user_profile_picture(user_id: int):
+    """Get a user's profile picture."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+
+            if not user or not user.profile_picture:
+                # Return default profile picture or 404
+                raise HTTPException(status_code=404, detail="Profile picture not found")
+
+            # Check if it's a URL (external)
+            if user.profile_picture.startswith('http'):
+                # Redirect to external URL
+                return Response(status_code=302, headers={"Location": user.profile_picture})
+            
+            # Local file path
+            file_path = Path(__file__).parent.parent / user.profile_picture
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail="Profile picture file not found")
+
+            # Determine content type
+            if file_path.suffix == '.svg':
+                content_type = "image/svg+xml"
+            else:
+                content_type = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
+
+            return FileResponse(
+                path=str(file_path),
+                media_type=content_type,
+                filename=file_path.name
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting profile picture: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(user_id: int):
+    """Delete a user."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            # Delete profile picture file if exists
+            if user.profile_picture:
+                file_path = Path(__file__).parent.parent / user.profile_picture
+                if file_path.exists():
+                    try:
+                        file_path.unlink()
+                    except Exception as e:
+                        logger.warning(f"Could not delete profile picture file: {e}")
+            
+            await session.delete(user)
+            await session.commit()
+            
+            return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

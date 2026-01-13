@@ -4,7 +4,18 @@ import { useChromecast } from '../hooks/useChromecast';
 import { videoProgressAPI } from '../services/videoProgress';
 
 export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
-  const { castAvailable, casting, castVideo, stopCasting, castSession, playbackInfo } = useChromecast();
+  const { 
+    castAvailable, 
+    casting, 
+    castVideo, 
+    stopCasting, 
+    castSession, 
+    playbackInfo,
+    playCast,
+    pauseCast,
+    seekCast,
+    setCastVolume
+  } = useChromecast();
 
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -72,6 +83,17 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
 
   // Handle play/pause toggle
   const togglePlayPause = () => {
+    // If casting, use cast controls
+    if (casting && playbackInfo) {
+      if (playbackInfo.playerState === 'PLAYING') {
+        pauseCast();
+      } else {
+        playCast();
+      }
+      return;
+    }
+    
+    // Otherwise use local video controls
     const video = videoRef.current;
     if (!video) {
       console.warn('Video element not ready');
@@ -91,12 +113,20 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
 
   // Handle seeking via progress bar
   const handleProgressClick = (e) => {
-    if (!progressBarRef.current || !videoRef.current) return;
+    if (!progressBarRef.current) return;
     
     const rect = progressBarRef.current.getBoundingClientRect();
     const pos = (e.clientX - rect.left) / rect.width;
     const newTime = pos * duration;
     
+    // If casting, use cast seek
+    if (casting && playbackInfo) {
+      seekCast(newTime);
+      return;
+    }
+    
+    // Otherwise use local video seek
+    if (!videoRef.current) return;
     videoRef.current.currentTime = newTime;
     setCurrentTime(newTime);
   };
@@ -111,6 +141,15 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
   const handleVolumeChange = (e) => {
     const newVolume = parseFloat(e.target.value);
     setVolume(newVolume);
+    
+    // If casting, use cast volume control
+    if (casting) {
+      setCastVolume(newVolume);
+      setIsMuted(newVolume === 0);
+      return;
+    }
+    
+    // Otherwise use local video volume
     if (videoRef.current) {
       videoRef.current.volume = newVolume;
     }
@@ -257,6 +296,59 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
     };
   }, []);
 
+  // Sync local state with cast playback info when casting
+  useEffect(() => {
+    if (casting && playbackInfo) {
+      // Update current time from cast
+      if (playbackInfo.currentTime !== undefined) {
+        setCurrentTime(playbackInfo.currentTime);
+      }
+      
+      // Update duration from cast
+      if (playbackInfo.duration !== undefined) {
+        setDuration(playbackInfo.duration);
+      }
+      
+      // Update volume from cast
+      if (playbackInfo.volume !== undefined) {
+        setVolume(playbackInfo.volume);
+        setIsMuted(playbackInfo.volume === 0);
+      }
+      
+      // Update playing state from cast
+      if (playbackInfo.playerState === 'PLAYING') {
+        setIsPlaying(true);
+      } else if (playbackInfo.playerState === 'PAUSED' || playbackInfo.playerState === 'IDLE') {
+        setIsPlaying(false);
+      }
+    }
+  }, [casting, playbackInfo]);
+
+  // Initialize current season/episode info for episode tracking
+  useEffect(() => {
+    if (type === 'episode' && videoId) {
+      // Reset auto-play trigger when episode changes
+      window.__autoPlayTriggered = null;
+      
+      // Try to parse season/episode from title if available (format: "S01E02 - Title")
+      if (title) {
+        const match = title.match(/S(\d+)E(\d+)/i);
+        if (match) {
+          window.__currentSeason = parseInt(match[1], 10);
+          window.__currentEpisode = parseInt(match[2], 10);
+          console.log('📺 Episode info from title:', {
+            season: window.__currentSeason,
+            episode: window.__currentEpisode
+          });
+        }
+      }
+    } else {
+      // Clear episode tracking for non-episodes
+      window.__currentSeason = null;
+      window.__currentEpisode = null;
+    }
+  }, [videoId, type, title]);
+
   // Load saved progress on mount
   useEffect(() => {
     const loadProgress = async () => {
@@ -322,37 +414,77 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
     return () => video.removeEventListener('ended', handleEnded);
   }, [type, videoId, duration, casting, castSession, castVideo]);
 
+  // Track currently casting episode ID (may differ from videoId prop if auto-played)
+  const [currentlyCastingEpisodeId, setCurrentlyCastingEpisodeId] = useState(videoId);
+  
+  // Update currently casting episode ID when videoId changes or when we start casting
+  useEffect(() => {
+    if (type === 'episode') {
+      setCurrentlyCastingEpisodeId(videoId);
+    }
+  }, [videoId, type]);
+
   // Track Chromecast playback and auto-play next episode
   useEffect(() => {
-    if (!casting || !playbackInfo || !type) return;
+    if (!casting || !playbackInfo || !type || type !== 'episode') return;
     
     const { playerState, currentTime, duration: castDuration, hasEnded, isIdle } = playbackInfo;
+    
+    // Use currently casting episode ID for progress tracking
+    const episodeIdToTrack = currentlyCastingEpisodeId || videoId;
     
     // Save progress for Chromecast playback every update
     if (currentTime > 0 && castDuration) {
       // Throttle saves - only save if position changed by more than 5 seconds
       const lastSaved = window.__lastSavedPosition || 0;
       if (Math.abs(currentTime - lastSaved) > 5) {
-        videoProgressAPI.saveProgress(type, videoId, currentTime, castDuration);
+        videoProgressAPI.saveProgress(type, episodeIdToTrack, currentTime, castDuration);
         window.__lastSavedPosition = currentTime;
       }
     }
     
-    // Check if media finished playing (either IDLE or near end)
-    const shouldAutoPlay = (isIdle && currentTime > 10) || hasEnded;
+    // Better detection: episode ended if:
+    // 1. hasEnded flag is true (from media update listener)
+    // 2. Player state is IDLE and we're at/near the end (within 2 seconds)
+    // 3. Player state is IDLE and we've watched substantial content (>10 seconds)
+    const isNearEnd = castDuration && currentTime > 0 && (castDuration - currentTime) <= 2;
+    const episodeEnded = hasEnded || 
+                         (playerState === 'IDLE' && isNearEnd && currentTime > 10) ||
+                         (playbackInfo.isAtEnd && playerState === 'IDLE');
     
-    if (shouldAutoPlay && type === 'episode') {
-      // Check if we already triggered auto-play for this video
-      const alreadyTriggered = window.__autoPlayTriggered === videoId;
+    if (episodeEnded) {
+      // Check if we already triggered auto-play for this episode
+      const alreadyTriggered = window.__autoPlayTriggered === episodeIdToTrack;
       
       if (!alreadyTriggered) {
-        console.log('🎬 Episode ended, loading next episode...');
-        window.__autoPlayTriggered = videoId;
+        console.log('🎬 Episode ended while casting:', {
+          episodeId: episodeIdToTrack,
+          currentTime: Math.floor(currentTime),
+          duration: Math.floor(castDuration),
+          playerState
+        });
+        window.__autoPlayTriggered = episodeIdToTrack;
         
-        videoProgressAPI.getNextEpisode(videoId).then(result => {
+        videoProgressAPI.getNextEpisode(episodeIdToTrack).then(result => {
           if (result.next_episode) {
             const nextEp = result.next_episode;
-            console.log('▶️ Auto-playing next episode:', `S${nextEp.season_number}E${nextEp.episode_number} - ${nextEp.title}`);
+            const currentSeason = window.__currentSeason || (nextEp.season_number - (nextEp.episode_number === 1 ? 1 : 0));
+            const isSeasonTransition = nextEp.season_number !== currentSeason;
+            
+            if (isSeasonTransition) {
+              console.log('📺 Season transition detected! Moving from S' + currentSeason + ' to S' + nextEp.season_number);
+            }
+            
+            console.log('▶️ Auto-casting next episode:', {
+              current: `S${currentSeason}E${window.__currentEpisode || '?'}`,
+              next: `S${nextEp.season_number}E${nextEp.episode_number}`,
+              title: nextEp.title,
+              isSeasonTransition
+            });
+            
+            // Store current season/episode for next transition
+            window.__currentSeason = nextEp.season_number;
+            window.__currentEpisode = nextEp.episode_number;
             
             fetch('/api/system/network-info')
               .then(res => res.json())
@@ -363,18 +495,34 @@ export const VideoPlayer = ({ videoId, title, onClose, type = 'movie' }) => {
                 const nextTitle = `S${nextEp.season_number}E${nextEp.episode_number} - ${nextEp.title}`;
                 
                 setTimeout(() => {
-                  // Clear the trigger so next episode can also auto-play
+                  // Update currently casting episode ID
+                  setCurrentlyCastingEpisodeId(nextEp.id);
+                  // Reset trigger for the next episode so it can also auto-play
                   window.__autoPlayTriggered = nextEp.id;
                   castVideo(nextUrl, nextTitle, null, 0);
                 }, 2000);
+              })
+              .catch(error => {
+                console.error('❌ Error getting network info for next episode:', error);
+                // Reset trigger on error so user can try again
+                window.__autoPlayTriggered = null;
               });
           } else {
             console.log('ℹ️ No next episode found - series ended');
+            // Clear trigger when series ends
+            window.__autoPlayTriggered = null;
+            window.__currentSeason = null;
+            window.__currentEpisode = null;
           }
+        })
+        .catch(error => {
+          console.error('❌ Error getting next episode:', error);
+          // Reset trigger on error
+          window.__autoPlayTriggered = null;
         });
       }
     }
-  }, [casting, playbackInfo, type, videoId, castVideo]);
+  }, [casting, playbackInfo, type, videoId, currentlyCastingEpisodeId, castVideo]);
 
   // Auto-load media when cast session becomes active (but only on first connection)
   useEffect(() => {

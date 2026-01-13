@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { videoAPI } from '../services/api';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { useChromecast } from '../hooks/useChromecast';
@@ -206,7 +206,6 @@ function CastAndCrew({ movieTitle, movieYear, showTitle, showYear, isMovie = tru
       return [];
     }
   };
-
 
   return (
     <div className="cast-crew-section">
@@ -445,6 +444,180 @@ function CastAndCrew({ movieTitle, movieYear, showTitle, showYear, isMovie = tru
   );
 }
 
+// Similar Content Component
+function SimilarContent({ contentType, contentId, title, year, description, genres, isMovie = true }) {
+  const [similarItems, setSimilarItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [generating, setGenerating] = useState(false);
+
+  // Load similar content on mount and when contentId/contentType changes
+  useEffect(() => {
+    // Reset state when content changes
+    setSimilarItems([]);
+    setError(null);
+    setLoading(false);
+    setGenerating(false);
+    
+    if (contentId) {
+      loadSimilarContent();
+    }
+  }, [contentId, contentType]);
+
+  const loadSimilarContent = async () => {
+    if (!contentId) {
+      setSimilarItems([]);
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    setSimilarItems([]); // Clear previous items
+    
+    try {
+      const result = await videoAPI.getSimilarContent(contentType, contentId);
+      if (result.success && result.similar_items) {
+        // Always set the items, even if empty array
+        setSimilarItems(result.similar_items);
+      } else {
+        setSimilarItems([]);
+      }
+    } catch (err) {
+      console.error('Error loading similar content:', err);
+      setError(err.message);
+      setSimilarItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateSimilar = async () => {
+    if (!contentId || !title) return;
+    
+    setGenerating(true);
+    setError(null);
+    setSimilarItems([]); // Clear previous items before generating
+    
+    try {
+      const result = await videoAPI.generateSimilarContent(
+        contentType,
+        contentId,
+        title,
+        year,
+        description || '',
+        genres || []
+      );
+      
+      if (result.success && result.similar_items) {
+        setSimilarItems(result.similar_items);
+      } else {
+        setSimilarItems([]);
+      }
+    } catch (err) {
+      console.error('Error generating similar content:', err);
+      setError(err.message);
+      setSimilarItems([]);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Don't show if no content selected
+  if (!contentId) return null;
+
+  return (
+    <div className="cast-crew-section">
+      <div className="crew-section">
+        <div className="crew-role-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Similar {isMovie ? 'Movies' : 'TV Shows'}</span>
+          {similarItems.length === 0 && !loading && !generating && (
+            <button
+              className="retry-btn"
+              onClick={generateSimilar}
+              style={{ fontSize: '0.9em', padding: '6px 12px' }}
+            >
+              Generate
+            </button>
+          )}
+        </div>
+
+        {loading && (
+          <div className="cast-crew-loading">
+            <div className="loading-indicator">
+              <div className="spinner"></div>
+              <span>Loading similar {isMovie ? 'movies' : 'shows'}...</span>
+            </div>
+          </div>
+        )}
+
+        {generating && (
+          <div className="cast-crew-loading">
+            <div className="loading-indicator">
+              <div className="spinner"></div>
+              <span>Generating similar {isMovie ? 'movies' : 'shows'}...</span>
+            </div>
+          </div>
+        )}
+
+        {error && !loading && !generating && (
+          <div className="cast-crew-error">
+            <div className="error-indicator">
+              <span>{error}</span>
+              <button className="retry-btn" onClick={generateSimilar}>
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!loading && !generating && similarItems.length > 0 && (
+          <div className="similar-content-list">
+            {similarItems.map((item, idx) => (
+              <div key={idx} className="similar-item">
+                <div className="similar-item-content">
+                  {item.poster_path && (
+                    <div className="similar-item-poster">
+                      <img 
+                        src={item.poster_path} 
+                        alt={item.db_title || item.title}
+                        className="similar-item-poster-img"
+                      />
+                    </div>
+                  )}
+                  <div className="similar-item-info">
+                    <div className="similar-item-title">
+                      <strong>{item.db_title || item.title}</strong>
+                      {item.year && <span className="similar-item-year"> ({item.year})</span>}
+                      {item.in_library && (
+                        <span className="similar-item-badge" title="Available in your library">✓</span>
+                      )}
+                    </div>
+                    {item.description && (
+                      <div className="similar-item-description">{item.description}</div>
+                    )}
+                    {item.reason && (
+                      <div className="similar-item-reason">{item.reason}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!loading && !generating && similarItems.length === 0 && !error && (
+          <div className="cast-crew-error">
+            <div className="error-indicator">
+              <span>No similar {isMovie ? 'movies' : 'shows'} found. Click Generate to create recommendations.</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
   const [library, setLibrary] = useState({ movies: [], tvShows: [] });
   const [loading, setLoading] = useState(false);
@@ -454,8 +627,12 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
   const [selectedShow, setSelectedShow] = useState(null);
   const [selectedSeason, setSelectedSeason] = useState(null);
   const [playingVideo, setPlayingVideo] = useState(null); // { id, title, type }
+  const [isScrolled, setIsScrolled] = useState(false);
   
   const { castAvailable, castVideo } = useChromecast();
+  
+  const heroRef = useRef(null);
+  const mainContentRef = useRef(null);
 
   const loadLibrary = async () => {
     setLoading(true);
@@ -479,6 +656,25 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
 
   useEffect(() => {
     loadLibrary();
+  }, []);
+
+  // Listen for video selection from search overlay
+  useEffect(() => {
+    const handleVideoSelect = (e) => {
+      const { type, movie, show } = e.detail;
+      if (type === 'movie' && movie) {
+        setSelectedMovie(movie);
+        setSelectedShow(null);
+        setSelectedSeason(null);
+      } else if (type === 'tvshow' && show) {
+        setSelectedShow(show);
+        setSelectedSeason(null);
+        setSelectedMovie(null);
+      }
+    };
+    
+    window.addEventListener('videoSelect', handleVideoSelect);
+    return () => window.removeEventListener('videoSelect', handleVideoSelect);
   }, []);
 
   // Filter library based on search query
@@ -713,6 +909,41 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
     onSearchResultsChange(results);
   }, [searchQuery, filteredMovies, filteredTVShows, filteredEpisodes, library.tvShows, onSearchResultsChange]);
 
+  // Scroll detection for showing minimal hero
+  useEffect(() => {
+    if (!heroRef.current || !mainContentRef.current) return;
+
+    // Show minimal hero when main hero's play button reaches the top
+    // Main hero height: ~280px, minimal hero height: 64px
+    // Threshold: when scrolled ~220px
+    const stickThreshold = 220; // Show minimal hero
+    const unstickThreshold = 200; // Hide minimal hero
+
+    const handleScroll = () => {
+      if (!mainContentRef.current) return;
+      
+      const scrollTop = mainContentRef.current.scrollTop;
+      
+      // Use hysteresis to prevent flickering at the boundary
+      setIsScrolled((prevScrolled) => {
+        if (scrollTop >= stickThreshold) {
+          return true; // Show minimal hero
+        } else if (scrollTop <= unstickThreshold) {
+          return false; // Hide minimal hero
+        }
+        // Between thresholds: maintain current state
+        return prevScrolled;
+      });
+    };
+
+    const mainContent = mainContentRef.current;
+    mainContent.addEventListener('scroll', handleScroll, { passive: true });
+    
+    return () => {
+      mainContent.removeEventListener('scroll', handleScroll);
+    };
+  }, [selectedMovie, selectedShow, selectedSeason]);
+
   const formatDuration = (seconds) => {
     if (!seconds) return '';
     const hours = Math.floor(seconds / 3600);
@@ -877,9 +1108,100 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
         </div>
 
         {/* Main Content */}
-        <div className="music-main">
-          {/* Hero Section */}
-          <div className="music-hero" style={heroBgStyle}>
+        <div className="music-main" ref={mainContentRef}>
+          {/* Minimal sticky hero - shows when scrolled */}
+          {(selectedMovie || (selectedShow && currentSeason)) && (
+            <div className={`music-hero-minimal ${isScrolled ? 'visible' : ''}`}>
+              {selectedMovie && (
+                <>
+                  <button
+                    className="hero-play-minimal"
+                    onClick={() => setPlayingVideo({ 
+                      id: selectedMovie.id, 
+                      title: selectedMovie.title,
+                      type: 'movie'
+                    })}
+                    title="Play Movie"
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                  </button>
+                  {castAvailable && (
+                    <button
+                      className="hero-cast-minimal"
+                      onClick={async () => {
+                        window.__justCastFromList = true;
+                        const response = await fetch('/api/system/network-info');
+                        const networkInfo = await response.json();
+                        const protocol = window.location.protocol;
+                        const host = `${networkInfo.network_ip}:${networkInfo.port}`;
+                        const movieUrl = `${protocol}//${host}/api/video/stream/${selectedMovie.id}`;
+                        castVideo(movieUrl, selectedMovie.title, null, 0);
+                      }}
+                      title="Cast Movie"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/>
+                      </svg>
+                    </button>
+                  )}
+                  <h2 className="hero-title-minimal">{heroTitle}</h2>
+                </>
+              )}
+              {selectedShow && currentSeason && currentSeason.episodes?.length > 0 && (
+                <>
+                  <button
+                    className="hero-play-minimal"
+                    onClick={() => {
+                      const firstEpisode = currentSeason.episodes
+                        .sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0))[0];
+                      if (firstEpisode) {
+                        setPlayingVideo({
+                          id: firstEpisode.id,
+                          title: `${selectedShow.title} - S${currentSeason.season_number}E${firstEpisode.episode_number} - ${firstEpisode.title || 'Episode ' + firstEpisode.episode_number}`,
+                          type: 'episode'
+                        });
+                      }
+                    }}
+                    title="Play Episode 1"
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                  </button>
+                  {castAvailable && (
+                    <button
+                      className="hero-cast-minimal"
+                      onClick={async () => {
+                        window.__justCastFromList = true;
+                        const firstEpisode = currentSeason.episodes
+                          .sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0))[0];
+                        if (firstEpisode) {
+                          const response = await fetch('/api/system/network-info');
+                          const networkInfo = await response.json();
+                          const protocol = window.location.protocol;
+                          const host = `${networkInfo.network_ip}:${networkInfo.port}`;
+                          const episodeUrl = `${protocol}//${host}/api/video/stream/${firstEpisode.id}`;
+                          const episodeTitle = `${selectedShow.title} - S${currentSeason.season_number}E${firstEpisode.episode_number} - ${firstEpisode.title || 'Episode ' + firstEpisode.episode_number}`;
+                          castVideo(episodeUrl, episodeTitle, null, 0);
+                        }
+                      }}
+                      title="Cast Episode 1"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/>
+                      </svg>
+                    </button>
+                  )}
+                  <h2 className="hero-title-minimal">{heroTitle}</h2>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Main full-size hero - scrolls normally */}
+          <div ref={heroRef} className="music-hero" style={heroBgStyle}>
             {heroPoster ? (
               <img
                 src={heroPoster}
@@ -1029,6 +1351,17 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                     movieTitle={selectedMovie.title} 
                     movieYear={selectedMovie.year} 
                   />
+                  
+                  {/* Similar Movies Section */}
+                  <SimilarContent
+                    contentType="movie"
+                    contentId={selectedMovie.id}
+                    title={selectedMovie.title}
+                    year={selectedMovie.year}
+                    description={selectedMovie.description || selectedMovie.metadata?.description || selectedMovie.extra_metadata?.description || ''}
+                    genres={selectedMovie.metadata?.genres || selectedMovie.extra_metadata?.genres || []}
+                    isMovie={true}
+                  />
                 </div>
               )}
 
@@ -1081,6 +1414,17 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange }) {
                   <CastAndCrew
                     showTitle={selectedShow.title}
                     showYear={selectedShow.year}
+                    isMovie={false}
+                  />
+                  
+                  {/* Similar TV Shows Section */}
+                  <SimilarContent
+                    contentType="tv_show"
+                    contentId={selectedShow.id}
+                    title={selectedShow.title}
+                    year={selectedShow.year}
+                    description={selectedShow.description || selectedShow.extra_metadata?.description || ''}
+                    genres={selectedShow.extra_metadata?.genres || []}
                     isMovie={false}
                   />
                 </>

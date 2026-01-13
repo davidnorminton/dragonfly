@@ -6,8 +6,64 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [videoSearchQuery, setVideoSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const searchRef = useRef(null);
   const { currentTitle } = usePersonas();
+
+  // Check fullscreen status on mount and listen for changes
+  useEffect(() => {
+    const checkFullscreen = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    
+    // Check initial state
+    checkFullscreen();
+    
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', checkFullscreen);
+    document.addEventListener('webkitfullscreenchange', checkFullscreen);
+    document.addEventListener('mozfullscreenchange', checkFullscreen);
+    document.addEventListener('MSFullscreenChange', checkFullscreen);
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', checkFullscreen);
+      document.removeEventListener('webkitfullscreenchange', checkFullscreen);
+      document.removeEventListener('mozfullscreenchange', checkFullscreen);
+      document.removeEventListener('MSFullscreenChange', checkFullscreen);
+    };
+  }, []);
+
+  // Toggle fullscreen
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        // Enter fullscreen
+        const element = document.documentElement;
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if (element.webkitRequestFullscreen) {
+          await element.webkitRequestFullscreen();
+        } else if (element.mozRequestFullScreen) {
+          await element.mozRequestFullScreen();
+        } else if (element.msRequestFullscreen) {
+          await element.msRequestFullscreen();
+        }
+      } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+          await document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+          await document.msExitFullscreen();
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling fullscreen:', error);
+    }
+  };
 
   // Close results when clicking outside
   useEffect(() => {
@@ -87,6 +143,16 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+            </svg>
+          </button>
+          <button
+            className={`nav-button ${activePage === 'users' ? 'active' : ''}`}
+            onClick={() => onNavigate?.('users')}
+            style={{ minWidth: 40, padding: '6px 12px' }}
+            title="Users"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M16 7c0-2.21-1.79-4-4-4S8 4.79 8 7s1.79 4 4 4 4-1.79 4-4zm-4 6c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
             </svg>
           </button>
         </div>
@@ -300,6 +366,22 @@ export function TopBar({ onSwitchAI, onSettingsClick, onAiFocusClick, activePage
           }}
         >
           Switch AI
+        </button>
+        <button
+          onClick={toggleFullscreen}
+          className="settings-icon-button"
+          title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+          style={{ marginRight: '12px' }}
+        >
+          {isFullscreen ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+            </svg>
+          )}
         </button>
         <button
           className={`settings-icon-button ${activePage === 'alerts' ? 'active' : ''}`}

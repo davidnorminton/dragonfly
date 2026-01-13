@@ -198,19 +198,61 @@ class VideoScanner:
                     logger.info(f"[{show_idx}/{len(show_dirs)}] 📺 {show_name}")
                     logger.info(f"{'='*80}")
                     
-                    # Look up show on TMDB
+                    # Priority order for show name:
+                    # 1. TMDB API (PRIMARY)
+                    # 2. Video file metadata (FALLBACK)
+                    # 3. Directory name (LAST RESORT)
+                    
                     tmdb_show = None
+                    show_name_from_api = None
+                    show_name_from_metadata = None
+                    
+                    # Step 1: Try TMDB API first (PRIMARY)
                     if self.tmdb_service:
-                        logger.info(f"  🔍 Searching TMDB for show...")
+                        logger.info(f"  🔍 [1/3] Searching TMDB API for show...")
                         tmdb_show = self.tmdb_service.search_tv_show(show_name)
                         
                         if tmdb_show:
-                            logger.info(f"  ✅ TMDB: '{tmdb_show['title']}'")
+                            show_name_from_api = tmdb_show['title']
+                            logger.info(f"  ✅ TMDB API: '{show_name_from_api}'")
                             logger.info(f"     ID: {tmdb_show.get('tmdb_id')}")
                             logger.info(f"     Seasons: {tmdb_show.get('number_of_seasons', 'N/A')}")
                             logger.info(f"     Poster: {'✓' if tmdb_show.get('poster_path') else '✗'}")
                         else:
-                            logger.warning(f"  ❌ Show not found on TMDB")
+                            logger.warning(f"  ❌ Show not found on TMDB API")
+                    
+                    # Step 2: If API failed, try extracting from video file metadata (FALLBACK)
+                    if not tmdb_show:
+                        logger.info(f"  🔍 [2/3] Extracting show name from video file metadata...")
+                        # Look for episode files to extract metadata
+                        season_dirs = [d for d in show_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+                        for season_dir in season_dirs[:1]:  # Check first season only
+                            episode_files = [f for f in season_dir.iterdir()
+                                           if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS]
+                            for ep_file in episode_files[:3]:  # Check first 3 episodes
+                                show_name_from_metadata = self._extract_show_name_from_metadata(ep_file)
+                                if show_name_from_metadata:
+                                    logger.info(f"  ✅ Metadata: '{show_name_from_metadata}'")
+                                    # Try TMDB again with metadata name
+                                    if self.tmdb_service:
+                                        logger.info(f"  🔍 Retrying TMDB API with metadata name...")
+                                        tmdb_show = self.tmdb_service.search_tv_show(show_name_from_metadata)
+                                        if tmdb_show:
+                                            show_name_from_api = tmdb_show['title']
+                                            logger.info(f"  ✅ TMDB API (retry): '{show_name_from_api}'")
+                                    break
+                            if show_name_from_metadata:
+                                break
+                        
+                        if not show_name_from_metadata:
+                            logger.info(f"  ⚠️  No show name found in video metadata")
+                    
+                    # Step 3: Use directory name as last resort
+                    final_show_name = show_name_from_api or show_name_from_metadata or show_name
+                    if final_show_name != show_name:
+                        logger.info(f"  📝 [3/3] Using: '{final_show_name}' (source: {'API' if show_name_from_api else 'metadata'})")
+                    else:
+                        logger.info(f"  📝 [3/3] Using directory name: '{final_show_name}' (last resort)")
                     
                     # Create or update show
                     result = await session.execute(
@@ -225,9 +267,9 @@ class VideoScanner:
                     else:
                         logger.info(f"  💾 Updating existing show (ID: {show.id})")
                     
-                    # Update show fields
+                    # Update show fields - prioritize API data
                     if tmdb_show:
-                        show.title = tmdb_show['title']
+                        show.title = tmdb_show['title']  # Always use API title when available
                         show.year = tmdb_show.get('year')
                         show.description = tmdb_show.get('description')
                         show.poster_path = tmdb_show.get('poster_path')
@@ -241,11 +283,13 @@ class VideoScanner:
                             'backdrop_path': tmdb_show.get('backdrop_path')
                         }
                     else:
-                        show.title = show_name
+                        # Fallback: use metadata name if available, otherwise directory name
+                        show.title = show_name_from_metadata or show_name
                     
                     await session.flush()  # Get show.id
                     show_count += 1
-                    logger.info(f"  ✅ Show saved: '{show.title}' (ID: {show.id})")
+                    title_source = "API" if tmdb_show else ("metadata" if show_name_from_metadata else "directory")
+                    logger.info(f"  ✅ Show saved: '{show.title}' (ID: {show.id}, source: {title_source})")
                     
                     # Scan seasons
                     season_dirs = [d for d in show_dir.iterdir() if d.is_dir() and d.name.isdigit()]
@@ -299,6 +343,21 @@ class VideoScanner:
                                         if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS]
                         logger.info(f"    📹 Found {len(episode_files)} episode files")
                         
+                        # Track metadata titles to detect duplicates (which would indicate incorrect metadata)
+                        metadata_titles_seen = {}
+                        
+                        # Force update any existing episodes with "TheKing" or similar release group titles
+                        if season.id:
+                            result = await session.execute(
+                                select(VideoTVEpisode).where(
+                                    VideoTVEpisode.season_id == season.id
+                                )
+                            )
+                            existing_episodes = result.scalars().all()
+                            theking_episodes = [e for e in existing_episodes if e.title and 'theking' in e.title.lower()]
+                            if theking_episodes:
+                                logger.info(f"    ⚠️  Found {len(theking_episodes)} existing episodes with 'TheKing' title - will force update")
+                        
                         for ep_file in sorted(episode_files):
                             try:
                                 logger.info(f"\n    ├─ {ep_file.name}")
@@ -317,8 +376,8 @@ class VideoScanner:
                                 video_meta = self._extract_video_metadata(ep_file)
                                 
                                 # Priority order for episode title:
-                                # 1. Video file metadata (embedded title tag)
-                                # 2. TMDB API
+                                # 1. TMDB API (PRIMARY)
+                                # 2. Video file metadata (FALLBACK)
                                 # 3. Parsed from filename
                                 # 4. Default "Episode X"
                                 
@@ -326,60 +385,186 @@ class VideoScanner:
                                 ep_description = None
                                 ep_metadata = None
                                 title_source = None
+                                meta_title = None
                                 
-                                # Check video metadata first (but ignore filename-like titles)
+                                # Extract metadata title for potential fallback (but don't use it yet)
+                                # ALWAYS filter out release group names FIRST - this is the most important check
+                                meta_title = None
                                 if video_meta and video_meta.get('title'):
-                                    meta_title = video_meta['title']
-                                    # Ignore if it looks like a filename (contains S##E## pattern or episode numbers)
-                                    if not re.search(r'[Ss]\d+[Ee]\d+|\d+x\d+|\.S\d+E\d+', meta_title):
-                                        ep_title = meta_title
-                                        title_source = 'metadata'
-                                        logger.info(f"    │  📼 Metadata title: '{ep_title}'")
+                                    raw_meta_title = video_meta['title']
+                                    filename_lower = ep_file.name.lower()
+                                    meta_title_lower = raw_meta_title.lower().strip()
+                                    
+                                    # CRITICAL: Check release group blacklist FIRST - this MUST catch "TheKing"
+                                    release_groups = ['theking', 'the king', 'yify', 'yts', 'rarbg', 'ettv', 'eztv', 'killer', 'x264', 'x265', 'hevc', 'ac3', 'aac', 'bluray', 'webrip', 'web-dl', 'sajid790']
+                                    if meta_title_lower in release_groups:
+                                        logger.info(f"    │  ⚠️  BLOCKED: Release group/uploader metadata: '{raw_meta_title}'")
+                                        meta_title = None  # Explicitly set to None
+                                    # Check 2: Ignore if metadata title appears in filename (especially after dash)
+                                    elif meta_title_lower in filename_lower:
+                                        # Check if it appears after a dash, underscore, or before file extension
+                                        if re.search(r'[-_]\s*' + re.escape(meta_title_lower) + r'(\s|\.|$|\.mp4|\.mkv|\.avi)', filename_lower):
+                                            logger.info(f"    │  ⚠️  BLOCKED: Metadata appears in filename (release group): '{raw_meta_title}'")
+                                            meta_title = None
+                                        # Also check if it's the last word before extension
+                                        elif filename_lower.endswith(meta_title_lower + '.mp4') or filename_lower.endswith(meta_title_lower + '.mkv'):
+                                            logger.info(f"    │  ⚠️  BLOCKED: Metadata matches filename ending (release group): '{raw_meta_title}'")
+                                            meta_title = None
+                                        else:
+                                            # It's in filename but not as release group - might be valid episode title
+                                            meta_title = raw_meta_title
+                                    # Check 3: Ignore if it looks like a filename (contains S##E## pattern or episode numbers)
+                                    elif re.search(r'[Ss]\d+[Ee]\d+|\d+x\d+|\.S\d+E\d+', raw_meta_title):
+                                        logger.info(f"    │  ⚠️  BLOCKED: Filename-like metadata: '{raw_meta_title}'")
+                                        meta_title = None
+                                    # Check 4: Ignore if it's just a single word that looks like a release group (all caps, short)
+                                    elif len(raw_meta_title) < 15 and raw_meta_title.isupper() and not re.search(r'\s', raw_meta_title):
+                                        logger.info(f"    │  ⚠️  BLOCKED: Suspicious single-word metadata: '{raw_meta_title}'")
+                                        meta_title = None
+                                    # Check 5: If metadata title is same across multiple episodes, it's likely wrong (handled later)
                                     else:
-                                        logger.info(f"    │  ⚠️  Ignoring filename-like metadata: '{meta_title}'")
+                                        # Metadata passed all checks, might be valid
+                                        meta_title = raw_meta_title
+                                        logger.info(f"    │  📼 Metadata title extracted: '{meta_title}' (will use as fallback if TMDB fails)")
+                                    
+                                    # FINAL CHECK: If somehow meta_title still contains "TheKing", block it
+                                    if meta_title and 'theking' in meta_title.lower():
+                                        logger.error(f"    │  ❌ CRITICAL: 'TheKing' detected in meta_title after filtering! Blocking.")
+                                        meta_title = None
                                 
-                                # Try TMDB next (only if we don't have a title from metadata)
-                                if not ep_title and tmdb_season and tmdb_season.get('episodes'):
-                                    tmdb_episode = next(
-                                        (e for e in tmdb_season['episodes'] if e.get('episode_number') == ep_num),
-                                        None
-                                    )
+                                # PRIORITY ORDER:
+                                # 1. TMDB API (PRIMARY - always try first)
+                                # 2. Metadata (FALLBACK - only if TMDB doesn't exist/fails)
+                                # 3. Filename (FALLBACK - only if no metadata)
+                                # 4. Default "Episode X" (LAST RESORT)
+                                
+                                # Step 1: Try TMDB API first (PRIMARY)
+                                logger.info(f"    │  🔍 [1/4] Checking TMDB API for episode {ep_num}...")
+                                if tmdb_season and tmdb_season.get('episodes'):
+                                    episodes_list = tmdb_season['episodes']
+                                    logger.info(f"    │     TMDB has {len(episodes_list)} episodes in season")
+                                    
+                                    # Try to find matching episode (handle both int and string comparisons)
+                                    tmdb_episode = None
+                                    for e in episodes_list:
+                                        ep_num_tmdb = e.get('episode_number')
+                                        # Handle both int and string comparisons
+                                        if ep_num_tmdb == ep_num or str(ep_num_tmdb) == str(ep_num):
+                                            tmdb_episode = e
+                                            logger.info(f"    │     ✓ Found match: TMDB episode {ep_num_tmdb} = file episode {ep_num}")
+                                            break
+                                    
                                     if tmdb_episode:
-                                        ep_title = tmdb_episode.get('name')
-                                        ep_description = tmdb_episode.get('overview')
-                                        ep_metadata = {
-                                            'tmdb_id': tmdb_episode.get('id'),
-                                            'air_date': tmdb_episode.get('air_date'),
-                                            'rating': tmdb_episode.get('vote_average')
-                                        }
-                                        if ep_title:
+                                        tmdb_title = tmdb_episode.get('name')
+                                        if tmdb_title:
+                                            ep_title = tmdb_title
+                                            ep_description = tmdb_episode.get('overview')
+                                            ep_metadata = {
+                                                'tmdb_id': tmdb_episode.get('id'),
+                                                'air_date': tmdb_episode.get('air_date'),
+                                                'rating': tmdb_episode.get('vote_average')
+                                            }
                                             title_source = 'tmdb'
-                                            logger.info(f"    │  ✅ TMDB: '{ep_title}'")
-                                        if ep_description:
-                                            logger.info(f"    │     Description: {ep_description[:50]}...")
+                                            logger.info(f"    │  ✅ TMDB API: '{ep_title}'")
+                                            if ep_description:
+                                                logger.info(f"    │     Description: {ep_description[:50]}...")
+                                        else:
+                                            logger.warning(f"    │  ⚠️  TMDB episode {ep_num} found but has no title (name field is empty)")
                                     else:
-                                        logger.info(f"    │  ⚠️  Episode {ep_num} not in TMDB data")
+                                        logger.warning(f"    │  ⚠️  Episode {ep_num} not found in TMDB data")
+                                        logger.info(f"    │     Available TMDB episode numbers: {[e.get('episode_number') for e in episodes_list[:10]]}")
+                                else:
+                                    if not tmdb_season:
+                                        logger.warning(f"    │  ⚠️  No TMDB season data available (tmdb_season is None)")
+                                    elif not tmdb_season.get('episodes'):
+                                        logger.warning(f"    │  ⚠️  TMDB season data exists but has no episodes list")
                                 
-                                # Try parsed filename next
+                                # Step 2: Try video metadata as fallback (only if TMDB didn't provide a title)
                                 if not ep_title:
+                                    logger.info(f"    │  🔍 [2/4] TMDB failed, trying metadata...")
+                                    if meta_title:
+                                        # Double-check: Never use release group names as titles
+                                        release_groups = ['theking', 'the king', 'yify', 'yts', 'rarbg', 'ettv', 'eztv', 'killer', 'x264', 'x265', 'hevc', 'ac3', 'aac', 'bluray', 'webrip', 'web-dl', 'sajid790']
+                                        if meta_title.lower() in release_groups:
+                                            logger.warning(f"    │  ⚠️  Rejecting metadata - release group name: '{meta_title}'")
+                                            meta_title = None
+                                        # Check if this metadata title was already used for another episode
+                                        elif meta_title in metadata_titles_seen:
+                                            logger.warning(f"    │  ⚠️  Metadata title '{meta_title}' already used for episode {metadata_titles_seen[meta_title]} - likely incorrect, skipping")
+                                            meta_title = None
+                                        
+                                        if meta_title:
+                                            metadata_titles_seen[meta_title] = ep_num
+                                            ep_title = meta_title
+                                            title_source = 'metadata'
+                                            logger.info(f"    │  ✅ Metadata: '{ep_title}'")
+                                    else:
+                                        logger.info(f"    │     No metadata available")
+                                
+                                # Step 3: Try parsed filename next (only if TMDB and metadata both failed)
+                                if not ep_title:
+                                    logger.info(f"    │  🔍 [3/4] TMDB and metadata failed, trying filename...")
                                     ep_title = parsed_ep.get('title')
                                     if ep_title:
                                         title_source = 'filename'
-                                        logger.info(f"    │  📝 Parsed from filename: '{ep_title}'")
+                                        logger.info(f"    │  ✅ Filename: '{ep_title}'")
+                                    else:
+                                        logger.info(f"    │     No title in filename")
                                 
-                                # Final fallback
+                                # Step 4: Final fallback - default "Episode X"
                                 if not ep_title:
                                     ep_title = f"Episode {ep_num}"
                                     title_source = 'default'
-                                    logger.info(f"    │  ⚠️  Using default title")
+                                    logger.info(f"    │  ⚠️  [4/4] Using default title: '{ep_title}'")
                                 
-                                # Create or update episode
+                                # CRITICAL FINAL CHECK: Never allow "TheKing" or release group names as title
+                                # This is the absolute last check before saving - reject "TheKing" from ANY source
+                                if ep_title and 'theking' in ep_title.lower():
+                                    logger.error(f"    │  ❌ BLOCKED: Title contains 'TheKing' - rejecting and using default")
+                                    # Try TMDB one more time if available
+                                    if tmdb_season and tmdb_season.get('episodes'):
+                                        for e in tmdb_season['episodes']:
+                                            ep_num_tmdb = e.get('episode_number')
+                                            if ep_num_tmdb == ep_num or str(ep_num_tmdb) == str(ep_num):
+                                                tmdb_title = e.get('name')
+                                                if tmdb_title and 'theking' not in tmdb_title.lower():
+                                                    ep_title = tmdb_title
+                                                    ep_description = e.get('overview')
+                                                    ep_metadata = {
+                                                        'tmdb_id': e.get('id'),
+                                                        'air_date': e.get('air_date'),
+                                                        'rating': e.get('vote_average')
+                                                    }
+                                                    title_source = 'tmdb'
+                                                    logger.info(f"    │  ✅ Recovered from TMDB: '{ep_title}'")
+                                                    break
+                                    
+                                    # If still "TheKing" or TMDB failed, use default
+                                    if not ep_title or 'theking' in ep_title.lower():
+                                        ep_title = f"Episode {ep_num}"
+                                        title_source = 'default'
+                                        logger.warning(f"    │  ⚠️  Using default title instead")
+                                
+                                # Create or update episode - try file_path first, then season+episode_number
                                 result = await session.execute(
                                     select(VideoTVEpisode).where(
                                         VideoTVEpisode.file_path == str(ep_file)
                                     )
                                 )
                                 episode = result.scalar_one_or_none()
+                                
+                                # Fallback: if not found by file_path, try season_id + episode_number
+                                if not episode:
+                                    result = await session.execute(
+                                        select(VideoTVEpisode).where(
+                                            VideoTVEpisode.season_id == season.id,
+                                            VideoTVEpisode.episode_number == ep_num
+                                        )
+                                    )
+                                    episode = result.scalar_one_or_none()
+                                    if episode:
+                                        logger.info(f"    │  💾 Found existing episode by season+episode (ID: {episode.id}, file_path: {episode.file_path})")
+                                        logger.info(f"    │     Updating file_path from '{episode.file_path}' to '{ep_file}'")
                                 
                                 if not episode:
                                     episode = VideoTVEpisode(
@@ -391,10 +576,39 @@ class VideoScanner:
                                     session.add(episode)
                                     logger.info(f"    │  💾 Creating new episode")
                                 else:
+                                    old_title = episode.title
                                     logger.info(f"    │  💾 Updating existing episode (ID: {episode.id})")
+                                    logger.info(f"    │     Old title: '{old_title}'")
+                                    logger.info(f"    │     New title: '{ep_title}' (source: {title_source})")
+                                    
+                                    # Final safety check: Never save "TheKing" as title
+                                    if ep_title and 'theking' in ep_title.lower():
+                                        logger.error(f"    │  ❌ ERROR: Attempted to save 'TheKing' as title! Using default instead.")
+                                        ep_title = f"Episode {ep_num}"
+                                        title_source = 'default'
 
                                 # Always update these fields (for both new and existing episodes)
                                 episode.episode_number = ep_num  # Important: update this for existing episodes too!
+                                
+                                # ABSOLUTE FINAL SAFETY CHECK: Never save "TheKing" - check right before assignment
+                                if ep_title and 'theking' in ep_title.lower():
+                                    logger.error(f"    │  ❌ CRITICAL ERROR: About to save 'TheKing' as title! Blocking and using default.")
+                                    ep_title = f"Episode {ep_num}"
+                                    title_source = 'default'
+                                
+                                # Log if we're updating from "TheKing"
+                                if episode.title and 'theking' in episode.title.lower() and ep_title and 'theking' not in ep_title.lower():
+                                    logger.info(f"    │  🔄 Updating title from '{episode.title}' to '{ep_title}'")
+                                
+                                # DEBUG: Log final title value before assignment
+                                logger.info(f"    │  📝 Final title before save: '{ep_title}' (source: {title_source})")
+                                
+                                # Assign title - this is the final assignment, "TheKing" should never reach here
+                                if ep_title and 'theking' in ep_title.lower():
+                                    logger.error(f"    │  ❌ FATAL: 'TheKing' detected in final title! This should never happen!")
+                                    ep_title = f"Episode {ep_num}"
+                                    title_source = 'default'
+                                
                                 episode.title = ep_title
                                 episode.description = ep_description
                                 episode.extra_metadata = ep_metadata
@@ -407,7 +621,14 @@ class VideoScanner:
                                 
                                 await session.commit()
                                 episode_count += 1
-                                logger.info(f"    │  ✅ Saved: '{ep_title}'")
+                                logger.info(f"    │  ✅ Saved: '{ep_title}' (source: {title_source}, episode {ep_num})")
+                                
+                                # Verify what was actually saved
+                                await session.refresh(episode)
+                                if episode.title != ep_title:
+                                    logger.error(f"    │  ❌ ERROR: Title mismatch! Expected '{ep_title}' but saved '{episode.title}'")
+                                else:
+                                    logger.info(f"    │     ✓ Verified: Title correctly saved as '{episode.title}'")
                                 
                             except Exception as e:
                                 logger.error(f"    │  ❌ Error processing episode: {e}", exc_info=True)
@@ -509,6 +730,51 @@ class VideoScanner:
         
         # No match found
         return {}
+    
+    def _extract_show_name_from_metadata(self, video_path: Path) -> Optional[str]:
+        """
+        Extract show name from video file metadata tags.
+        
+        Args:
+            video_path: Path to video file
+            
+        Returns:
+            Show name if found, None otherwise
+        """
+        try:
+            result = subprocess.run(
+                ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+                 '-show_format', str(video_path)],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                return None
+            
+            data = json.loads(result.stdout)
+            tags = {}
+            if 'format' in data and 'tags' in data['format']:
+                tags = data['format']['tags']
+            
+            # Try common metadata keys for show name
+            for key in ['show', 'SHOW', 'Show', 'series', 'SERIES', 'Series', 
+                       'tv_show', 'TV_SHOW', 'TV Show', 'album', 'ALBUM', 'Album',
+                       'title', 'TITLE', 'Title']:  # Some files use 'title' for show name
+                if key in tags and tags[key]:
+                    potential_show_name = tags[key].strip()
+                    # Ignore if it looks like a filename, episode pattern, or is too short
+                    if (potential_show_name and 
+                        len(potential_show_name) > 2 and
+                        not re.search(r'[Ss]\d+[Ee]\d+|\d+x\d+|\.S\d+E\d+', potential_show_name) and
+                        not potential_show_name.lower().endswith(('.mp4', '.mkv', '.avi', '.mov'))):
+                        return potential_show_name
+            
+            return None
+        except Exception as e:
+            logger.debug(f"Could not extract show name from metadata {video_path}: {e}")
+            return None
     
     def _extract_video_metadata(self, video_path: Path) -> Optional[Dict[str, Any]]:
         """Extract metadata from video file using ffprobe."""

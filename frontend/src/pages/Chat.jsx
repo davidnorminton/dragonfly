@@ -6,7 +6,7 @@ import { useExpertTypes } from '../hooks/useExpertTypes';
 import { formatMessage } from '../utils/messageFormatter';
 import 'highlight.js/styles/github-dark.css';
 
-export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '', onSearchResultsChange }) {
+export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '', onSearchResultsChange, selectedUser }) {
   const [mode, setMode] = useState('qa');
   const [expertType, setExpertType] = useState('general');
   const [input, setInput] = useState('');
@@ -118,6 +118,19 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
     // Preset selection will be loaded by useEffect when currentSessionId changes
     setCurrentSessionId(sessionId);
   }, []);
+
+  // Listen for chat session selection from search overlay
+  useEffect(() => {
+    const handleChatSelect = (e) => {
+      const { sessionId } = e.detail;
+      if (sessionId) {
+        handleSelectSession(sessionId);
+      }
+    };
+    
+    window.addEventListener('chatSelectSession', handleChatSelect);
+    return () => window.removeEventListener('chatSelectSession', handleChatSelect);
+  }, [handleSelectSession]);
 
   // Load preset selection for current session
   useEffect(() => {
@@ -249,7 +262,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
       
       try {
         // Get all chat sessions from API
-        const data = await chatAPI.getSessions();
+        const data = await chatAPI.getSessions(selectedUser?.id);
         if (data.success && data.sessions) {
           const sessionList = data.sessions.map(s => s.session_id);
           // Only add currentSessionId to list if it exists and is not already there
@@ -300,7 +313,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
       const timeoutId = setTimeout(loadSessions, 500);
       return () => clearTimeout(timeoutId);
     }
-  }, []); // Empty dependency array - only run once on mount
+  }, [selectedUser]); // Reload when selected user changes
 
   // Note: reloadHistory is handled by useChat hook when sessionId changes
   // No need to call it here to avoid double-loading
@@ -363,7 +376,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
       sessionToUse = newSessionId;
       
       // Try to create session in database (but don't wait for it)
-      chatAPI.createSession(newSessionId).then(result => {
+      chatAPI.createSession(newSessionId, selectedUser?.id).then(result => {
         if (result.success && result.title) {
           setSessionTitles(prev => ({
             ...prev,
