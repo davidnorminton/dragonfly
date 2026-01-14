@@ -167,8 +167,13 @@ class AIService(BaseService):
             self.logger.warning(f"Could not get max_tokens from system config: {e}", exc_info=True)
         return None
     
-    async def _build_system_prompt_with_pre_context(self, user_id: Optional[int] = None) -> Optional[str]:
-        """Build system prompt including pre-context prompt with user name."""
+    async def _build_system_prompt_with_pre_context(self, user_id: Optional[int] = None, is_ai_focus_mode: bool = False) -> Optional[str]:
+        """Build system prompt including pre-context prompt with user name.
+        
+        Args:
+            user_id: Optional user ID for user name replacement
+            is_ai_focus_mode: If True, adds instruction to keep answers to 80 words or less
+        """
         system_prompt_parts = []
         
         # Get pre-context prompt from system config with user name
@@ -185,6 +190,12 @@ class AIService(BaseService):
             if persona_prompt:
                 system_prompt_parts.append(persona_prompt)
         
+        # Add AI focus mode specific instruction
+        if is_ai_focus_mode:
+            ai_focus_instruction = "Keep your answers concise and to the point, limiting responses to 80 words or less."
+            system_prompt_parts.append(ai_focus_instruction)
+            self.logger.info("✅ Added AI focus mode instruction: keep answers to 80 words or less")
+        
         result = "\n\n".join(system_prompt_parts) if system_prompt_parts else None
         if result:
             self.logger.info(f"✅ Final system prompt built with {len(system_prompt_parts)} part(s), total length: {len(result)}")
@@ -194,27 +205,41 @@ class AIService(BaseService):
         """
         Load conversation history for a session with prioritized recent messages.
         Provides context for maintaining conversation continuity.
+        Only loads messages for the exact session_id provided.
         """
+        if not session_id:
+            self.logger.warning("_load_conversation_history called without session_id")
+            return []
+            
         try:
             async with AsyncSessionLocal() as session:
+                # Use exact match to ensure we only get messages for this specific session
                 result = await session.execute(
                     select(ChatMessage)
-                    .where(ChatMessage.session_id == session_id)
+                    .where(ChatMessage.session_id == session_id)  # Exact match - only this session
                     .order_by(desc(ChatMessage.created_at))
                     .limit(limit)
                 )
                 messages = result.scalars().all()
                 
+                # Verify all messages belong to the requested session (safety check)
+                filtered_messages = []
+                for msg in messages:
+                    if msg.session_id == session_id:  # Double-check session_id matches
+                        filtered_messages.append(msg)
+                    else:
+                        self.logger.warning(f"Message {msg.id} has session_id {msg.session_id} but expected {session_id}, filtering out")
+                
                 # Convert to list of message dicts, reverse to get chronological order
                 history = []
-                for msg in reversed(messages):
+                for msg in reversed(filtered_messages):
                     if msg.role in ["user", "assistant"]:
                         history.append({
                             "role": msg.role,
                             "content": msg.message
                         })
                 
-                self.logger.debug(f"Loaded {len(history)} messages from conversation history for session {session_id}")
+                self.logger.info(f"Loaded {len(history)} messages from conversation history for session {session_id} (filtered from {len(messages)} total)")
                 return history
         except Exception as e:
             self.logger.error(f"Error loading conversation history: {e}", exc_info=True)
@@ -377,7 +402,9 @@ class AIService(BaseService):
                 }
             
             # Build system prompt with pre-context
-            system_prompt = await self._build_system_prompt_with_pre_context(user_id)
+            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
+            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
+            system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
             if system_prompt:
                 self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
             else:
@@ -507,7 +534,9 @@ class AIService(BaseService):
                 }
             
             # Build system prompt with pre-context
-            system_prompt = await self._build_system_prompt_with_pre_context(user_id)
+            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
+            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
+            system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
             if system_prompt:
                 self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
             else:
@@ -626,7 +655,9 @@ class AIService(BaseService):
                 }
             
             # Build system prompt with pre-context
-            system_prompt = await self._build_system_prompt_with_pre_context(user_id)
+            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
+            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
+            system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
             if system_prompt:
                 self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
             else:

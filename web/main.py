@@ -707,15 +707,18 @@ async def ai_ask_question_stream(request: Request):
     """
     Streaming AI question endpoint - streams text chunks as they're generated.
     Returns text chunks in real-time.
+    Accepts optional user_id for pre-context support.
     """
     try:
         payload = await request.json()
         question = payload.get("question", "")
+        user_id = payload.get("user_id")
+        session_id = payload.get("session_id")  # Optional session_id for conversation context
         
         if not question:
             return JSONResponse(status_code=400, content={"error": "No question provided"})
         
-        logger.info(f"[AI ASK STREAM] Question: {question[:100]}...")
+        logger.info(f"[AI ASK STREAM] Question: {question[:100]}... User ID: {user_id}, Session ID: {session_id}")
         
         from services.ai_service import AIService
         ai = AIService()
@@ -730,7 +733,30 @@ async def ai_ask_question_stream(request: Request):
                 
                 logger.info(f"[AI ASK STREAM] 🚀 Starting text stream...")
                 
-                async for text_chunk in ai.async_stream_execute({"question": question, "use_system_max_tokens": True}):
+                # Load conversation history if session_id is provided
+                conversation_history = []
+                if session_id:
+                    logger.info(f"[AI ASK STREAM] Loading conversation history for session_id: {session_id}")
+                    conversation_history = await ai._load_conversation_history(session_id, limit=50)
+                    logger.info(f"[AI ASK STREAM] Loaded {len(conversation_history)} messages from conversation history for session {session_id}")
+                    # Verify all messages belong to the requested session
+                    for msg in conversation_history:
+                        # Note: The _load_conversation_history method already filters by session_id
+                        # This is just a safety check in the logs
+                        pass
+                else:
+                    logger.info(f"[AI ASK STREAM] No session_id provided, not loading conversation history")
+                
+                # Pass user_id and conversation history to enable context
+                input_data = {"question": question, "use_system_max_tokens": True}
+                if user_id:
+                    input_data["user_id"] = user_id
+                if session_id:
+                    input_data["session_id"] = session_id
+                if conversation_history:
+                    input_data["messages"] = conversation_history
+                
+                async for text_chunk in ai.async_stream_execute(input_data):
                     chunk_count += 1
                     if first_chunk_time is None:
                         first_chunk_time = time.time() - start_time
@@ -1102,13 +1128,13 @@ async def get_filler_audio(persona: Optional[str] = None):
             logger.info(f"[FILLER] 🎭 Using specified persona: {persona}")
         
         if not persona_config or "filler_audio" not in persona_config:
-            logger.error(f"[FILLER] ❌ No filler audio configured for persona: {persona}")
-            return JSONResponse(status_code=404, content={"error": "No filler audio configured for this persona"})
+            logger.info(f"[FILLER] ℹ️ No filler audio configured for persona: {persona}")
+            return Response(status_code=204)  # No Content - not an error, just no filler audio available
         
         filler_paths = persona_config.get("filler_audio", [])
         if not filler_paths:
-            logger.error(f"[FILLER] ❌ No filler audio paths found for persona: {persona}")
-            return JSONResponse(status_code=404, content={"error": "No filler audio files found"})
+            logger.info(f"[FILLER] ℹ️ No filler audio paths found for persona: {persona}")
+            return Response(status_code=204)  # No Content - not an error, just no filler audio available
         
         logger.info(f"[FILLER] 📋 Available filler paths: {filler_paths}")
         
@@ -1124,8 +1150,8 @@ async def get_filler_audio(persona: Optional[str] = None):
         logger.info(f"[FILLER] ✅ File exists: {audio_file.exists()}")
         
         if not audio_file.exists():
-            logger.error(f"[FILLER] ❌ Filler audio file not found: {audio_file}")
-            return JSONResponse(status_code=404, content={"error": "Filler audio file not found"})
+            logger.warning(f"[FILLER] ⚠️ Filler audio file not found: {audio_file}")
+            return Response(status_code=204)  # No Content - file doesn't exist
         
         # Return the audio file with no caching to ensure fresh persona-specific audio
         return FileResponse(
@@ -1215,10 +1241,13 @@ async def ai_ask_question(request: Request):
 
 @app.post("/api/chat/sessions/{session_id}/generate-title")
 async def generate_chat_title(session_id: str):
-    """Generate a title for a chat session using AI based on conversation context."""
+    """Generate a title for a chat session using AI based on conversation context.
+    Works for both regular chat sessions (chat-*) and AI focus sessions (ai-focus-*).
+    """
     try:
+        logger.info(f"[GENERATE TITLE] Generating title for session: {session_id}")
         async with AsyncSessionLocal() as session:
-            # Get all messages from this conversation
+            # Get all messages from this conversation (works for both chat-* and ai-focus-* session IDs)
             result = await session.execute(
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
@@ -1226,7 +1255,10 @@ async def generate_chat_title(session_id: str):
             )
             messages = result.scalars().all()
             
+            logger.info(f"[GENERATE TITLE] Found {len(messages)} messages for session {session_id}")
+            
             if not messages:
+                logger.warning(f"[GENERATE TITLE] No messages found for session {session_id}")
                 return {"success": False, "error": "No messages found in this conversation"}
             
             # Build conversation context
@@ -1278,13 +1310,14 @@ async def generate_chat_title(session_id: str):
             
             await session.commit()
             
+            logger.info(f"[GENERATE TITLE] Successfully generated title '{generated_title}' for session {session_id}")
             return {
                 "success": True,
                 "title": generated_title
             }
             
     except Exception as e:
-        logger.error(f"Error generating chat title: {e}", exc_info=True)
+        logger.error(f"[GENERATE TITLE] Error generating chat title for session {session_id}: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
 
@@ -1482,6 +1515,203 @@ async def text_to_audio_stream(request: Request):
             
     except Exception as e:
         logger.error(f"[TEXT-TO-AUDIO] Failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/ai/focus/save-message")
+async def save_ai_focus_message(request: Request):
+    """
+    Save AI focus mode message to database.
+    Separates questions and tasks into different session IDs.
+    """
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        answer = payload.get("answer", "")
+        mode = payload.get("mode", "question")  # 'question' or 'task'
+        persona = payload.get("persona")
+        user_id = payload.get("user_id")
+        audio_file_path = payload.get("audio_file_path")
+        session_id = payload.get("session_id")  # Use provided session_id if available
+
+        if not question or not answer:
+            return {"success": False, "error": "Question and answer are required"}
+
+        # Use provided session_id, or create new one if not provided
+        if not session_id:
+            from datetime import datetime
+            timestamp = int(datetime.now().timestamp() * 1000)
+            session_id = f"ai-focus-{mode}-{timestamp}"
+            logger.info(f"[AI FOCUS] No session_id provided, created new: {session_id}")
+        else:
+            logger.info(f"[AI FOCUS] Using provided session_id: {session_id}, persona={persona}, mode={mode}")
+        
+        # Get current persona if not provided
+        if not persona:
+            persona = await get_current_persona_name()
+            logger.info(f"[AI FOCUS] No persona provided, using current: {persona}")
+        
+        async with AsyncSessionLocal() as session:
+            # CRITICAL: Always use the provided session_id - never create a new one here
+            # The session_id should be consistent across all messages in the same chat
+            logger.info(f"[AI FOCUS] Saving messages with session_id={session_id}, persona={persona}, mode={mode}")
+            
+            # CRITICAL: Save user message FIRST, then commit to ensure it's in the database
+            # This ensures the question is saved before the answer, maintaining proper order
+            user_msg = ChatMessage(
+                session_id=session_id,  # Use the provided session_id consistently
+                role="user",
+                message=question,
+                service_name="ai_service",
+                mode=None,  # AI focus mode doesn't use mode
+                persona=persona,  # Store the persona that was active when question was asked
+                message_metadata={}
+            )
+            session.add(user_msg)
+            # Flush to ensure user message gets an ID and is saved first
+            await session.flush()
+            
+            logger.info(f"[AI FOCUS] Saved user message: session_id={session_id}, user_msg_id={user_msg.id}, question_preview={question[:50]}")
+            
+            # Save assistant message with audio file path in metadata
+            assistant_metadata = {}
+            if audio_file_path:
+                assistant_metadata["audio_file"] = audio_file_path
+            
+            assistant_msg = ChatMessage(
+                session_id=session_id,  # Use the same session_id for both messages
+                role="assistant",
+                message=answer,
+                service_name="ai_service",
+                mode=None,
+                persona=persona,  # Store the persona that generated this answer
+                message_metadata=assistant_metadata
+            )
+            session.add(assistant_msg)
+            # Flush to ensure assistant message gets an ID
+            await session.flush()
+            
+            logger.info(f"[AI FOCUS] Saved assistant message: session_id={session_id}, assistant_msg_id={assistant_msg.id}, answer_preview={answer[:50] if answer else 'empty'}")
+            
+            # Create or update ChatSession if user_id is provided
+            # CRITICAL: Always check for existing session first to prevent duplicates
+            if user_id:
+                # Check if session already exists - use a more robust query
+                result = await session.execute(
+                    select(ChatSession).where(ChatSession.session_id == session_id)
+                )
+                chat_session = result.scalar_one_or_none()
+                
+                if chat_session:
+                    # Update existing session - CRITICAL: Always use the existing session, don't create a new one
+                    logger.info(f"[AI FOCUS] Updating existing ChatSession: session_id={session_id}, persona={persona}, user_id={user_id}, existing_title={chat_session.title}")
+                    from datetime import datetime, timezone
+                    chat_session.user_id = user_id
+                    chat_session.updated_at = datetime.now(timezone.utc)
+                    # Only update title if it's still the default/temporary one
+                    if not chat_session.title or chat_session.title.startswith("AI Focus"):
+                        new_title = f"AI Focus {mode.capitalize()} - {question[:30]}..." if len(question) > 30 else f"AI Focus {mode.capitalize()}"
+                        chat_session.title = new_title
+                        logger.info(f"[AI FOCUS] Updated ChatSession title to: {new_title}")
+                else:
+                    # Create new session ONLY if it doesn't exist
+                    # Double-check to prevent race conditions
+                    result2 = await session.execute(
+                        select(ChatSession).where(ChatSession.session_id == session_id)
+                    )
+                    chat_session = result2.scalar_one_or_none()
+                    
+                    if not chat_session:
+                        logger.info(f"[AI FOCUS] Creating new ChatSession: session_id={session_id}, persona={persona}, user_id={user_id}, mode={mode}")
+                        from datetime import datetime, timezone
+                        chat_session = ChatSession(
+                            session_id=session_id,
+                            user_id=user_id,
+                            title=f"AI Focus {mode.capitalize()} - {question[:30]}..." if len(question) > 30 else f"AI Focus {mode.capitalize()}"
+                        )
+                        session.add(chat_session)
+                    else:
+                        # Session was created between checks - just update it
+                        logger.info(f"[AI FOCUS] ChatSession created between checks, updating: session_id={session_id}")
+                        from datetime import datetime, timezone
+                        chat_session.user_id = user_id
+                        chat_session.updated_at = datetime.now(timezone.utc)
+            
+            await session.commit()
+            
+            logger.info(f"[AI FOCUS] Saved message: session_id={session_id}, mode={mode}, persona={persona}, audio_file={audio_file_path}")
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "message_id": assistant_msg.id
+            }
+    except Exception as e:
+        logger.error(f"[AI FOCUS] Error saving message: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/ai/focus/save-audio")
+async def save_ai_focus_audio(request: Request):
+    """
+    Save audio file for AI focus mode message and return the file path.
+    """
+    try:
+        payload = await request.json()
+        text = payload.get("text", "")
+        message_id = payload.get("message_id")  # Optional message ID to update
+        
+        if not text:
+            return JSONResponse(status_code=400, content={"error": "Text is required"})
+        
+        # Get current persona and voice config
+        from config.voice_loader import get_voice_for_persona
+        from config.persona_loader import get_current_persona_name
+        
+        current_persona = await get_current_persona_name()
+        voice_config = await get_voice_for_persona(current_persona)
+        
+        if voice_config:
+            voice_id, voice_engine_default = voice_config
+            voice_engine = voice_engine_default or "s1"
+        else:
+            persona_config = await load_persona_config()
+            fish_cfg = (persona_config or {}).get("fish_audio", {}) if persona_config else {}
+            voice_id = fish_cfg.get("voice_id")
+            voice_engine = fish_cfg.get("voice_engine", "s1")
+        
+        if not voice_id:
+            return JSONResponse(status_code=500, content={"error": "TTS not configured"})
+        
+        # Generate and save audio
+        from services.tts_service import TTSService
+        tts_service = TTSService()
+        audio_data, audio_filepath = await tts_service.generate_audio(text, voice_id, voice_engine, save_to_file=True)
+        
+        if not audio_data or not audio_filepath:
+            return JSONResponse(status_code=500, content={"error": "Failed to generate audio"})
+        
+        # Update message metadata with audio file path if message_id is provided
+        if message_id:
+            try:
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(select(ChatMessage).where(ChatMessage.id == message_id))
+                    message = result.scalar_one_or_none()
+                    if message:
+                        metadata = message.message_metadata or {}
+                        metadata["audio_file"] = audio_filepath
+                        message.message_metadata = metadata
+                        await session.commit()
+                        logger.info(f"[AI FOCUS] Updated message {message_id} with audio file: {audio_filepath}")
+            except Exception as e:
+                logger.warning(f"[AI FOCUS] Failed to update message metadata: {e}")
+        
+        return {
+            "success": True,
+            "audio_file_path": audio_filepath
+        }
+    except Exception as e:
+        logger.error(f"[AI FOCUS] Error saving audio: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
@@ -7384,11 +7614,13 @@ async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optiona
         query = select(ChatMessage)
         count_query = select(func.count(ChatMessage.id))
         
-        # For chat sessions (starting with 'chat-'), filter by session_id ONLY
-        if session_id and session_id.startswith('chat-'):
+        # For chat sessions (starting with 'chat-') or AI focus sessions (starting with 'ai-focus-'), filter by session_id ONLY
+        if session_id and (session_id.startswith('chat-') or session_id.startswith('ai-focus-')):
             logger.info(f"[get_chat_history] Filtering by session_id: {session_id}")
+            # Use exact match for session_id to ensure we only get messages for this specific session
             query = query.where(ChatMessage.session_id == session_id)
             count_query = count_query.where(ChatMessage.session_id == session_id)
+            logger.info(f"[get_chat_history] Applied session_id filter: {session_id}")
         else:
             # For non-chat sessions, filter by mode and persona (backward compatibility)
             logger.info(f"[get_chat_history] Filtering by mode={mode}, persona={persona}")
@@ -7406,12 +7638,16 @@ async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optiona
         total_count = count_result.scalar() or 0
         
         # Get messages with pagination
-        query = query.order_by(desc(ChatMessage.created_at)).limit(limit).offset(offset)
+        # Order by created_at DESC (newest first), then by id DESC (to break ties)
+        # This ensures consistent ordering even when messages have the same timestamp
+        query = query.order_by(desc(ChatMessage.created_at), desc(ChatMessage.id)).limit(limit).offset(offset)
         result = await session.execute(query)
         messages = result.scalars().all()
         
         logger.info(f"[get_chat_history] Returning {len(messages)} messages for session_id={session_id}, total_count={total_count}")
         
+        # Reverse to get chronological order (oldest first)
+        # Messages are now properly ordered by created_at and id
         return {
             "messages": [
                 {
@@ -7420,6 +7656,7 @@ async def get_chat_history(limit: int = 50, offset: int = 0, session_id: Optiona
                     "role": m.role,
                     "message": m.message,
                     "service_name": m.service_name,
+                    "persona": m.persona,  # Include persona in response
                     "message_metadata": m.message_metadata or {},
                     "created_at": m.created_at.isoformat() if m.created_at else None
                 }
@@ -7879,6 +8116,53 @@ async def create_chat_session(request: Request):
             }
     except Exception as e:
         logger.error(f"Error creating chat session: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/ai/focus/sessions")
+async def get_ai_focus_sessions(user_id: int = None):
+    """Get all AI focus mode sessions (questions and tasks) with their titles, filtered by user_id if provided."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get sessions that start with 'ai-focus-'
+            query = select(ChatSession).where(
+                or_(
+                    ChatSession.session_id.like('ai-focus-question-%'),
+                    ChatSession.session_id.like('ai-focus-task-%')
+                )
+            )
+            
+            # Filter by user_id if provided
+            try:
+                test_query = text("SELECT user_id FROM chat_sessions LIMIT 1")
+                await session.execute(test_query)
+                if user_id is not None:
+                    query = query.where(ChatSession.user_id == user_id)
+                else:
+                    query = query.where(ChatSession.user_id == -1)  # Impossible condition = empty result
+            except Exception:
+                pass  # Column doesn't exist yet - return all sessions
+            
+            result = await session.execute(
+                query.order_by(ChatSession.pinned.desc(), desc(ChatSession.updated_at))
+            )
+            sessions = result.scalars().all()
+            
+            return {
+                "success": True,
+                "sessions": [
+                    {
+                        "session_id": s.session_id,
+                        "title": s.title,
+                        "pinned": s.pinned if hasattr(s, 'pinned') else False,
+                        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+                        "mode": "question" if s.session_id.startswith("ai-focus-question-") else "task"
+                    }
+                    for s in sessions
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting AI focus sessions: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
 

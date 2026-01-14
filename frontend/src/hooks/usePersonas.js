@@ -11,8 +11,13 @@ export function usePersonas(selectedUserId = null) {
     try {
       const data = await personaAPI.getPersonas(userId);
       setPersonas(data.personas || []);
-      setCurrentPersona(data.current || 'default');
-      setCurrentTitle(data.current_title || 'CYBER');
+      // Only update if we got a valid response
+      if (data.current) {
+        setCurrentPersona(data.current);
+      }
+      if (data.current_title) {
+        setCurrentTitle(data.current_title);
+      }
       setLoading(false);
     } catch (error) {
       console.error('Error loading personas:', error);
@@ -22,12 +27,29 @@ export function usePersonas(selectedUserId = null) {
 
   const selectPersona = async (personaName, userId = null) => {
     try {
+      // Optimistically update the UI immediately
+      setCurrentPersona(personaName);
+      
+      // Save to backend
       await personaAPI.selectPersona(personaName, userId);
+      
+      // Reload to get the updated persona and title from backend
       await loadPersonas(userId);
+      
       // Trigger a custom event so other components can refresh
-      window.dispatchEvent(new CustomEvent('personaChanged'));
+      // NOTE: Components should NOT use this event to trigger question resends or session resets
+      window.dispatchEvent(new CustomEvent('personaChanged', { 
+        detail: { 
+          personaName, 
+          userId,
+          // Include a flag to indicate this should NOT trigger any automatic actions
+          preventAutoActions: true 
+        } 
+      }));
     } catch (error) {
       console.error('Error selecting persona:', error);
+      // Revert on error
+      await loadPersonas(userId);
       throw error;
     }
   };

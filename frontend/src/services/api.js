@@ -12,6 +12,43 @@ export const systemAPI = {
   getApiHealth: () => api.get('/system/api-health').then(res => res.data),
 };
 
+export const aiFocusAPI = {
+  saveMessage: (question, answer, mode, persona, userId, audioFilePath, sessionId = null) => {
+    const payload = {
+      question,
+      answer,
+      mode,
+      persona,
+      user_id: userId,
+      audio_file_path: audioFilePath
+    };
+    if (sessionId) {
+      payload.session_id = sessionId;
+    }
+    return api.post('/ai/focus/save-message', payload).then(res => res.data);
+  },
+  saveAudio: (text, messageId) => {
+    return api.post('/ai/focus/save-audio', {
+      text,
+      message_id: messageId
+    }).then(res => res.data);
+  },
+  getSessions: (userId) => {
+    const params = userId ? { user_id: userId } : {};
+    return api.get('/ai/focus/sessions', { params }).then(res => res.data);
+  },
+  createSession: (sessionId, userId) => {
+    const body = { session_id: sessionId };
+    if (userId) body.user_id = userId;
+    return api.post('/chat/sessions', body).then(res => res.data);
+  },
+  getHistory: (sessionId, limit = 50, offset = 0) => {
+    return api.get('/chat', { 
+      params: { session_id: sessionId, limit, offset } 
+    }).then(res => res.data);
+  },
+};
+
 export const chatAPI = {
   getHistory: (limit = 50, offset = 0, sessionId = null, mode = null, persona = null) => {
     const params = { limit, offset };

@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SideNav } from './components/SideNav';
 import { LeftPanel } from './components/LeftPanel';
 import { OctopusEnergy } from './components/OctopusEnergy';
 import { ApiHealth } from './components/ApiHealth';
 import { usePersonas } from './hooks/usePersonas';
 import { useAudioQueue } from './hooks/useAudioQueue';
-import { routerAPI, aiAPI } from './services/api';
+import { routerAPI, aiAPI, aiFocusAPI, chatAPI } from './services/api';
+import { getProfileImageUrl } from './utils/profileImageHelper';
+import { getPersonaImageUrl } from './utils/personaImageHelper';
 import { MusicPage } from './pages/Music';
 import { MusicEditor } from './pages/MusicEditor';
 import { VideosPage } from './pages/Videos';
@@ -41,6 +43,19 @@ function App() {
   const [fillerAudioObj, setFillerAudioObj] = useState(null); // Filler audio for immediate feedback
   const [micRestartKey, setMicRestartKey] = useState(0);
   const [aiFocusMode, setAiFocusMode] = useState('question'); // 'question' or 'task'
+  const [aiFocusConversations, setAiFocusConversations] = useState([]); // Array of {question, answer, persona, messageId, audioFile} objects
+  const [playingAudioId, setPlayingAudioId] = useState(null); // Track which audio is currently playing
+  const [aiFocusTitle, setAiFocusTitle] = useState(''); // Chat title for AI focus mode
+  const [aiFocusSessions, setAiFocusSessions] = useState([]); // List of AI focus sessions
+  const [currentAiFocusSessionId, setCurrentAiFocusSessionId] = useState(null); // Current session ID
+  const [aiFocusSessionTitles, setAiFocusSessionTitles] = useState({}); // Session titles
+  const [editingAiFocusSessionId, setEditingAiFocusSessionId] = useState(null); // Session being edited
+  const [editingAiFocusTitle, setEditingAiFocusTitle] = useState(''); // Title being edited
+  const [openAiFocusMenuId, setOpenAiFocusMenuId] = useState(null); // Open menu ID
+  const [aiFocusMenuPosition, setAiFocusMenuPosition] = useState({ top: 0, right: 0 }); // Menu position
+  const [generatingAiFocusTitle, setGeneratingAiFocusTitle] = useState(null); // Session generating title
+  const [deleteConfirmAiFocusSession, setDeleteConfirmAiFocusSession] = useState(null); // Session to delete
+  const [showPersonaSelector, setShowPersonaSelector] = useState(false); // Show persona selector popup
   // Initialize activePage from URL or localStorage
   const [activePage, setActivePage] = useState(() => {
     // Check URL hash first
@@ -137,8 +152,36 @@ function App() {
   const toggleAiFocus = () => {
     const newState = !aiFocusActive;
     setAiFocusActive(newState);
-    
+
     if (newState) {
+      // Entering focus mode - reset state
+      setMicStatus('idle');
+      setAiResponseText('');
+      setTranscript('');
+      setRouterText('');
+      setMicError('');
+      setAiFocusConversations([]);
+      setAiFocusTitle('');
+      setAiFocusMode('question');
+      setCurrentAiFocusSessionId(null);
+      
+      // Load AI focus sessions for the selected user
+      if (selectedUser?.id) {
+        aiFocusAPI.getSessions(selectedUser.id).then(result => {
+          if (result.success && result.sessions) {
+            const sessions = result.sessions.filter(s => s.mode === 'question' || s.mode === 'task');
+            setAiFocusSessions(sessions);
+            const titles = {};
+            sessions.forEach(s => {
+              if (s.title) titles[s.session_id] = s.title;
+            });
+            setAiFocusSessionTitles(titles);
+          }
+        }).catch(err => {
+          console.error('[AI FOCUS] Error loading sessions:', err);
+        });
+      }
+      
       // Entering focus mode - pause music and other audio
       // Dispatch event for music player to pause (and remember state)
       window.dispatchEvent(new CustomEvent('enterFocusMode'));
@@ -184,23 +227,37 @@ function App() {
     try {
       console.log('[FILLER] Requesting filler audio...');
       const fillerResp = await aiAPI.getFillerAudio();
-      const blob = fillerResp?.data;
       
+      // Handle 204 No Content response (no filler audio available)
+      if (fillerResp?.status === 204) {
+        console.log('[FILLER] No filler audio available for this persona');
+        return;
+      }
+      
+      const blob = fillerResp?.data;
+
       if (blob && blob.size > 0) {
         const url = URL.createObjectURL(blob);
         const filler = new Audio(url);
         setFillerAudioObj(filler);
-        
+
         filler.onended = () => {
           console.log('[FILLER] Filler audio ended');
           setFillerAudioObj(null);
         };
-        
+
         await filler.play();
         console.log('[FILLER] Playing filler audio');
       }
     } catch (err) {
-      console.error('[FILLER] Failed to play filler audio:', err);
+      // Only log if it's not a 404/204 (no content available)
+      const status = err?.response?.status;
+      if (status === 404 || status === 204) {
+        // Silently handle - no filler audio available is not an error
+        console.log('[FILLER] No filler audio available for this persona');
+      } else {
+        console.error('[FILLER] Failed to play filler audio:', err);
+      }
     }
   };
 
@@ -308,7 +365,7 @@ function App() {
     };
 
     const sendForTranscription = async (blob) => {
-      setMicStatus('processing');
+      setMicStatus('thinking');
       try {
         const fd = new FormData();
         fd.append('file', blob, 'audio.webm');
@@ -332,9 +389,6 @@ function App() {
           const transcript = data.transcript || '';
           console.log('Transcript:', transcript);
           
-          // Show thinking status while AI processes
-          setAiResponseText('Thinking...');
-          
           // Handle based on AI focus mode
           if (aiFocusMode === 'question') {
             // Direct AI question mode - stream text first, then audio
@@ -349,7 +403,73 @@ function App() {
               // Step 1: Stream text from AI and display it
               console.log('[STREAM] Streaming text response...');
               
-              await aiAPI.askQuestionStream({ question: transcript }, (data) => {
+              // Add question to conversation
+              const currentQuestion = transcript;
+              // Capture the persona at the time the question is asked (before it might change)
+              const personaAtQuestionTime = currentPersona;
+              
+              // CRITICAL: Ensure we have a session ID - create one if we don't have one
+              // Once a session ID is established for a chat, it NEVER changes, regardless of persona switches
+              let sessionIdToUse = currentAiFocusSessionId;
+              if (!sessionIdToUse) {
+                // No session ID yet - create a new one and set it immediately
+                sessionIdToUse = `ai-focus-${aiFocusMode}-${Date.now()}`;
+                console.log('[AI FOCUS] No session ID, creating new one:', sessionIdToUse);
+                setCurrentAiFocusSessionId(sessionIdToUse);
+                
+                // Create temp title
+                const tempTitle = currentQuestion.length > 30 
+                  ? `${currentQuestion.substring(0, 30)}...`
+                  : currentQuestion;
+                setAiFocusTitle(tempTitle);
+                
+                // Create session in database immediately
+                aiFocusAPI.createSession(sessionIdToUse, selectedUser?.id).then(sessionResult => {
+                  if (sessionResult.success) {
+                    if (sessionResult.title) {
+                      setAiFocusTitle(sessionResult.title);
+                      setAiFocusSessionTitles(prev => ({
+                        ...prev,
+                        [sessionIdToUse]: sessionResult.title
+                      }));
+                    }
+                    
+                    // Add to sessions list
+                    setAiFocusSessions(prev => {
+                      const exists = prev.some(s => s.session_id === sessionIdToUse);
+                      if (!exists) {
+                        return [{
+                          session_id: sessionIdToUse,
+                          title: sessionResult.title || tempTitle,
+                          mode: aiFocusMode,
+                          pinned: false
+                        }, ...prev].slice(0, 20);
+                      }
+                      return prev;
+                    });
+                  }
+                }).catch(err => {
+                  console.error('[AI FOCUS] Error creating session:', err);
+                });
+              }
+              
+              // CRITICAL: sessionIdToUse is now guaranteed to be set and will NEVER change for this chat
+              // Persona switches will NOT affect this session ID
+              console.log('[AI FOCUS] Question asked with session ID:', sessionIdToUse, 'Persona:', personaAtQuestionTime);
+              
+              let savedMessageId = null; // Store message ID for audio file update
+              
+              setAiFocusConversations(prev => [...prev, { question: currentQuestion, answer: '', isStreaming: true, messageId: null, persona: personaAtQuestionTime }]);
+              setMicStatus('thinking');
+              
+              // Pass session_id and persona to include conversation context
+              // Use the established session ID - it will never change for this chat
+              await aiAPI.askQuestionStream({ 
+                question: transcript, 
+                user_id: selectedUser?.id,
+                session_id: sessionIdToUse, // Use the established session ID
+                persona: personaAtQuestionTime // Pass the persona that was active when question was asked
+              }, (data) => {
                 if (data.chunk) {
                   if (firstTextChunk === null) {
                     firstTextChunk = Date.now() - startTime;
@@ -357,19 +477,170 @@ function App() {
                   }
                   responseText += data.chunk;
                   setAiResponseText(responseText);
+                  // Update the last conversation entry with streaming answer
+                  setAiFocusConversations(prev => {
+                    const updated = [...prev];
+                    if (updated.length > 0) {
+                      updated[updated.length - 1] = { ...updated[updated.length - 1], answer: responseText, isStreaming: true };
+                    }
+                    return updated;
+                  });
                 } else if (data.done) {
                   const textTime = Date.now() - startTime;
                   console.log(`[STREAM] Text complete in ${textTime}ms, length: ${responseText.length}`);
                   responseText = data.full_text || responseText;
                   setAiResponseText(responseText);
+                  
+                  // Update the last conversation entry with final answer and persona
+                  setAiFocusConversations(prev => {
+                    const updated = [...prev];
+                    if (updated.length > 0) {
+                      updated[updated.length - 1] = { 
+                        ...updated[updated.length - 1], 
+                        answer: responseText, 
+                        isStreaming: false,
+                        persona: personaAtQuestionTime // Store the persona that answered
+                      };
+                    }
+                    return updated;
+                  });
+                  
+                  // Save message to database (without audio file path yet)
+                  // Use the persona that was active when the question was asked
+                  // Use the established session ID - it never changes for this chat
+                  aiFocusAPI.saveMessage(
+                    currentQuestion,
+                    responseText,
+                    aiFocusMode,
+                    personaAtQuestionTime, // Use the persona captured at question time
+                    selectedUser?.id,
+                    null, // Audio file path will be added after audio is saved
+                    sessionIdToUse // Use the established session ID - it never changes
+                  ).then(result => {
+                    if (result.success) {
+                      // CRITICAL: The session_id should match what we sent
+                      // If it doesn't, log a warning but use what we sent (sessionIdToUse)
+                      const returnedSessionId = result.session_id;
+                      console.log('[AI FOCUS] Message saved:', {
+                        returned_session_id: returnedSessionId,
+                        sent_session_id: sessionIdToUse,
+                        message_id: result.message_id
+                      });
+                      
+                      // Ensure the session ID state matches what we're using
+                      // This should already be set, but double-check
+                      if (currentAiFocusSessionId !== sessionIdToUse) {
+                        console.log('[AI FOCUS] Session ID mismatch, updating state:', {
+                          current: currentAiFocusSessionId,
+                          should_be: sessionIdToUse
+                        });
+                        setCurrentAiFocusSessionId(sessionIdToUse);
+                      }
+                      
+                      savedMessageId = result.message_id; // Store for audio file update
+                      // Update the last conversation entry with message ID, persona, and audio file (if available)
+                      setAiFocusConversations(prev => {
+                        const updated = [...prev];
+                        if (updated.length > 0) {
+                          updated[updated.length - 1] = { 
+                            ...updated[updated.length - 1], 
+                            messageId: result.message_id,
+                            persona: personaAtQuestionTime, // Store the persona that answered
+                            audioFile: null // Will be updated when audio is saved
+                          };
+                        }
+                        return updated;
+                      });
+                      
+                      // Session should already be created if it was new
+                      // Just ensure the title is set if we don't have one
+                      if (!aiFocusTitle && currentQuestion) {
+                        const tempTitle = currentQuestion.length > 30 
+                          ? `${currentQuestion.substring(0, 30)}...`
+                          : currentQuestion;
+                        setAiFocusTitle(tempTitle);
+                      }
+                    }
+                  }).catch(err => {
+                    console.error('[AI FOCUS] Error saving message:', err);
+                  });
                 }
               });
               
-              // Step 2: Now generate streaming audio from the completed text
+              // Step 2: Generate and save audio file, then stream it
               if (responseText) {
                 console.log('[STREAM] Starting audio generation from completed text...');
                 const audioStartTime = Date.now();
                 
+                // Save audio file after a delay to ensure message is saved first
+                // Use closure variable savedMessageId which will be set in the done callback
+                setTimeout(async () => {
+                  try {
+                    // Use savedMessageId from closure, or try to get from state as fallback
+                    let messageIdToUse = savedMessageId;
+                    if (!messageIdToUse) {
+                      // Fallback: try to get from state (may not be updated yet)
+                      // This is a workaround - ideally savedMessageId should be set by now
+                      const currentConvs = aiFocusConversations;
+                      if (currentConvs.length > 0) {
+                        messageIdToUse = currentConvs[currentConvs.length - 1]?.messageId;
+                      }
+                    }
+                    
+                    if (messageIdToUse) {
+                      // Save audio file and update message metadata
+                      const audioResult = await aiFocusAPI.saveAudio(responseText, messageIdToUse);
+                      if (audioResult.success && audioResult.audio_file_path) {
+                        console.log('[AI FOCUS] Audio file saved:', audioResult.audio_file_path);
+                        // Update conversation with audio file path
+                        setAiFocusConversations(prev => {
+                          const updated = [...prev];
+                          if (updated.length > 0) {
+                            updated[updated.length - 1] = { 
+                              ...updated[updated.length - 1], 
+                              audioFile: audioResult.audio_file_path
+                            };
+                          }
+                          return updated;
+                        });
+                      }
+                    } else {
+                      console.warn('[AI FOCUS] No message ID available yet, will retry...');
+                      // Retry once more after another delay
+                      setTimeout(async () => {
+                        const retryConvs = aiFocusConversations;
+                        if (retryConvs.length > 0) {
+                          const retryMessageId = retryConvs[retryConvs.length - 1]?.messageId;
+                          if (retryMessageId) {
+                            try {
+                              const audioResult = await aiFocusAPI.saveAudio(responseText, retryMessageId);
+                              if (audioResult.success && audioResult.audio_file_path) {
+                                console.log('[AI FOCUS] Audio file saved on retry:', audioResult.audio_file_path);
+                                // Update conversation with audio file path
+                                setAiFocusConversations(prev => {
+                                  const updated = [...prev];
+                                  if (updated.length > 0) {
+                                    updated[updated.length - 1] = { 
+                                      ...updated[updated.length - 1], 
+                                      audioFile: audioResult.audio_file_path
+                                    };
+                                  }
+                                  return updated;
+                                });
+                              }
+                            } catch (retryErr) {
+                              console.error('[AI FOCUS] Error saving audio file on retry:', retryErr);
+                            }
+                          }
+                        }
+                      }, 1000);
+                    }
+                  } catch (audioSaveErr) {
+                    console.error('[AI FOCUS] Error saving audio file:', audioSaveErr);
+                  }
+                }, 1500); // Delay to ensure message is saved first
+                
+                // Now stream the audio for playback
                 const response = await fetch('/api/ai/text-to-audio-stream', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -433,7 +704,7 @@ function App() {
                       firstAudioChunk = Date.now() - startTime;
                       console.log(`[STREAM] First audio chunk in ${firstAudioChunk}ms`);
                       stopFillerAudio();
-                      setMicStatus('playing');
+                      setMicStatus('thinking');
                     }
                     
                     totalBytes += value.length;
@@ -464,6 +735,11 @@ function App() {
                   setMicStatus('idle');
                   setAiResponseText('');
                   URL.revokeObjectURL(audio.src);
+                };
+                
+                // Keep status as thinking while audio is playing
+                audio.onplay = () => {
+                  setMicStatus('thinking');
                 };
                 
                 audio.onerror = (err) => {
@@ -547,6 +823,40 @@ function App() {
     };
     // Depend on micRestartKey to allow restarting listening after retries
   }, [aiFocusActive, micRestartKey, micStatus]);
+
+  // Auto-scroll conversations to bottom when new messages are added
+  const conversationsRef = useRef(null);
+  useEffect(() => {
+    if (conversationsRef.current) {
+      conversationsRef.current.scrollTop = conversationsRef.current.scrollHeight;
+    }
+  }, [aiFocusConversations]);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (openAiFocusMenuId) {
+      const handleClickOutside = (e) => {
+        if (!e.target.closest('.ai-focus-session-menu') && !e.target.closest('.ai-focus-session-menu-btn')) {
+          setOpenAiFocusMenuId(null);
+        }
+      };
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [openAiFocusMenuId]);
+
+  // Close persona selector when clicking outside
+  useEffect(() => {
+    if (showPersonaSelector) {
+      const handleClickOutside = (e) => {
+        if (!e.target.closest('.ai-focus-persona-selector-popup') && !e.target.closest('.ai-focus-persona-selector-icon')) {
+          setShowPersonaSelector(false);
+        }
+      };
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [showPersonaSelector]);
 
 
   return (
@@ -695,54 +1005,899 @@ function App() {
       
       {aiFocusActive && (
         <div className="ai-focus-overlay">
-          <div className="ai-focus-persona-name">
-            {currentTitle || 'AI Assistant'}
-          </div>
-          <div
-            className={`ai-focus-mic ${
-              ['listening', 'processing', 'playing'].includes(micStatus) ? 'active' : 'off'
-            }`}
-            role="button"
-            tabIndex={0}
-            onClick={beginListening}
-            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
-            title="Start microphone"
-          >
-            <AIFocusMic 
-              personas={personas}
-              currentPersona={currentPersona}
-              currentTitle={currentTitle}
-              micStatus={micStatus}
-            />
-          </div>
-          <div className="ai-focus-status">
-            {micStatus === 'listening' && 'Listening...'}
-            {micStatus === 'error' && `Mic error: ${micError}`}
-            {micStatus === 'processing' && 'Transcribing...'}
-            {micStatus === 'playing' && 'Playing response...'}
-            {micStatus === 'idle' && 'Tap mic to start'}
-          </div>
-          <div className="ai-focus-mode-toggle">
-            <button
-              className={aiFocusMode === 'question' ? 'active' : ''}
-              onClick={() => setAiFocusMode('question')}
-              disabled={micStatus !== 'idle'}
-            >
-              Question
-            </button>
-            <button
-              className={aiFocusMode === 'task' ? 'active' : ''}
-              onClick={() => setAiFocusMode('task')}
-              disabled={micStatus !== 'idle'}
-            >
-              Task
-            </button>
-          </div>
-          {aiResponseText && (
-            <div className="ai-response-text">
-              {aiResponseText}
+          {/* Left Sidebar */}
+          <div className="ai-focus-sidebar">
+            <div className="ai-focus-sidebar-content">
+              {/* Mode indicator above avatar */}
+              <div className="ai-focus-mode-indicator">
+                {aiFocusMode === 'question' ? 'Question' : 'Task'}
+              </div>
+              
+              {/* Avatar container with controls */}
+              <div className="ai-focus-avatar-container">
+                {/* Avatar near top with room for animation */}
+                <div className="ai-focus-sidebar-avatar">
+                  <div
+                    className={`ai-focus-mic ${
+                      ['listening', 'thinking'].includes(micStatus) ? 'active' : 'off'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={beginListening}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
+                    title="Start microphone"
+                  >
+                    <AIFocusMic 
+                      personas={personas}
+                      currentPersona={currentPersona}
+                      currentTitle={currentTitle}
+                      micStatus={micStatus}
+                    />
+                  </div>
+                </div>
+                
+                {/* New Chat icon button - to the right, level with top of image */}
+                <button
+                  className="ai-focus-new-chat-icon"
+                  onClick={async () => {
+                    if (micStatus !== 'idle') return;
+                    
+                    // Generate a new session ID based on timestamp and mode
+                    const newSessionId = `ai-focus-${aiFocusMode}-${Date.now()}`;
+                    console.log('[AI FOCUS] Creating new session:', newSessionId);
+                    
+                    // Create temp title
+                    const tempTitle = new Date().toLocaleString();
+                    
+                    // Add the new session to the list immediately
+                    setAiFocusSessions(prev => {
+                      const updated = [{
+                        session_id: newSessionId,
+                        title: tempTitle,
+                        mode: aiFocusMode,
+                        pinned: false
+                      }, ...prev.filter(s => s.session_id !== newSessionId)];
+                      return updated.slice(0, 20);
+                    });
+                    
+                    // Set the temp title immediately
+                    setAiFocusSessionTitles(prev => ({
+                      ...prev,
+                      [newSessionId]: tempTitle
+                    }));
+                    
+                    // Set the new session ID
+                    setCurrentAiFocusSessionId(newSessionId);
+                    setAiFocusTitle(tempTitle);
+                    setAiFocusConversations([]);
+                    
+                    // Create session in database
+                    aiFocusAPI.createSession(newSessionId, selectedUser?.id).then(result => {
+                      if (result.success && result.title) {
+                        setAiFocusSessionTitles(prev => ({
+                          ...prev,
+                          [newSessionId]: result.title
+                        }));
+                        setAiFocusTitle(result.title);
+                        // Update session in list
+                        setAiFocusSessions(prev => prev.map(s => 
+                          s.session_id === newSessionId 
+                            ? { ...s, title: result.title }
+                            : s
+                        ));
+                      }
+                    }).catch(err => {
+                      console.error('[AI FOCUS] Error creating session:', err);
+                    });
+                  }}
+                  disabled={micStatus !== 'idle'}
+                  title="New Chat"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
+                </button>
+                
+                {/* Persona selector icon button - below New Chat */}
+                <button
+                  className="ai-focus-persona-selector-icon"
+                  onClick={() => setShowPersonaSelector(!showPersonaSelector)}
+                  title="Change Persona"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                  </svg>
+                </button>
+              </div>
+              
+              {/* Persona selector popup */}
+              {showPersonaSelector && (
+                <div className="ai-focus-persona-selector-popup">
+                  <div className="ai-focus-persona-selector-header">
+                    <h3>Select Persona</h3>
+                    <button 
+                      className="ai-focus-persona-selector-close"
+                      onClick={() => setShowPersonaSelector(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="ai-focus-persona-selector-list">
+                    {personas && personas.length > 0 ? (
+                      personas.map((persona) => (
+                        <button
+                          key={persona.name}
+                          className={`ai-focus-persona-selector-item ${currentPersona === persona.name ? 'active' : ''}`}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              // Only change persona if not already selected and mic is idle
+                              if (currentPersona !== persona.name && micStatus === 'idle') {
+                                // CRITICAL: Persona switch should NEVER affect the session ID or chat state
+                                // The session ID is fixed when the chat starts and never changes
+                                // Persona only affects future answers, not the chat structure
+                                
+                                console.log('[AI FOCUS] Switching persona from', currentPersona, 'to', persona.name);
+                                console.log('[AI FOCUS] Current session ID (will NOT change):', currentAiFocusSessionId);
+                                console.log('[AI FOCUS] Current conversations count:', aiFocusConversations.length);
+                                
+                                // Simply change the persona - do NOT touch session ID or conversations
+                                // Pass the selected user ID to ensure persona is set for the correct user
+                                await selectPersona(persona.name, selectedUser?.id);
+                                
+                                setShowPersonaSelector(false);
+                                
+                                // Log for debugging
+                                console.log('[AI FOCUS] Persona switched. Session ID remains:', currentAiFocusSessionId);
+                                console.log('[AI FOCUS] Conversations remain:', aiFocusConversations.length, 'items');
+                                // Persona change only affects future answers - session and chat structure unchanged
+                              } else if (currentPersona === persona.name) {
+                                // Already selected, just close the popup
+                                setShowPersonaSelector(false);
+                              }
+                            } catch (error) {
+                              console.error('[AI FOCUS] Error selecting persona:', error);
+                              // On error, try to preserve session state
+                              if (currentAiFocusSessionId) {
+                                console.log('[AI FOCUS] Error occurred, but preserving session ID:', currentAiFocusSessionId);
+                              }
+                            }
+                          }}
+                        >
+                          {persona.name}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="ai-focus-persona-selector-empty">No personas available</div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Name under avatar */}
+              <div className="ai-focus-persona-name">
+                {currentTitle || 'AI Assistant'}
+              </div>
+              
+              {/* Chat title under name */}
+              {aiFocusTitle && (
+                <div className="ai-focus-chat-title">
+                  {aiFocusTitle}
+                </div>
+              )}
+              
+              {/* Status under name (only listening or thinking) */}
+              <div className="ai-focus-status">
+                {micStatus === 'listening' && 'Listening'}
+                {micStatus === 'thinking' && 'Thinking'}
+                {micStatus === 'idle' && ''}
+                {micStatus === 'error' && `Error: ${micError}`}
+              </div>
+              
+              {/* Clear All Chats Button */}
+              <div className="ai-focus-clear-all">
+                <button
+                  className="ai-focus-clear-all-btn"
+                  onClick={async () => {
+                    if (confirm('Are you sure you want to delete all AI focus chats? This cannot be undone.')) {
+                      try {
+                        // Delete all AI focus sessions for the current user
+                        const sessionsToDelete = aiFocusSessions.map(s => s.session_id);
+                        let deletedCount = 0;
+                        
+                        for (const sessionId of sessionsToDelete) {
+                          try {
+                            const result = await chatAPI.deleteSession(sessionId);
+                            if (result.success) {
+                              deletedCount++;
+                            }
+                          } catch (err) {
+                            console.error(`[AI FOCUS] Error deleting session ${sessionId}:`, err);
+                          }
+                        }
+                        
+                        // Clear local state
+                        setAiFocusSessions([]);
+                        setAiFocusSessionTitles({});
+                        setCurrentAiFocusSessionId(null);
+                        setAiFocusConversations([]);
+                        setAiFocusTitle('');
+                        
+                        console.log(`[AI FOCUS] Deleted ${deletedCount} sessions`);
+                      } catch (error) {
+                        console.error('[AI FOCUS] Error clearing all chats:', error);
+                      }
+                    }
+                  }}
+                  disabled={micStatus !== 'idle' || aiFocusSessions.length === 0}
+                  title="Clear All Chats"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                  Clear All
+                </button>
+              </div>
+              
+              {/* Chat Sessions List */}
+              <div className="ai-focus-sessions">
+                
+                {/* Questions and Tasks tabs - under New Chat button */}
+                <div className="ai-focus-tabs">
+                  <button
+                    className={`ai-focus-tab ${aiFocusMode === 'question' ? 'active' : ''}`}
+                    onClick={() => {
+                      if (micStatus === 'idle') {
+                        // When switching tabs, keep the current session if it matches the new mode
+                        // Only clear if switching to a different mode and current session doesn't match
+                        const newMode = 'question';
+                        if (aiFocusMode !== newMode) {
+                          // Switching to question mode
+                          // Check if current session matches question mode
+                          if (currentAiFocusSessionId && currentAiFocusSessionId.startsWith(`ai-focus-${newMode}-`)) {
+                            // Session already exists for this mode, just switch mode and load it
+                            setAiFocusMode(newMode);
+                            // Load the session's conversations
+                            aiFocusAPI.getHistory(currentAiFocusSessionId).then(data => {
+                              if (data && data.messages && data.messages.length > 0) {
+                                const conversations = [];
+                                let currentConv = null;
+                                for (const msg of data.messages) {
+                                  const role = msg.role;
+                                  const messageText = msg.message || '';
+                                  if (role === 'user') {
+                                    if (currentConv) {
+                                      conversations.push(currentConv);
+                                    }
+                                    currentConv = {
+                                      question: messageText,
+                                      answer: '',
+                                      persona: null,
+                                      messageId: msg.id,
+                                      audioFile: null
+                                    };
+                                  } else if (role === 'assistant' && currentConv) {
+                                    currentConv.answer = messageText;
+                                    currentConv.persona = msg.persona || null;
+                                    if (msg.message_metadata && msg.message_metadata.audio_file) {
+                                      currentConv.audioFile = msg.message_metadata.audio_file;
+                                    }
+                                  }
+                                }
+                                if (currentConv) {
+                                  conversations.push(currentConv);
+                                }
+                                const reversedConvs = conversations.reverse();
+                                setAiFocusConversations(reversedConvs);
+                                // Update title if available
+                                const session = aiFocusSessions.find(s => s.session_id === currentAiFocusSessionId);
+                                if (session) {
+                                  setAiFocusTitle(aiFocusSessionTitles[currentAiFocusSessionId] || session.title || '');
+                                }
+                              } else {
+                                setAiFocusConversations([]);
+                              }
+                            }).catch(err => {
+                              console.error('[AI FOCUS] Error loading history:', err);
+                              setAiFocusConversations([]);
+                            });
+                          } else {
+                            // Different mode or no session - clear for new session
+                            setAiFocusMode(newMode);
+                            setCurrentAiFocusSessionId(null);
+                            setAiFocusConversations([]);
+                            setAiFocusTitle('');
+                          }
+                        }
+                      }
+                    }}
+                    disabled={micStatus !== 'idle'}
+                  >
+                    Questions
+                  </button>
+                  <button
+                    className={`ai-focus-tab ${aiFocusMode === 'task' ? 'active' : ''}`}
+                    onClick={() => {
+                      if (micStatus === 'idle') {
+                        // When switching tabs, keep the current session if it matches the new mode
+                        // Only clear if switching to a different mode and current session doesn't match
+                        const newMode = 'task';
+                        if (aiFocusMode !== newMode) {
+                          // Switching to task mode
+                          // Check if current session matches task mode
+                          if (currentAiFocusSessionId && currentAiFocusSessionId.startsWith(`ai-focus-${newMode}-`)) {
+                            // Session already exists for this mode, just switch mode and load it
+                            setAiFocusMode(newMode);
+                            // Load the session's conversations
+                            aiFocusAPI.getHistory(currentAiFocusSessionId).then(data => {
+                              if (data && data.messages && data.messages.length > 0) {
+                                // Backend returns messages in chronological order (oldest first)
+                                // Sort by created_at and id to ensure consistent ordering
+                                const sortedMessages = [...data.messages].sort((a, b) => {
+                                  const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                                  const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                                  if (timeA !== timeB) {
+                                    return timeA - timeB; // Older first
+                                  }
+                                  // If timestamps are equal, sort by ID (user message should come before assistant)
+                                  return (a.id || 0) - (b.id || 0);
+                                });
+                                
+                                // Process them to pair user questions with assistant answers
+                                const conversations = [];
+                                let currentConv = null;
+                                
+                                // Process messages in order (oldest to newest)
+                                for (const msg of sortedMessages) {
+                                  const role = msg.role;
+                                  const messageText = msg.message || '';
+                                  
+                                  if (role === 'user') {
+                                    // If we have a previous conversation without an answer, save it
+                                    if (currentConv && !currentConv.answer) {
+                                      conversations.push(currentConv);
+                                    }
+                                    // Start a new conversation with the user's question
+                                    currentConv = {
+                                      question: messageText,
+                                      answer: '',
+                                      persona: null,
+                                      messageId: msg.id,
+                                      audioFile: null
+                                    };
+                                  } else if (role === 'assistant') {
+                                    if (currentConv) {
+                                      // Add answer to current conversation
+                                      currentConv.answer = messageText;
+                                      currentConv.persona = msg.persona || null;
+                                      if (msg.message_metadata && msg.message_metadata.audio_file) {
+                                        currentConv.audioFile = msg.message_metadata.audio_file;
+                                      }
+                                    } else {
+                                      // Orphaned assistant message (shouldn't happen, but handle it)
+                                      console.warn('[AI FOCUS] Found orphaned assistant message:', messageText.substring(0, 50));
+                                      currentConv = {
+                                        question: '', // No question found
+                                        answer: messageText,
+                                        persona: msg.persona || null,
+                                        messageId: msg.id,
+                                        audioFile: msg.message_metadata?.audio_file || null
+                                      };
+                                    }
+                                    // Save the completed conversation
+                                    conversations.push(currentConv);
+                                    currentConv = null; // Reset for next pair
+                                  }
+                                }
+                                
+                                // If there's a conversation without an answer at the end, save it
+                                if (currentConv) {
+                                  conversations.push(currentConv);
+                                }
+                                
+                                // Conversations are now in chronological order (oldest first)
+                                // Don't reverse - display them as-is
+                                console.log('[AI FOCUS] Loaded conversations:', conversations.length, 'in chronological order');
+                                setAiFocusConversations(conversations);
+                                // Update title if available
+                                const session = aiFocusSessions.find(s => s.session_id === currentAiFocusSessionId);
+                                if (session) {
+                                  setAiFocusTitle(aiFocusSessionTitles[currentAiFocusSessionId] || session.title || '');
+                                }
+                              } else {
+                                setAiFocusConversations([]);
+                              }
+                            }).catch(err => {
+                              console.error('[AI FOCUS] Error loading history:', err);
+                              setAiFocusConversations([]);
+                            });
+                          } else {
+                            // Different mode or no session - clear for new session
+                            setAiFocusMode(newMode);
+                            setCurrentAiFocusSessionId(null);
+                            setAiFocusConversations([]);
+                            setAiFocusTitle('');
+                          }
+                        }
+                      }
+                    }}
+                    disabled={micStatus !== 'idle'}
+                  >
+                    Tasks
+                  </button>
+                </div>
+                
+                {/* Chat list filtered by current mode */}
+                <div className="ai-focus-sessions-list">
+                  {aiFocusSessions
+                    .filter(s => s.mode === aiFocusMode)
+                    .slice(0, 10)
+                    .map(session => {
+                      const title = aiFocusSessionTitles[session.session_id] || 
+                        (session.session_id.includes('-') 
+                          ? new Date(parseInt(session.session_id.split('-').pop())).toLocaleString()
+                          : session.session_id);
+                      return (
+                        <div
+                          key={session.session_id}
+                          className={`ai-focus-session-item-wrapper ${currentAiFocusSessionId === session.session_id ? 'active' : ''}`}
+                        >
+                          {editingAiFocusSessionId === session.session_id ? (
+                            <div className="ai-focus-session-title-edit" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="text"
+                                value={editingAiFocusTitle}
+                                onChange={(e) => setEditingAiFocusTitle(e.target.value)}
+                                onKeyPress={(e) => {
+                                  if (e.key === 'Enter') {
+                                    chatAPI.updateSessionTitle(session.session_id, editingAiFocusTitle).then(result => {
+                                      if (result.success) {
+                                        setAiFocusSessionTitles(prev => ({
+                                          ...prev,
+                                          [session.session_id]: result.title || null
+                                        }));
+                                        setAiFocusTitle(result.title || editingAiFocusTitle);
+                                        setEditingAiFocusSessionId(null);
+                                        setEditingAiFocusTitle('');
+                                      }
+                                    }).catch(err => {
+                                      console.error('Error saving title:', err);
+                                    });
+                                  } else if (e.key === 'Escape') {
+                                    setEditingAiFocusSessionId(null);
+                                    setEditingAiFocusTitle('');
+                                  }
+                                }}
+                                autoFocus
+                                className="ai-focus-title-input"
+                              />
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  chatAPI.updateSessionTitle(session.session_id, editingAiFocusTitle).then(result => {
+                                    if (result.success) {
+                                      setAiFocusSessionTitles(prev => ({
+                                        ...prev,
+                                        [session.session_id]: result.title || null
+                                      }));
+                                      setAiFocusTitle(result.title || editingAiFocusTitle);
+                                      setEditingAiFocusSessionId(null);
+                                      setEditingAiFocusTitle('');
+                                    }
+                                  }).catch(err => {
+                                    console.error('Error saving title:', err);
+                                  });
+                                }} 
+                                className="ai-focus-title-save"
+                              >
+                                ✓
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingAiFocusSessionId(null);
+                                  setEditingAiFocusTitle('');
+                                }} 
+                                className="ai-focus-title-cancel"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                className={`ai-focus-session-item ${currentAiFocusSessionId === session.session_id ? 'active' : ''}`}
+                                onClick={() => {
+                                  if (micStatus === 'idle') {
+                                    setCurrentAiFocusSessionId(session.session_id);
+                                    setAiFocusTitle(title);
+                                    // Clear conversations first to show loading state
+                                    setAiFocusConversations([]);
+                                    // Load chat history for this session
+                                    const selectedSessionId = session.session_id;
+                                    console.log('[AI FOCUS] Loading history for session:', selectedSessionId);
+                                    aiFocusAPI.getHistory(selectedSessionId).then(result => {
+                                      console.log('[AI FOCUS] Loaded history result:', result);
+                                      // The API returns {messages: [...], total: ..., ...} without a success field
+                                      const messages = result.messages || result;
+                                      if (messages && Array.isArray(messages) && messages.length > 0) {
+                                        // Filter messages to only include those for this specific session_id
+                                        const filteredMessages = messages.filter(msg => {
+                                          const msgSessionId = msg.session_id || msg.sessionId;
+                                          const matches = msgSessionId === selectedSessionId;
+                                          if (!matches) {
+                                            console.warn('[AI FOCUS] Message filtered out - session_id mismatch:', {
+                                              messageSessionId: msgSessionId,
+                                              selectedSessionId: selectedSessionId,
+                                              messageId: msg.id
+                                            });
+                                          }
+                                          return matches;
+                                        });
+                                        
+                                        console.log('[AI FOCUS] Filtered messages:', filteredMessages.length, 'out of', messages.length);
+                                        
+                                        // Sort messages by created_at and id to ensure consistent ordering
+                                        // This handles cases where messages have the same timestamp
+                                        const sortedMessages = [...filteredMessages].sort((a, b) => {
+                                          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                                          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                                          if (timeA !== timeB) {
+                                            return timeA - timeB; // Older first
+                                          }
+                                          // If timestamps are equal, sort by ID (user message should come before assistant)
+                                          return (a.id || a.message_id || 0) - (b.id || b.message_id || 0);
+                                        });
+                                        
+                                        // Process them to pair user questions with assistant answers
+                                        const conversations = [];
+                                        let currentConv = null;
+                                        
+                                        // Process messages in order (oldest to newest)
+                                        for (const msg of sortedMessages) {
+                                          const role = msg.role || '';
+                                          const messageText = msg.message || msg.content || '';
+                                          
+                                          if (role === 'user') {
+                                            // If we have a previous conversation without an answer, save it
+                                            if (currentConv && !currentConv.answer) {
+                                              conversations.push(currentConv);
+                                            }
+                                            // Start a new conversation with the user's question
+                                            currentConv = {
+                                              question: messageText,
+                                              answer: '',
+                                              persona: null,
+                                              messageId: msg.id || msg.message_id || null,
+                                              audioFile: null
+                                            };
+                                          } else if (role === 'assistant') {
+                                            if (currentConv) {
+                                              // Add answer to current conversation
+                                              currentConv.answer = messageText;
+                                              currentConv.persona = msg.persona || null;
+                                              if (msg.message_metadata && msg.message_metadata.audio_file) {
+                                                currentConv.audioFile = msg.message_metadata.audio_file;
+                                              }
+                                              if (msg.id || msg.message_id) {
+                                                currentConv.messageId = msg.id || msg.message_id;
+                                              }
+                                            } else {
+                                              // Orphaned assistant message (shouldn't happen, but handle it)
+                                              console.warn('[AI FOCUS] Found orphaned assistant message:', messageText.substring(0, 50));
+                                              currentConv = {
+                                                question: '', // No question found
+                                                answer: messageText,
+                                                persona: msg.persona || null,
+                                                messageId: msg.id || msg.message_id || null,
+                                                audioFile: msg.message_metadata?.audio_file || null
+                                              };
+                                            }
+                                            // Save the completed conversation
+                                            conversations.push(currentConv);
+                                            currentConv = null; // Reset for next pair
+                                          }
+                                        }
+                                        
+                                        // If there's a conversation without an answer at the end, save it
+                                        if (currentConv) {
+                                          conversations.push(currentConv);
+                                        }
+                                        
+                                        // Conversations are now in chronological order (oldest first)
+                                        // Don't reverse - display them as-is
+                                        console.log('[AI FOCUS] Processed conversations:', conversations.length, 'in chronological order');
+                                        setAiFocusConversations(conversations);
+                                      } else {
+                                        // No messages or empty result
+                                        console.log('[AI FOCUS] No messages found for session:', session.session_id);
+                                        setAiFocusConversations([]);
+                                      }
+                                    }).catch(err => {
+                                      console.error('[AI FOCUS] Error loading history:', err);
+                                      setAiFocusConversations([]);
+                                    });
+                                  }
+                                }}
+                                disabled={micStatus !== 'idle'}
+                              >
+                                {title}
+                              </button>
+                              <button
+                                className="ai-focus-session-menu-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (openAiFocusMenuId === session.session_id) {
+                                    setOpenAiFocusMenuId(null);
+                                  } else {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setAiFocusMenuPosition({
+                                      top: rect.top,
+                                      right: window.innerWidth - rect.right
+                                    });
+                                    setOpenAiFocusMenuId(session.session_id);
+                                  }
+                                }}
+                                title="More options"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <circle cx="12" cy="5" r="1"/>
+                                  <circle cx="12" cy="12" r="1"/>
+                                  <circle cx="12" cy="19" r="1"/>
+                                </svg>
+                              </button>
+                              {openAiFocusMenuId === session.session_id && (
+                                <div 
+                                  className="ai-focus-session-menu"
+                                  style={{
+                                    top: `${aiFocusMenuPosition.top}px`,
+                                    right: `${aiFocusMenuPosition.right}px`
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button 
+                                    className="ai-focus-session-menu-item" 
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      setOpenAiFocusMenuId(null);
+                                      setGeneratingAiFocusTitle(session.session_id);
+                                      
+                                      try {
+                                        console.log('[AI FOCUS] Generating title for session:', session.session_id);
+                                        const response = await fetch(`/api/chat/sessions/${session.session_id}/generate-title`, {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' }
+                                        });
+                                        
+                                        if (!response.ok) {
+                                          const errorText = await response.text();
+                                          console.error('[AI FOCUS] Generate title failed with status:', response.status, errorText);
+                                          throw new Error(`HTTP ${response.status}: ${errorText}`);
+                                        }
+                                        
+                                        const result = await response.json();
+                                        console.log('[AI FOCUS] Generate title result:', result);
+                                        
+                                        if (result.success && result.title) {
+                                          // Update local state
+                                          setAiFocusSessionTitles(prev => ({
+                                            ...prev,
+                                            [session.session_id]: result.title
+                                          }));
+                                          
+                                          // Update current title if this is the active session
+                                          if (currentAiFocusSessionId === session.session_id) {
+                                            setAiFocusTitle(result.title);
+                                          }
+                                          
+                                          // Update session in list
+                                          setAiFocusSessions(prev => prev.map(s => 
+                                            s.session_id === session.session_id 
+                                              ? { ...s, title: result.title }
+                                              : s
+                                          ));
+                                          
+                                          console.log('[AI FOCUS] Title generated successfully:', result.title);
+                                        } else {
+                                          console.error('[AI FOCUS] Failed to generate title:', result.error || 'Unknown error');
+                                        }
+                                      } catch (error) {
+                                        console.error('[AI FOCUS] Error generating title:', error);
+                                      } finally {
+                                        setGeneratingAiFocusTitle(null);
+                                      }
+                                    }} 
+                                    disabled={generatingAiFocusTitle === session.session_id}
+                                  >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M12 2v4M12 18v4M4 12H2M6.314 6.314l-2.828-2.828M20.485 20.485l-2.828-2.828M17.686 6.314l2.828-2.828M3.515 20.485l2.828-2.828M22 12h-2M6.314 17.686l-2.828 2.828M20.485 3.515l2.828-2.828"/>
+                                      <circle cx="12" cy="12" r="4"/>
+                                    </svg>
+                                    {generatingAiFocusTitle === session.session_id ? 'Generating...' : 'Generate'}
+                                  </button>
+                                  <button 
+                                    className="ai-focus-session-menu-item" 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenAiFocusMenuId(null);
+                                      setEditingAiFocusSessionId(session.session_id);
+                                      setEditingAiFocusTitle(title);
+                                    }}
+                                  >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                    </svg>
+                                    Rename
+                                  </button>
+                                  <button 
+                                    className="ai-focus-session-menu-item ai-focus-session-menu-item-danger" 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenAiFocusMenuId(null);
+                                      if (confirm('Delete this chat?')) {
+                                        chatAPI.deleteSession(session.session_id).then(result => {
+                                          if (result.success) {
+                                            setAiFocusSessions(prev => prev.filter(s => s.session_id !== session.session_id));
+                                            setAiFocusSessionTitles(prev => {
+                                              const newTitles = { ...prev };
+                                              delete newTitles[session.session_id];
+                                              return newTitles;
+                                            });
+                                            if (currentAiFocusSessionId === session.session_id) {
+                                              setCurrentAiFocusSessionId(null);
+                                              setAiFocusConversations([]);
+                                              setAiFocusTitle('');
+                                            }
+                                          }
+                                        }).catch(err => {
+                                          console.error('Error deleting session:', err);
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                    </svg>
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
             </div>
-          )}
+          </div>
+          
+          {/* Right Pane - Questions and Answers */}
+          <div className="ai-focus-content">
+            <div className="ai-focus-conversations" ref={conversationsRef}>
+              {aiFocusConversations.length === 0 ? (
+                <div className="ai-focus-empty-state">
+                  <p>Start a conversation by asking a question or giving a task.</p>
+                </div>
+              ) : (
+                aiFocusConversations.map((conv, index) => {
+                  const userImageUrl = getProfileImageUrl(selectedUser?.profile_picture, selectedUser?.id);
+                  const personaName = conv.persona || currentPersona || 'AI Assistant';
+                  
+                  // Find the persona object to get image_path
+                  const personaObj = personas.find(p => p.name === personaName);
+                  const personaImageUrl = personaObj ? getPersonaImageUrl(personaObj.image_path, personaName) : null;
+                  
+                  return (
+                    <div key={index} className="ai-focus-conversation-item">
+                      <div className="ai-focus-question">
+                        {userImageUrl ? (
+                          <img 
+                            src={userImageUrl} 
+                            alt={selectedUser?.name || 'User'} 
+                            className="ai-focus-user-avatar"
+                          />
+                        ) : (
+                          <div className="ai-focus-user-avatar-placeholder">
+                            {selectedUser?.name?.charAt(0)?.toUpperCase() || 'U'}
+                          </div>
+                        )}
+                        <div className="ai-focus-question-text">{conv.question}</div>
+                      </div>
+                      {conv.answer && (
+                        <div className={`ai-focus-answer ${conv.isStreaming ? 'streaming' : ''}`}>
+                          <div className="ai-focus-persona-avatar-container">
+                            {personaImageUrl ? (
+                              <img 
+                                src={personaImageUrl} 
+                                alt={personaName} 
+                                className="ai-focus-persona-avatar"
+                                onError={(e) => {
+                                  // Fallback to placeholder if image fails to load
+                                  const placeholder = e.target.nextElementSibling;
+                                  if (placeholder) {
+                                    e.target.style.display = 'none';
+                                    placeholder.style.display = 'flex';
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <div className="ai-focus-persona-avatar-placeholder">
+                                {personaName.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            {conv.audioFile && (
+                              <button
+                                className="ai-focus-audio-play-btn"
+                                onClick={async () => {
+                                  try {
+                                    // Get audio file URL
+                                    let audioUrl = conv.audioFile;
+                                    if (audioUrl.startsWith('data/')) {
+                                      audioUrl = `/${audioUrl}`;
+                                    } else if (!audioUrl.startsWith('/')) {
+                                      audioUrl = `/data/audio/${audioUrl.split('/').pop()}`;
+                                    }
+                                    
+                                    // Stop any currently playing audio
+                                    if (playingAudioId !== null) {
+                                      const currentAudio = document.getElementById(`ai-focus-audio-${playingAudioId}`);
+                                      if (currentAudio) {
+                                        currentAudio.pause();
+                                        currentAudio.currentTime = 0;
+                                      }
+                                    }
+                                    
+                                    // Play the audio
+                                    const audioId = conv.messageId || index;
+                                    setPlayingAudioId(audioId);
+                                    
+                                    const audio = new Audio(audioUrl);
+                                    audio.id = `ai-focus-audio-${audioId}`;
+                                    
+                                    audio.onended = () => {
+                                      setPlayingAudioId(null);
+                                    };
+                                    
+                                    audio.onerror = (e) => {
+                                      console.error('[AI FOCUS] Error playing audio:', e);
+                                      setPlayingAudioId(null);
+                                    };
+                                    
+                                    await audio.play();
+                                  } catch (error) {
+                                    console.error('[AI FOCUS] Error playing audio:', error);
+                                    setPlayingAudioId(null);
+                                  }
+                                }}
+                                title="Play audio"
+                              >
+                                {playingAudioId === (conv.messageId || index) ? (
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <rect x="6" y="4" width="4" height="16"/>
+                                    <rect x="14" y="4" width="4" height="16"/>
+                                  </svg>
+                                ) : (
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polygon points="5 3 19 12 5 21 5 3"/>
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          <div className="ai-focus-answer-text">{conv.answer}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          
+          {/* Exit button */}
           <button
             className="ai-focus-exit"
             onClick={toggleAiFocus}
