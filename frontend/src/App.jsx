@@ -1008,35 +1008,13 @@ function App() {
           {/* Left Sidebar */}
           <div className="ai-focus-sidebar">
             <div className="ai-focus-sidebar-content">
-              {/* Mode indicator above avatar */}
-              <div className="ai-focus-mode-indicator">
-                {aiFocusMode === 'question' ? 'Question' : 'Task'}
-              </div>
-              
-              {/* Avatar container with controls */}
-              <div className="ai-focus-avatar-container">
-                {/* Avatar near top with room for animation */}
-                <div className="ai-focus-sidebar-avatar">
-                  <div
-                    className={`ai-focus-mic ${
-                      ['listening', 'thinking'].includes(micStatus) ? 'active' : 'off'
-                    }`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={beginListening}
-                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
-                    title="Start microphone"
-                  >
-                    <AIFocusMic 
-                      personas={personas}
-                      currentPersona={currentPersona}
-                      currentTitle={currentTitle}
-                      micStatus={micStatus}
-                    />
-                  </div>
+              {/* Mode indicator and buttons row */}
+              <div className="ai-focus-mode-header">
+                <div className="ai-focus-mode-indicator">
+                  {aiFocusMode === 'question' ? 'Ask' : 'Command'}
                 </div>
                 
-                {/* New Chat icon button - to the right, level with top of image */}
+                {/* New Chat icon button */}
                 <button
                   className="ai-focus-new-chat-icon"
                   onClick={async () => {
@@ -1098,7 +1076,7 @@ function App() {
                   </svg>
                 </button>
                 
-                {/* Persona selector icon button - below New Chat */}
+                {/* Persona selector icon button */}
                 <button
                   className="ai-focus-persona-selector-icon"
                   onClick={() => setShowPersonaSelector(!showPersonaSelector)}
@@ -1109,6 +1087,30 @@ function App() {
                     <circle cx="12" cy="7" r="4"/>
                   </svg>
                 </button>
+              </div>
+              
+              {/* Avatar container - centered */}
+              <div className="ai-focus-avatar-container">
+                {/* Avatar near top with room for animation */}
+                <div className="ai-focus-sidebar-avatar">
+                  <div
+                    className={`ai-focus-mic ${
+                      ['listening', 'thinking'].includes(micStatus) ? 'active' : 'off'
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={beginListening}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
+                    title="Start microphone"
+                  >
+                    <AIFocusMic 
+                      personas={personas}
+                      currentPersona={currentPersona}
+                      currentTitle={currentTitle}
+                      micStatus={micStatus}
+                    />
+                  </div>
+                </div>
               </div>
               
               {/* Persona selector popup */}
@@ -1180,64 +1182,12 @@ function App() {
                 {currentTitle || 'AI Assistant'}
               </div>
               
-              {/* Chat title under name */}
-              {aiFocusTitle && (
-                <div className="ai-focus-chat-title">
-                  {aiFocusTitle}
-                </div>
-              )}
-              
               {/* Status under name (only listening or thinking) */}
               <div className="ai-focus-status">
                 {micStatus === 'listening' && 'Listening'}
                 {micStatus === 'thinking' && 'Thinking'}
                 {micStatus === 'idle' && ''}
                 {micStatus === 'error' && `Error: ${micError}`}
-              </div>
-              
-              {/* Clear All Chats Button */}
-              <div className="ai-focus-clear-all">
-                <button
-                  className="ai-focus-clear-all-btn"
-                  onClick={async () => {
-                    if (confirm('Are you sure you want to delete all AI focus chats? This cannot be undone.')) {
-                      try {
-                        // Delete all AI focus sessions for the current user
-                        const sessionsToDelete = aiFocusSessions.map(s => s.session_id);
-                        let deletedCount = 0;
-                        
-                        for (const sessionId of sessionsToDelete) {
-                          try {
-                            const result = await chatAPI.deleteSession(sessionId);
-                            if (result.success) {
-                              deletedCount++;
-                            }
-                          } catch (err) {
-                            console.error(`[AI FOCUS] Error deleting session ${sessionId}:`, err);
-                          }
-                        }
-                        
-                        // Clear local state
-                        setAiFocusSessions([]);
-                        setAiFocusSessionTitles({});
-                        setCurrentAiFocusSessionId(null);
-                        setAiFocusConversations([]);
-                        setAiFocusTitle('');
-                        
-                        console.log(`[AI FOCUS] Deleted ${deletedCount} sessions`);
-                      } catch (error) {
-                        console.error('[AI FOCUS] Error clearing all chats:', error);
-                      }
-                    }
-                  }}
-                  disabled={micStatus !== 'idle' || aiFocusSessions.length === 0}
-                  title="Clear All Chats"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                  </svg>
-                  Clear All
-                </button>
               </div>
               
               {/* Chat Sessions List */}
@@ -1506,7 +1456,7 @@ function App() {
                             </div>
                           ) : (
                             <>
-                              <button
+                              <div
                                 className={`ai-focus-session-item ${currentAiFocusSessionId === session.session_id ? 'active' : ''}`}
                                 onClick={() => {
                                   if (micStatus === 'idle') {
@@ -1622,8 +1572,11 @@ function App() {
                                 }}
                                 disabled={micStatus !== 'idle'}
                               >
-                                {title}
-                              </button>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                                </svg>
+                                <span>{title}</span>
+                              </div>
                               <button
                                 className="ai-focus-session-menu-btn"
                                 onClick={(e) => {

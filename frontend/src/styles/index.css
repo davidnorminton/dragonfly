@@ -2546,7 +2546,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 60px;
+  padding-top: 12px;
   padding-left: 20px;
   padding-right: 20px;
 }
@@ -2554,8 +2554,9 @@ body {
 .ai-focus-avatar-container {
   position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   margin-bottom: 24px;
 }
 
@@ -2567,26 +2568,33 @@ body {
   min-height: 200px; /* Room for animation */
 }
 
+.ai-focus-mode-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 20px;
+  padding: 0 8px;
+}
+
 .ai-focus-mode-indicator {
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   font-weight: 600;
   color: #ffffff;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  text-align: center;
-  margin-bottom: 16px;
-  padding: 6px 16px;
-  display: inline-block;
+  text-align: left;
+  flex: 1;
 }
 
 .ai-focus-new-chat-icon,
 .ai-focus-persona-selector-icon {
-  width: 40px;
-  height: 40px;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -2596,10 +2604,16 @@ body {
   flex-shrink: 0;
 }
 
+.ai-focus-new-chat-icon svg,
+.ai-focus-persona-selector-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
 .ai-focus-new-chat-icon:hover:not(:disabled),
 .ai-focus-persona-selector-icon:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: transparent;
+  border: none;
   color: rgba(255, 255, 255, 1);
 }
 
@@ -2711,6 +2725,11 @@ body {
   text-align: center;
   margin-bottom: 12px;
   animation: fadeInSlideDown 0.8s ease forwards;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transform: none;
 }
 
 .ai-focus-chat-title {
@@ -2727,16 +2746,17 @@ body {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  white-space: nowrap;
 }
 
 @keyframes fadeInSlideDown {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(-20px);
+    transform: translateY(-20px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }
 
@@ -2918,12 +2938,13 @@ body {
 }
 
 .ai-focus-sessions-list {
-  max-height: 200px;
+  max-height: 400px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   margin-top: 8px;
+  padding: 0 8px;
 }
 
 .ai-focus-session-item-wrapper {
@@ -2931,35 +2952,43 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .ai-focus-session-item {
   flex: 1;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.85rem;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #8e8ea0;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.ai-focus-session-item span {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .ai-focus-session-item:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
+  background: rgba(59, 130, 246, 0.05);
+  color: #e0e0e0;
 }
 
 .ai-focus-session-item.active {
-  background: rgba(22, 199, 130, 0.15);
-  border-color: rgba(22, 199, 130, 0.4);
-  color: #16c782;
-  font-weight: 500;
+  background: rgba(59, 130, 246, 0.15);
+  color: #ffffff;
 }
 
 .ai-focus-session-item:disabled {
