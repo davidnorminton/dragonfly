@@ -14,6 +14,8 @@ import { VideosPage } from './pages/Videos';
 import { AnalyticsPage } from './pages/Analytics';
 import { ChatPage } from './pages/Chat';
 import { NewsPage } from './pages/News';
+import { StoriesPage } from './pages/Stories';
+import { CreateStoryPage } from './pages/CreateStory';
 import { SettingsPage } from './pages/Settings';
 import { AlertsPage } from './pages/Alerts';
 import { UsersPage } from './pages/Users';
@@ -60,7 +62,7 @@ function App() {
   const [activePage, setActivePage] = useState(() => {
     // Check URL hash first
     const hash = window.location.hash.slice(1);
-    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor'].includes(hash)) {
+    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'stories', 'create-story', 'edit-story', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor'].includes(hash)) {
       return hash;
     }
     // Fallback to localStorage
@@ -914,6 +916,44 @@ function App() {
         />
       ) : activePage === 'news' ? (
         <NewsPage />
+      ) : activePage === 'stories' ? (
+        <StoriesPage 
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            if (data) {
+              setPageData(data);
+            }
+          }}
+          selectedUser={selectedUser}
+        />
+      ) : activePage === 'create-story' ? (
+        <CreateStoryPage 
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            if (data) {
+              setPageData(data);
+            }
+          }}
+          selectedUser={selectedUser}
+        />
+      ) : activePage === 'edit-story' ? (
+        <CreateStoryPage 
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            if (data) {
+              setPageData(data);
+            }
+          }}
+          selectedUser={selectedUser}
+          storyId={pageData?.storyId}
+          editMode={true}
+        />
       ) : activePage === 'settings' ? (
         <SettingsPage onNavigate={(page) => {
           setActivePage(page);

@@ -661,3 +661,58 @@ class Alarm(Base):
     def __repr__(self):
         return f"<Alarm {self.alarm_type.value} at {self.alarm_time}>"
 
+
+class Plot(Base):
+    """Model for storing story plot details."""
+    __tablename__ = "plots"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    details = Column(Text, nullable=False)  # Plot details/description
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationship to stories
+    stories = relationship("Story", back_populates="plot")
+    
+    def __repr__(self):
+        return f"<Plot {self.id}>"
+
+
+class Story(Base):
+    """Model for storing stories."""
+    __tablename__ = "stories"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String, nullable=False, index=True)
+    plot_id = Column(Integer, ForeignKey("plots.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Link to user who created it
+    narrator_persona = Column(String, nullable=True, index=True)  # Persona name for narrator
+    screenplay = Column(Text, nullable=True)  # Generated screenplay JSON
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    plot = relationship("Plot", back_populates="stories")
+    cast = relationship("StoryCast", back_populates="story", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Story {self.title}>"
+
+
+class StoryCast(Base):
+    """Model for storing story cast (personas with custom context)."""
+    __tablename__ = "story_cast"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    story_id = Column(Integer, ForeignKey("stories.id"), nullable=False, index=True)
+    persona_name = Column(String, nullable=False, index=True)  # Name of the persona
+    custom_context = Column(Text, nullable=True)  # Custom context for this persona in this story
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationship
+    story = relationship("Story", back_populates="cast")
+    
+    def __repr__(self):
+        return f"<StoryCast {self.persona_name} for story {self.story_id}>"
+

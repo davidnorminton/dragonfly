@@ -217,6 +217,44 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
         </button>
       )}
 
+      {/* Stories - Admin only */}
+      {isAdmin && (
+        <button
+          className={`side-nav-button ${activePage === 'stories' || activePage === 'create-story' ? 'active' : ''}`}
+          onClick={() => onNavigate?.('stories')}
+          title="Stories"
+          style={{
+            width: '44px',
+            height: '44px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: (activePage === 'stories' || activePage === 'create-story') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            color: (activePage === 'stories' || activePage === 'create-story') ? '#fff' : '#9da7b8',
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={(e) => {
+            if (activePage !== 'stories' && activePage !== 'create-story') {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.color = '#fff';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (activePage !== 'stories' && activePage !== 'create-story') {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = '#9da7b8';
+            }
+          }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+          </svg>
+        </button>
+      )}
+
       <div style={{ flex: 1 }} />
 
       {/* Search - absolutely positioned in the center with separators */}

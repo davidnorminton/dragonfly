@@ -99,17 +99,86 @@ export const expertTypesAPI = {
   getExpertTypes: () => api.get('/expert-types').then(res => res.data),
 };
 
+export const storyAPI = {
+  createStory: (title, plot, cast, userId, narrator, screenplay) => {
+    console.log('[API] createStory called with:', {
+      title,
+      plotLength: plot?.length,
+      castCount: cast?.length,
+      userId,
+      narrator,
+      hasScreenplay: !!screenplay,
+      screenplayLength: screenplay?.length,
+      screenplayPreview: screenplay?.substring(0, 100)
+    });
+    return api.post('/stories', {
+      title,
+      plot,
+      cast,
+      user_id: userId,
+      narrator_persona: narrator,
+      screenplay: screenplay
+    }).then(res => {
+      console.log('[API] createStory response:', res.data);
+      return res.data;
+    });
+  },
+  getStories: (userId) => {
+    const params = userId ? { user_id: userId } : {};
+    return api.get('/stories', { params }).then(res => res.data);
+  },
+  getStory: (storyId) => {
+    return api.get(`/stories/${storyId}`).then(res => res.data);
+  },
+  updateStory: (storyId, title, plot, cast, userId, narrator, screenplay) => {
+    console.log('[API] updateStory called with:', {
+      storyId,
+      title,
+      plotLength: plot?.length,
+      castCount: cast?.length,
+      userId,
+      narrator,
+      hasScreenplay: !!screenplay,
+      screenplayLength: screenplay?.length,
+      screenplayPreview: screenplay?.substring(0, 100)
+    });
+    return api.put(`/stories/${storyId}`, {
+      title,
+      plot,
+      cast,
+      user_id: userId,
+      narrator_persona: narrator,
+      screenplay: screenplay
+    }).then(res => {
+      console.log('[API] updateStory response:', res.data);
+      return res.data;
+    });
+  },
+};
+
 export const personaAPI = {
   getPersonas: (userId) => {
     const params = userId ? { user_id: userId } : {};
     return api.get('/personas', { params }).then(res => res.data);
   },
-  selectPersona: (persona, userId) => 
+  selectPersona: (persona, userId) =>
     api.post('/personas/select', { persona, user_id: userId }).then(res => res.data),
-  getFillerWords: (personaName) => 
+  getFillerWords: (personaName) =>
     api.get(`/personas/${encodeURIComponent(personaName)}/filler-words`).then(res => res.data),
-  createFillerWord: (personaName, text) => 
+  createFillerWord: (personaName, text) =>
     api.post(`/personas/${encodeURIComponent(personaName)}/filler-words`, { text }).then(res => res.data),
+  getPersonaContext: (personaName) =>
+    api.get(`/personas/${encodeURIComponent(personaName)}/context`)
+      .then(res => res.data)
+      .catch(error => {
+        console.error(`Error fetching persona context for ${personaName}:`, error);
+        // Return a safe default response
+        return {
+          success: false,
+          error: error.response?.data?.detail || error.message || 'Unknown error',
+          context: ''
+        };
+      }),
   deleteFillerWord: (personaName, filename) => 
     api.delete(`/personas/${encodeURIComponent(personaName)}/filler-words/${encodeURIComponent(filename)}`).then(res => res.data),
   getFillerWordAudio: (personaName, filename) => 
@@ -135,6 +204,23 @@ export const routerAPI = {
 export const aiAPI = {
   askQuestion: (payload) => api.post('/ai/ask', payload).then(res => res.data),
   askQuestionAudio: (payload) => api.post('/ai/ask-audio', payload, { responseType: 'blob' }),
+  generateScreenplay: (payload) => {
+    console.log('[API] generateScreenplay called with payload:', {
+      questionLength: payload.question?.length,
+      systemPromptLength: payload.system_prompt?.length,
+      max_tokens: payload.max_tokens
+    });
+    return api.post('/ai/generate-screenplay', payload)
+      .then(res => {
+        console.log('[API] generateScreenplay response:', res.data);
+        return res.data;
+      })
+      .catch(error => {
+        console.error('[API] generateScreenplay error:', error);
+        console.error('[API] Error response:', error.response?.data);
+        throw error;
+      });
+  },
   askQuestionStream: (payload, onChunk) => {
     // Use EventSource for Server-Sent Events
     return new Promise((resolve, reject) => {

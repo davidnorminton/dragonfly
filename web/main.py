@@ -26,7 +26,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -12800,6 +12800,381 @@ async def select_persona(request: Request):
         "persona": persona_name,
         "message": f"Persona changed to {persona_name}"
     }
+
+@app.post("/api/ai/generate-screenplay")
+async def generate_screenplay(request: Request):
+    """Generate a screenplay using the default AI with a custom system prompt."""
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        system_prompt = payload.get("system_prompt", "")
+        max_tokens = payload.get("max_tokens", 4096)
+        
+        if not question:
+            return JSONResponse(
+                status_code=200,
+                content={"success": False, "error": "No question provided"}
+            )
+        
+        logger.info(f"[GENERATE SCREENPLAY] Generating screenplay (question length: {len(question)}, max_tokens: {max_tokens})")
+        
+        from services.ai_service import AIService
+        ai_service = AIService()
+        
+        result = await ai_service.execute_with_system_prompt(
+            question=question,
+            system_prompt=system_prompt or "You are a professional screenwriter. Create screenplays based on provided plots and character descriptions.",
+            max_tokens=max_tokens
+        )
+        
+        if result.get("error"):
+            logger.error(f"[GENERATE SCREENPLAY] Error: {result.get('error')}")
+            return JSONResponse(
+                status_code=200,
+                content={"success": False, "error": result.get("error", "Failed to generate screenplay")}
+            )
+        
+        answer = result.get("answer", "")
+        if answer:
+            logger.info(f"[GENERATE SCREENPLAY] Successfully generated screenplay (length: {len(answer)})")
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "answer": answer
+                }
+            )
+        else:
+            logger.error("[GENERATE SCREENPLAY] No answer returned")
+            return JSONResponse(
+                status_code=200,
+                content={"success": False, "error": "No screenplay generated"}
+            )
+    except Exception as e:
+        logger.error(f"[GENERATE SCREENPLAY] Error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+@app.get("/api/personas/{persona_name}/context")
+async def get_persona_context(persona_name: str):
+    """Get the context/system prompt for a persona.
+    
+    The System Prompt is stored at: config_data -> anthropic -> prompt_context
+    This matches the Settings page: Settings > Personas > Select Persona > AI Configuration > System Prompt
+    """
+    try:
+        # URL decode the persona name in case it's encoded
+        from urllib.parse import unquote
+        persona_name_decoded = unquote(persona_name)
+        
+        logger.info(f"[GET PERSONA CONTEXT] Loading context for persona: '{persona_name}' (decoded: '{persona_name_decoded}')")
+        
+        # Try with both encoded and decoded names
+        persona_config = await load_persona_config(persona_name_decoded)
+        if not persona_config:
+            # Try with original name
+            persona_config = await load_persona_config(persona_name)
+        
+        if not persona_config:
+            # Try to list all personas to see what's available
+            all_personas = await list_available_personas()
+            persona_names = [p.get("name") if isinstance(p, dict) else p for p in all_personas]
+            logger.warning(f"[GET PERSONA CONTEXT] Persona '{persona_name}' not found. Available personas: {persona_names}")
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": False,
+                    "error": f"Persona '{persona_name}' not found",
+                    "context": "",
+                    "available_personas": persona_names
+                }
+            )
+        
+        # Extract context from anthropic.prompt_context (as used in ai_service.py and Settings.jsx)
+        # The structure is: config_data -> anthropic -> prompt_context
+        anthropic_config = persona_config.get("anthropic", {})
+        if not anthropic_config:
+            logger.warning(f"[GET PERSONA CONTEXT] No anthropic config found for persona {persona_name}")
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "context": ""
+                }
+            )
+        
+        # Get prompt_context (this is the System Prompt field in Settings)
+        context = anthropic_config.get("prompt_context", "")
+        
+        # Log for debugging
+        logger.info(f"[GET PERSONA CONTEXT] Loading context for persona {persona_name}: found {len(context)} characters")
+        logger.debug(f"[GET PERSONA CONTEXT] Anthropic config keys for {persona_name}: {list(anthropic_config.keys())}")
+        logger.debug(f"[GET PERSONA CONTEXT] prompt_context value (first 100 chars): {context[:100] if context else 'EMPTY'}")
+        
+        if not context:
+            logger.warning(f"[GET PERSONA CONTEXT] No prompt_context found in persona {persona_name} config. Anthropic config keys: {list(anthropic_config.keys())}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "context": context or ""
+            }
+        )
+    except Exception as e:
+        logger.error(f"[GET PERSONA CONTEXT] Error getting persona context: {e}", exc_info=True)
+        import traceback
+        logger.error(f"[GET PERSONA CONTEXT] Traceback: {traceback.format_exc()}")
+        # Return error response instead of raising HTTPException
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": False,
+                "error": str(e),
+                "context": ""
+            }
+        )
+
+@app.post("/api/stories")
+async def create_story(request: Request):
+    """Create a new story with plot and cast."""
+    try:
+        data = await request.json()
+        title = data.get("title", "").strip()
+        plot_details = data.get("plot", "").strip()
+        cast = data.get("cast", [])  # Array of {persona_name, custom_context}
+        user_id = data.get("user_id")
+        narrator_persona = data.get("narrator_persona")  # Optional narrator persona name
+        screenplay = data.get("screenplay")  # Optional screenplay JSON string
+        
+        logger.info(f"[CREATE STORY] Received data - title: {title}, plot_length: {len(plot_details)}, cast_count: {len(cast)}, has_screenplay: {bool(screenplay)}, screenplay_length: {len(screenplay) if screenplay else 0}")
+        
+        if not title:
+            raise HTTPException(status_code=400, detail="Story title is required")
+        if not plot_details:
+            raise HTTPException(status_code=400, detail="Plot details are required")
+        
+        async with AsyncSessionLocal() as session:
+            # Create plot
+            plot = Plot(details=plot_details)
+            session.add(plot)
+            await session.flush()  # Get plot.id
+            
+            # Create story
+            story = Story(
+                title=title,
+                plot_id=plot.id,
+                user_id=user_id,
+                narrator_persona=narrator_persona,
+                screenplay=screenplay
+            )
+            session.add(story)
+            await session.flush()  # Get story.id
+            
+            logger.info(f"[CREATE STORY] Created story with id={story.id}, screenplay set: {bool(story.screenplay)}, screenplay length: {len(story.screenplay) if story.screenplay else 0}")
+            
+            # Create story cast entries
+            for cast_member in cast:
+                persona_name = cast_member.get("persona_name")
+                custom_context = cast_member.get("custom_context", "")
+                if persona_name:
+                    story_cast = StoryCast(
+                        story_id=story.id,
+                        persona_name=persona_name,
+                        custom_context=custom_context
+                    )
+                    session.add(story_cast)
+            
+            await session.commit()
+            
+            return {
+                "success": True,
+                "story_id": story.id,
+                "message": "Story created successfully"
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating story: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/stories")
+async def get_stories(user_id: Optional[int] = None):
+    """Get list of stories, optionally filtered by user_id."""
+    try:
+        async with AsyncSessionLocal() as session:
+            query = select(Story)
+            if user_id:
+                query = query.where(Story.user_id == user_id)
+            query = query.order_by(desc(Story.created_at))
+            
+            result = await session.execute(query)
+            stories = result.scalars().all()
+            
+            stories_data = []
+            for story in stories:
+                # Load cast
+                cast_result = await session.execute(
+                    select(StoryCast).where(StoryCast.story_id == story.id)
+                )
+                cast = cast_result.scalars().all()
+                
+                stories_data.append({
+                    "id": story.id,
+                    "title": story.title,
+                    "plot_id": story.plot_id,
+                    "user_id": story.user_id,
+                    "created_at": story.created_at.isoformat() if story.created_at else None,
+                    "cast": [
+                        {
+                            "persona_name": c.persona_name,
+                            "custom_context": c.custom_context
+                        }
+                        for c in cast
+                    ]
+                })
+            
+            return {
+                "success": True,
+                "stories": stories_data
+            }
+    except Exception as e:
+        logger.error(f"Error getting stories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/stories/{story_id}")
+async def get_story(story_id: int):
+    """Get a specific story with plot and cast."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Story).where(Story.id == story_id)
+            )
+            story = result.scalar_one_or_none()
+            
+            if not story:
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            # Load plot
+            plot_result = await session.execute(
+                select(Plot).where(Plot.id == story.plot_id)
+            )
+            plot = plot_result.scalar_one_or_none()
+            
+            # Load cast
+            cast_result = await session.execute(
+                select(StoryCast).where(StoryCast.story_id == story.id)
+            )
+            cast = cast_result.scalars().all()
+            
+            return {
+                "success": True,
+                "story": {
+                    "id": story.id,
+                    "title": story.title,
+                    "plot_details": plot.details if plot else None,
+                    "narrator_persona": story.narrator_persona,
+                    "screenplay": story.screenplay,
+                    "user_id": story.user_id,
+                    "created_at": story.created_at.isoformat() if story.created_at else None,
+                    "cast": [
+                        {
+                            "persona_name": c.persona_name,
+                            "custom_context": c.custom_context
+                        }
+                        for c in cast
+                    ]
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting story: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/stories/{story_id}")
+async def update_story(story_id: int, request: Request):
+    """Update an existing story with plot and cast."""
+    try:
+        data = await request.json()
+        title = data.get("title", "").strip()
+        plot_details = data.get("plot", "").strip()
+        cast = data.get("cast", [])  # Array of {persona_name, custom_context}
+        user_id = data.get("user_id")
+        narrator_persona = data.get("narrator_persona")  # Optional narrator persona name
+        screenplay = data.get("screenplay")  # Optional screenplay JSON string
+        
+        logger.info(f"[UPDATE STORY] Received data for story_id={story_id} - title: {title}, plot_length: {len(plot_details)}, cast_count: {len(cast)}, has_screenplay: {bool(screenplay)}, screenplay_length: {len(screenplay) if screenplay else 0}")
+        
+        if not title:
+            raise HTTPException(status_code=400, detail="Story title is required")
+        if not plot_details:
+            raise HTTPException(status_code=400, detail="Plot details are required")
+        
+        async with AsyncSessionLocal() as session:
+            # Get existing story
+            story_result = await session.execute(
+                select(Story).where(Story.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            # Update plot
+            plot_result = await session.execute(
+                select(Plot).where(Plot.id == story.plot_id)
+            )
+            plot = plot_result.scalar_one_or_none()
+            if plot:
+                plot.details = plot_details
+                plot.updated_at = datetime.now(timezone.utc)
+            else:
+                # Create new plot if it doesn't exist
+                plot = Plot(details=plot_details)
+                session.add(plot)
+                await session.flush()
+                story.plot_id = plot.id
+            
+            # Update story
+            story.title = title
+            story.narrator_persona = narrator_persona
+            story.screenplay = screenplay
+            story.updated_at = datetime.now(timezone.utc)
+            
+            logger.info(f"[UPDATE STORY] Updated story id={story.id}, screenplay set: {bool(story.screenplay)}, screenplay length: {len(story.screenplay) if story.screenplay else 0}")
+            
+            # Delete existing cast
+            await session.execute(
+                delete(StoryCast).where(StoryCast.story_id == story_id)
+            )
+            
+            # Create new story cast entries
+            for cast_member in cast:
+                persona_name = cast_member.get("persona_name")
+                custom_context = cast_member.get("custom_context", "")
+                if persona_name:
+                    story_cast = StoryCast(
+                        story_id=story.id,
+                        persona_name=persona_name,
+                        custom_context=custom_context
+                    )
+                    session.add(story_cast)
+            
+            await session.commit()
+            
+            return {
+                "success": True,
+                "story_id": story.id,
+                "message": "Story updated successfully"
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating story: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/devices/health")
 async def get_devices_health():
