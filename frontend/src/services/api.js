@@ -130,7 +130,7 @@ export const storyAPI = {
   getStory: (storyId) => {
     return api.get(`/stories/${storyId}`).then(res => res.data);
   },
-  updateStory: (storyId, title, plot, cast, userId, narrator, screenplay) => {
+  updateStory: (storyId, title, plot, cast, userId, narrator, screenplay, screenplayVersion) => {
     console.log('[API] updateStory called with:', {
       storyId,
       title,
@@ -140,7 +140,7 @@ export const storyAPI = {
       narrator,
       hasScreenplay: !!screenplay,
       screenplayLength: screenplay?.length,
-      screenplayPreview: screenplay?.substring(0, 100)
+      hasVersion: !!screenplayVersion
     });
     return api.put(`/stories/${storyId}`, {
       title,
@@ -148,11 +148,39 @@ export const storyAPI = {
       cast,
       user_id: userId,
       narrator_persona: narrator,
-      screenplay: screenplay
+      screenplay: screenplay,
+      screenplay_version: screenplayVersion
     }).then(res => {
       console.log('[API] updateStory response:', res.data);
       return res.data;
     });
+  },
+  getScreenplayVersions: (storyId) => {
+    return api.get(`/stories/${storyId}/screenplay-versions`).then(res => res.data);
+  },
+  setActiveVersion: (storyId, versionId) => {
+    return api.post(`/stories/${storyId}/screenplay-versions/${versionId}/activate`).then(res => res.data);
+  },
+  generateAudio: (storyId, selectedIndices) => {
+    console.log('[API] generateAudio called with:', { storyId, selectedIndices });
+    return api.post(`/stories/${storyId}/generate-audio`, {
+      selected_indices: selectedIndices
+    }).then(res => {
+      console.log('[API] generateAudio response:', res.data);
+      return res.data;
+    }).catch(error => {
+      console.error('[API] generateAudio error:', error);
+      console.error('[API] generateAudio error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      throw error;
+    });
+  },
+  getAudioFiles: (storyId) => {
+    return api.get(`/stories/${storyId}/audio-files`).then(res => res.data);
   },
 };
 

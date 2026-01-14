@@ -26,7 +26,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -13069,6 +13069,14 @@ async def get_story(story_id: int):
             )
             cast = cast_result.scalars().all()
             
+            # Load screenplay versions
+            versions_result = await session.execute(
+                select(StoryScreenplayVersion)
+                .where(StoryScreenplayVersion.story_id == story.id)
+                .order_by(StoryScreenplayVersion.version_number)
+            )
+            versions = versions_result.scalars().all()
+            
             return {
                 "success": True,
                 "story": {
@@ -13085,6 +13093,16 @@ async def get_story(story_id: int):
                             "custom_context": c.custom_context
                         }
                         for c in cast
+                    ],
+                    "screenplay_versions": [
+                        {
+                            "id": v.id,
+                            "version_number": v.version_number,
+                            "is_active": v.is_active,
+                            "screenplay": v.screenplay,  # Include full screenplay data
+                            "created_at": v.created_at.isoformat() if v.created_at else None
+                        }
+                        for v in versions
                     ]
                 }
             }
@@ -13105,8 +13123,9 @@ async def update_story(story_id: int, request: Request):
         user_id = data.get("user_id")
         narrator_persona = data.get("narrator_persona")  # Optional narrator persona name
         screenplay = data.get("screenplay")  # Optional screenplay JSON string
+        screenplay_version = data.get("screenplay_version")  # Optional new version to create
         
-        logger.info(f"[UPDATE STORY] Received data for story_id={story_id} - title: {title}, plot_length: {len(plot_details)}, cast_count: {len(cast)}, has_screenplay: {bool(screenplay)}, screenplay_length: {len(screenplay) if screenplay else 0}")
+        logger.info(f"[UPDATE STORY] Received data for story_id={story_id} - title: {title}, plot_length: {len(plot_details)}, cast_count: {len(cast)}, has_screenplay: {bool(screenplay)}, has_version: {bool(screenplay_version)}")
         
         if not title:
             raise HTTPException(status_code=400, detail="Story title is required")
@@ -13146,6 +13165,26 @@ async def update_story(story_id: int, request: Request):
             
             logger.info(f"[UPDATE STORY] Updated story id={story.id}, screenplay set: {bool(story.screenplay)}, screenplay length: {len(story.screenplay) if story.screenplay else 0}")
             
+            # Create new screenplay version if provided
+            if screenplay_version and screenplay_version.get("screenplay"):
+                # Deactivate all existing versions
+                existing_versions_result = await session.execute(
+                    select(StoryScreenplayVersion).where(StoryScreenplayVersion.story_id == story_id)
+                )
+                existing_versions = existing_versions_result.scalars().all()
+                for v in existing_versions:
+                    v.is_active = False
+                
+                # Create new version
+                new_version = StoryScreenplayVersion(
+                    story_id=story.id,
+                    screenplay=screenplay_version.get("screenplay"),
+                    version_number=screenplay_version.get("version_number", 1),
+                    is_active=screenplay_version.get("is_active", True)
+                )
+                session.add(new_version)
+                logger.info(f"[UPDATE STORY] Created new screenplay version {new_version.version_number} for story {story.id}")
+            
             # Delete existing cast
             await session.execute(
                 delete(StoryCast).where(StoryCast.story_id == story_id)
@@ -13174,6 +13213,323 @@ async def update_story(story_id: int, request: Request):
         raise
     except Exception as e:
         logger.error(f"Error updating story: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/stories/{story_id}/screenplay-versions")
+async def get_screenplay_versions(story_id: int):
+    """Get all screenplay versions for a story."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(StoryScreenplayVersion)
+                .where(StoryScreenplayVersion.story_id == story_id)
+                .order_by(StoryScreenplayVersion.version_number)
+            )
+            versions = result.scalars().all()
+            
+            return {
+                "success": True,
+                "versions": [
+                    {
+                        "id": v.id,
+                        "version_number": v.version_number,
+                        "is_active": v.is_active,
+                        "screenplay": v.screenplay,
+                        "created_at": v.created_at.isoformat() if v.created_at else None
+                    }
+                    for v in versions
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting screenplay versions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/stories/{story_id}/screenplay-versions/{version_id}/activate")
+async def activate_screenplay_version(story_id: int, version_id: int):
+    """Set a screenplay version as active."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get the version
+            version_result = await session.execute(
+                select(StoryScreenplayVersion).where(
+                    StoryScreenplayVersion.id == version_id,
+                    StoryScreenplayVersion.story_id == story_id
+                )
+            )
+            version = version_result.scalar_one_or_none()
+            
+            if not version:
+                raise HTTPException(status_code=404, detail="Version not found")
+            
+            # Deactivate all versions for this story
+            all_versions_result = await session.execute(
+                select(StoryScreenplayVersion).where(StoryScreenplayVersion.story_id == story_id)
+            )
+            all_versions = all_versions_result.scalars().all()
+            for v in all_versions:
+                v.is_active = False
+            
+            # Activate the selected version
+            version.is_active = True
+            version.updated_at = datetime.now(timezone.utc)
+            
+            # Update story's screenplay to match active version
+            story_result = await session.execute(
+                select(Story).where(Story.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            if story:
+                story.screenplay = version.screenplay
+                story.updated_at = datetime.now(timezone.utc)
+            
+            await session.commit()
+            
+            return {
+                "success": True,
+                "message": f"Version {version.version_number} activated"
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error activating screenplay version: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/stories/{story_id}/audio-files")
+async def get_story_audio_files(story_id: int):
+    """Get list of audio files for a story."""
+    try:
+        project_root = Path(__file__).parent.parent
+        
+        # Check story audio directory
+        story_audio_dir = project_root / "data" / "story" / str(story_id)
+        
+        if not story_audio_dir.exists():
+            return {
+                "success": True,
+                "audio_files": []
+            }
+        
+        audio_files = []
+        # List all MP3 files in the directory
+        for file_path in story_audio_dir.glob("*.mp3"):
+            filename = file_path.name
+            # Parse index from filename: item_0001_speaker.mp3
+            if filename.startswith("item_") and "_" in filename:
+                try:
+                    # Extract index from filename (item_0001_speaker.mp3 -> 1)
+                    parts = filename.replace(".mp3", "").split("_")
+                    if len(parts) >= 2:
+                        index_str = parts[1]
+                        index = int(index_str)
+                        # Extract speaker from remaining parts
+                        speaker = "_".join(parts[2:]) if len(parts) > 2 else "unknown"
+                        
+                        relative_path = f"data/story/{story_id}/{filename}"
+                        audio_files.append({
+                            "index": index,
+                            "speaker": speaker,
+                            "file_path": relative_path,
+                            "filename": filename
+                        })
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not parse filename {filename}: {e}")
+                    continue
+        
+        # Sort by index to maintain screenplay order
+        audio_files.sort(key=lambda x: x["index"])
+        
+        return {
+            "success": True,
+            "audio_files": audio_files
+        }
+    except Exception as e:
+        logger.error(f"Error getting story audio files: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/stories/{story_id}/generate-audio")
+async def generate_story_audio(story_id: int, request: Request):
+    """Generate audio files for selected screenplay items."""
+    try:
+        from database.models import PersonaConfig, Voice
+        
+        project_root = Path(__file__).parent.parent
+        
+        data = await request.json()
+        selected_indices = data.get("selected_indices", [])  # Array of item indices
+        
+        if not selected_indices:
+            raise HTTPException(status_code=400, detail="No items selected")
+        
+        async with AsyncSessionLocal() as session:
+            # Get story with screenplay
+            story_result = await session.execute(
+                select(Story).where(Story.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            # Get active screenplay version or use legacy screenplay field
+            screenplay_text = None
+            version_result = await session.execute(
+                select(StoryScreenplayVersion)
+                .where(StoryScreenplayVersion.story_id == story_id, StoryScreenplayVersion.is_active == True)
+            )
+            active_version = version_result.scalar_one_or_none()
+            
+            if active_version:
+                screenplay_text = active_version.screenplay
+            elif story.screenplay:
+                screenplay_text = story.screenplay
+            
+            if not screenplay_text:
+                raise HTTPException(status_code=400, detail="No screenplay found for story")
+            
+            # Parse screenplay JSON
+            try:
+                screenplay_data = json.loads(screenplay_text)
+                script = screenplay_data.get("script", [])
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid screenplay JSON")
+            
+            # Create story audio directory
+            story_audio_dir = project_root / "data" / "story" / str(story_id)
+            story_audio_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Get narrator persona voice settings
+            narrator_voice_id = None
+            narrator_voice_engine = "s1"
+            if story.narrator_persona:
+                narrator_persona_result = await session.execute(
+                    select(PersonaConfig).where(PersonaConfig.name == story.narrator_persona)
+                )
+                narrator_persona = narrator_persona_result.scalar_one_or_none()
+                if narrator_persona and narrator_persona.voice_id:
+                    voice_result = await session.execute(
+                        select(Voice).where(Voice.id == narrator_persona.voice_id)
+                    )
+                    voice = voice_result.scalar_one_or_none()
+                    if voice:
+                        narrator_voice_id = voice.fish_audio_id
+                        # Get voice_engine from Voice model, or from config_data, or default to "s1"
+                        narrator_voice_engine = voice.voice_engine or "s1"
+                        # If not in Voice model, try to get from config_data
+                        if narrator_voice_engine == "s1" and narrator_persona.config_data:
+                            fish_audio_config = narrator_persona.config_data.get("fish_audio", {})
+                            narrator_voice_engine = fish_audio_config.get("voice_engine", "s1")
+            
+            if not narrator_voice_id:
+                logger.error(f"Narrator persona '{story.narrator_persona}' voice not configured for story {story_id}")
+                raise HTTPException(status_code=400, detail=f"Narrator persona '{story.narrator_persona}' voice not configured. Please set up voice settings for the narrator persona.")
+            
+            # Get cast personas voice settings
+            cast_voices = {}  # {persona_name: {voice_id, voice_engine}}
+            cast_result = await session.execute(
+                select(StoryCast).where(StoryCast.story_id == story_id)
+            )
+            cast_members = cast_result.scalars().all()
+            
+            for cast_member in cast_members:
+                persona_result = await session.execute(
+                    select(PersonaConfig).where(PersonaConfig.name == cast_member.persona_name)
+                )
+                persona = persona_result.scalar_one_or_none()
+                if persona and persona.voice_id:
+                    voice_result = await session.execute(
+                        select(Voice).where(Voice.id == persona.voice_id)
+                    )
+                    voice = voice_result.scalar_one_or_none()
+                    if voice:
+                        # Get voice_engine from Voice model, or from config_data, or default to "s1"
+                        voice_engine = voice.voice_engine or "s1"
+                        # If not in Voice model, try to get from config_data
+                        if voice_engine == "s1" and persona.config_data:
+                            fish_audio_config = persona.config_data.get("fish_audio", {})
+                            voice_engine = fish_audio_config.get("voice_engine", "s1")
+                        
+                        cast_voices[cast_member.persona_name] = {
+                            "voice_id": voice.fish_audio_id,
+                            "voice_engine": voice_engine
+                        }
+            
+            # Generate audio for each selected item
+            tts_service = TTSService()
+            audio_files = []
+            
+            for index in selected_indices:
+                if index < 0 or index >= len(script):
+                    logger.warning(f"Invalid index {index}, skipping")
+                    continue
+                
+                item = script[index]
+                speaker = item.get("speaker", "").lower()
+                text = item.get("text", "")
+                
+                if not text:
+                    continue
+                
+                # Determine which persona to use
+                if speaker == "narrator":
+                    voice_id = narrator_voice_id
+                    voice_engine = narrator_voice_engine
+                else:
+                    # Find persona by name (case-insensitive)
+                    persona_name = None
+                    for cast_name in cast_voices.keys():
+                        if cast_name.lower() == speaker.lower():
+                            persona_name = cast_name
+                            break
+                    
+                    if not persona_name or persona_name not in cast_voices:
+                        logger.warning(f"Persona '{speaker}' not found in cast for story {story_id}, skipping item {index}")
+                        continue
+                    
+                    if not cast_voices[persona_name].get("voice_id"):
+                        logger.warning(f"Persona '{persona_name}' has no voice_id configured, skipping item {index}")
+                        continue
+                    
+                    voice_id = cast_voices[persona_name]["voice_id"]
+                    voice_engine = cast_voices[persona_name]["voice_engine"]
+                
+                # Generate audio
+                logger.info(f"Generating audio for item {index} (speaker: {speaker}, voice_id: {voice_id}, voice_engine: {voice_engine})")
+                try:
+                    audio_bytes = await tts_service.generate_audio_simple(text, voice_id, voice_engine)
+                    
+                    if audio_bytes:
+                        # Save audio file
+                        filename = f"item_{index:04d}_{speaker}.mp3"
+                        filepath = story_audio_dir / filename
+                        
+                        with open(filepath, 'wb') as f:
+                            f.write(audio_bytes)
+                        
+                        # Store relative path
+                        relative_path = f"data/story/{story_id}/{filename}"
+                        audio_files.append({
+                            "index": index,
+                            "speaker": speaker,
+                            "file_path": relative_path,
+                            "filename": filename
+                        })
+                        logger.info(f"Saved audio file: {filepath}")
+                    else:
+                        logger.error(f"Failed to generate audio for item {index} (speaker: {speaker}, voice_id: {voice_id})")
+                except Exception as audio_error:
+                    logger.error(f"Error generating audio for item {index}: {audio_error}", exc_info=True)
+                    # Continue with other items even if one fails
+            
+            return {
+                "success": True,
+                "audio_files": audio_files,
+                "message": f"Generated {len(audio_files)} audio files"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating story audio: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/devices/health")

@@ -694,6 +694,7 @@ class Story(Base):
     # Relationships
     plot = relationship("Plot", back_populates="stories")
     cast = relationship("StoryCast", back_populates="story", cascade="all, delete-orphan")
+    screenplay_versions = relationship("StoryScreenplayVersion", back_populates="story", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Story {self.title}>"
@@ -702,17 +703,36 @@ class Story(Base):
 class StoryCast(Base):
     """Model for storing story cast (personas with custom context)."""
     __tablename__ = "story_cast"
-    
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     story_id = Column(Integer, ForeignKey("stories.id"), nullable=False, index=True)
     persona_name = Column(String, nullable=False, index=True)  # Name of the persona
     custom_context = Column(Text, nullable=True)  # Custom context for this persona in this story
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+
     # Relationship
     story = relationship("Story", back_populates="cast")
-    
+
     def __repr__(self):
         return f"<StoryCast {self.persona_name} for story {self.story_id}>"
+
+
+class StoryScreenplayVersion(Base):
+    """Model for storing screenplay versions/history for a story."""
+    __tablename__ = "story_screenplay_versions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    story_id = Column(Integer, ForeignKey("stories.id"), nullable=False, index=True)
+    screenplay = Column(Text, nullable=False)  # JSON screenplay data
+    version_number = Column(Integer, nullable=False, default=1)  # Version number
+    is_active = Column(Boolean, default=False, index=True)  # Which version is currently active
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationship
+    story = relationship("Story", back_populates="screenplay_versions")
+
+    def __repr__(self):
+        return f"<StoryScreenplayVersion {self.id} for story {self.story_id} v{self.version_number}>"
 

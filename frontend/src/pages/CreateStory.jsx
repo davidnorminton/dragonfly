@@ -16,11 +16,18 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
   const [screenplay, setScreenplay] = useState('');
   const [screenplayData, setScreenplayData] = useState(null); // Parsed JSON data
   const [screenplayError, setScreenplayError] = useState(null);
+  const [editingItemIndex, setEditingItemIndex] = useState(null); // Index of item being edited
+  const [editingItemText, setEditingItemText] = useState(''); // Text being edited
+  const [selectedItems, setSelectedItems] = useState(new Set()); // Set of selected item indices
+  const [screenplayVersions, setScreenplayVersions] = useState([]); // List of screenplay versions
+  const [activeVersionId, setActiveVersionId] = useState(null); // Currently active version
   const [savingStory, setSavingStory] = useState(false);
   const [storySaved, setStorySaved] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [loadingStory, setLoadingStory] = useState(false);
+  const [generatingAudio, setGeneratingAudio] = useState(false);
+  const [audioFiles, setAudioFiles] = useState({}); // {index: {file_path, speaker, filename}}
 
   // Load story data when in edit mode
   useEffect(() => {
@@ -28,6 +35,39 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
       loadStoryData();
     }
   }, [editMode, storyId]);
+
+  // Reload audio files when screenplay data changes (in case screenplay loads after audio files)
+  useEffect(() => {
+    if (editMode && storyId && screenplayData && screenplayData.script) {
+      // Only reload if we don't have audio files yet
+      if (Object.keys(audioFiles).length === 0) {
+        const loadAudioFiles = async () => {
+          try {
+            const audioResult = await storyAPI.getAudioFiles(storyId);
+            console.log('[CreateStory] Reloading audio files after screenplay load:', audioResult);
+            if (audioResult && audioResult.success && audioResult.audio_files) {
+              const loadedAudioFiles = {};
+              const indicesWithAudio = new Set();
+              audioResult.audio_files.forEach(audioFile => {
+                loadedAudioFiles[audioFile.index] = {
+                  file_path: audioFile.file_path,
+                  speaker: audioFile.speaker,
+                  filename: audioFile.filename
+                };
+                indicesWithAudio.add(audioFile.index);
+              });
+              setAudioFiles(loadedAudioFiles);
+              setSelectedItems(indicesWithAudio);
+              console.log('[CreateStory] Reloaded audio files:', Object.keys(loadedAudioFiles).length, 'items');
+            }
+          } catch (error) {
+            console.error('[CreateStory] Error reloading audio files:', error);
+          }
+        };
+        loadAudioFiles();
+      }
+    }
+  }, [editMode, storyId, screenplayData]);
 
   const loadStoryData = async () => {
     setLoadingStory(true);
@@ -58,46 +98,66 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
           setPersonaContexts(contexts);
         }
         
-        // Load screenplay if available
-        if (story.screenplay) {
-          console.log('[CreateStory] Loading screenplay from story:', {
+        // Load screenplay versions if available
+        if (story.screenplay_versions && Array.isArray(story.screenplay_versions) && story.screenplay_versions.length > 0) {
+          console.log('[CreateStory] Loading screenplay versions:', story.screenplay_versions.length);
+          setScreenplayVersions(story.screenplay_versions);
+          
+          // Find active version
+          const activeVersion = story.screenplay_versions.find(v => v.is_active);
+          if (activeVersion) {
+            setActiveVersionId(activeVersion.id);
+            loadScreenplayVersion(activeVersion.screenplay);
+          } else {
+            // Use the most recent version if no active one
+            const latestVersion = story.screenplay_versions[story.screenplay_versions.length - 1];
+            setActiveVersionId(latestVersion.id);
+            loadScreenplayVersion(latestVersion.screenplay);
+          }
+        } else if (story.screenplay) {
+          // Fallback to old screenplay field if no versions exist
+          console.log('[CreateStory] Loading screenplay from story (legacy):', {
             type: typeof story.screenplay,
             length: story.screenplay?.length || 0,
             preview: story.screenplay?.substring(0, 100) || ''
           });
-          try {
-            const screenplayJson = typeof story.screenplay === 'string' 
-              ? JSON.parse(story.screenplay) 
-              : story.screenplay;
-            
-            console.log('[CreateStory] Parsed screenplay JSON:', {
-              hasScript: !!screenplayJson.script,
-              scriptLength: screenplayJson.script?.length || 0
-            });
-            
-            setScreenplayData(screenplayJson);
-            
-            // Format for display - create formatted text from script array
-            let formattedText = '';
-            if (screenplayJson.script && Array.isArray(screenplayJson.script)) {
-              screenplayJson.script.forEach((item, index) => {
-                const speaker = item.speaker || 'unknown';
-                const text = item.text || '';
-                formattedText += `[${index + 1}] ${speaker.toUpperCase()}\n`;
-                formattedText += `${text}\n\n`;
-              });
-            }
-            setScreenplay(formattedText.trim());
-            console.log('[CreateStory] Screenplay loaded and formatted:', formattedText.length, 'chars');
-          } catch (e) {
-            console.error('[CreateStory] Error parsing screenplay:', e);
-            console.error('[CreateStory] Raw screenplay:', story.screenplay);
-            // If it's not JSON, treat as plain text
-            setScreenplay(story.screenplay);
-            setScreenplayData(null);
-          }
+          setScreenplayVersions([]); // Initialize empty versions array
+          loadScreenplayVersion(story.screenplay);
         } else {
           console.log('[CreateStory] No screenplay found in story data');
+          setScreenplayVersions([]);
+        }
+        
+        // Load existing audio files
+        try {
+          const audioResult = await storyAPI.getAudioFiles(storyId);
+          console.log('[CreateStory] Audio files result:', audioResult);
+          if (audioResult && audioResult.success && audioResult.audio_files) {
+            const loadedAudioFiles = {};
+            const indicesWithAudio = new Set();
+            audioResult.audio_files.forEach(audioFile => {
+              loadedAudioFiles[audioFile.index] = {
+                file_path: audioFile.file_path,
+                speaker: audioFile.speaker,
+                filename: audioFile.filename
+              };
+              indicesWithAudio.add(audioFile.index);
+            });
+            setAudioFiles(loadedAudioFiles);
+            // Check the boxes for items that have audio files
+            setSelectedItems(indicesWithAudio);
+            console.log('[CreateStory] Loaded audio files:', Object.keys(loadedAudioFiles).length, 'items');
+            console.log('[CreateStory] Set selected items:', Array.from(indicesWithAudio));
+          } else {
+            console.log('[CreateStory] No audio files found or invalid response');
+            setAudioFiles({});
+            setSelectedItems(new Set());
+          }
+        } catch (error) {
+          console.error('[CreateStory] Error loading audio files:', error);
+          // Don't fail the whole load if audio files can't be loaded
+          setAudioFiles({});
+          setSelectedItems(new Set());
         }
       }
     } catch (error) {
@@ -105,6 +165,154 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
       setScreenplayError('Failed to load story data');
     } finally {
       setLoadingStory(false);
+    }
+  };
+
+  const loadScreenplayVersion = (screenplayText) => {
+    try {
+      const screenplayJson = typeof screenplayText === 'string' 
+        ? JSON.parse(screenplayText) 
+        : screenplayText;
+      
+      console.log('[CreateStory] Parsed screenplay JSON:', {
+        hasScript: !!screenplayJson.script,
+        scriptLength: screenplayJson.script?.length || 0
+      });
+      
+      setScreenplayData(screenplayJson);
+      
+      // Format for display - create formatted text from script array
+      let formattedText = '';
+      if (screenplayJson.script && Array.isArray(screenplayJson.script)) {
+        screenplayJson.script.forEach((item, index) => {
+          const speaker = item.speaker || 'unknown';
+          const text = item.text || '';
+          formattedText += `[${index + 1}] ${speaker.toUpperCase()}\n`;
+          formattedText += `${text}\n\n`;
+        });
+      }
+      setScreenplay(formattedText.trim());
+      console.log('[CreateStory] Screenplay loaded and formatted:', formattedText.length, 'chars');
+    } catch (e) {
+      console.error('[CreateStory] Error parsing screenplay:', e);
+      console.error('[CreateStory] Raw screenplay:', screenplayText);
+      // If it's not JSON, treat as plain text
+      setScreenplay(screenplayText);
+      setScreenplayData(null);
+    }
+  };
+
+  const handleEditItem = (index) => {
+    if (screenplayData && screenplayData.script && screenplayData.script[index]) {
+      setEditingItemIndex(index);
+      setEditingItemText(screenplayData.script[index].text || '');
+    }
+  };
+
+  const handleSaveItem = () => {
+    if (editingItemIndex !== null && screenplayData && screenplayData.script) {
+      const updatedScript = [...screenplayData.script];
+      updatedScript[editingItemIndex] = {
+        ...updatedScript[editingItemIndex],
+        text: editingItemText
+      };
+      setScreenplayData({ ...screenplayData, script: updatedScript });
+      setEditingItemIndex(null);
+      setEditingItemText('');
+    }
+  };
+
+  const handleCancelItemEdit = () => {
+    setEditingItemIndex(null);
+    setEditingItemText('');
+  };
+
+  const handleDeleteItem = (index) => {
+    if (screenplayData && screenplayData.script) {
+      const updatedScript = screenplayData.script.filter((_, i) => i !== index);
+      setScreenplayData({ ...screenplayData, script: updatedScript });
+      // Update selected items set
+      const newSelected = new Set(selectedItems);
+      newSelected.delete(index);
+      // Adjust indices for items after deleted one
+      const adjustedSelected = new Set();
+      newSelected.forEach(idx => {
+        if (idx < index) {
+          adjustedSelected.add(idx);
+        } else if (idx > index) {
+          adjustedSelected.add(idx - 1);
+        }
+      });
+      setSelectedItems(adjustedSelected);
+    }
+  };
+
+  const handleToggleItem = (index) => {
+    const newSelected = new Set(selectedItems);
+    if (newSelected.has(index)) {
+      newSelected.delete(index);
+    } else {
+      newSelected.add(index);
+    }
+    setSelectedItems(newSelected);
+  };
+
+  const handleCreateAudio = async () => {
+    if (!storyId || !editMode) {
+      console.error('[CreateStory] Cannot create audio: story must be saved first');
+      alert('Please save the story first before generating audio');
+      return;
+    }
+
+    if (selectedItems.size === 0) {
+      alert('Please select at least one screenplay item to generate audio');
+      return;
+    }
+
+    setGeneratingAudio(true);
+    try {
+      const selectedIndices = Array.from(selectedItems);
+      console.log('[CreateStory] Generating audio for items:', selectedIndices);
+
+      const result = await storyAPI.generateAudio(storyId, selectedIndices);
+
+      if (result && result.success) {
+        console.log('[CreateStory] Audio generation successful:', result);
+        
+        // Store audio files in state, mapping by index
+        const newAudioFiles = { ...audioFiles };
+        const newSelectedItems = new Set(selectedItems);
+        if (result.audio_files && Array.isArray(result.audio_files)) {
+          result.audio_files.forEach(audioFile => {
+            newAudioFiles[audioFile.index] = {
+              file_path: audioFile.file_path,
+              speaker: audioFile.speaker,
+              filename: audioFile.filename
+            };
+            // Keep items selected that now have audio
+            newSelectedItems.add(audioFile.index);
+          });
+        }
+        setAudioFiles(newAudioFiles);
+        setSelectedItems(newSelectedItems);
+        
+        alert(`Successfully generated ${result.audio_files?.length || 0} audio files`);
+      } else {
+        throw new Error(result?.error || result?.message || 'Failed to generate audio');
+      }
+    } catch (error) {
+      console.error('[CreateStory] Error generating audio:', error);
+      console.error('[CreateStory] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        fullError: error
+      });
+      const errorMessage = error.response?.data?.detail || error.response?.data?.error || error.message || 'Unknown error';
+      alert(`Error generating audio: ${errorMessage}`);
+    } finally {
+      setGeneratingAudio(false);
     }
   };
 
@@ -459,6 +667,24 @@ FAILURE CONDITIONS:
         console.log('[CreateStory] No screenplay data to save');
       }
 
+      // Save as a new version if we have screenplay data and are editing
+      let versionToSave = null;
+      if (screenplayJson && editMode && storyId && screenplayData) {
+        // Get the next version number
+        const nextVersion = screenplayVersions.length > 0 
+          ? Math.max(...screenplayVersions.map(v => v.version_number)) + 1
+          : 1;
+        versionToSave = {
+          screenplay: screenplayJson,
+          version_number: nextVersion,
+          is_active: true // New version becomes active
+        };
+        console.log('[CreateStory] Creating new screenplay version:', {
+          version_number: nextVersion,
+          screenplay_length: screenplayJson.length
+        });
+      }
+
       let result;
       if (editMode && storyId) {
         // Update existing story
@@ -469,7 +695,8 @@ FAILURE CONDITIONS:
           cast,
           selectedUser?.id,
           selectedNarrator,
-          screenplayJson
+          screenplayJson,
+          versionToSave
         );
       } else {
         // Create new story
@@ -489,6 +716,24 @@ FAILURE CONDITIONS:
         setStorySaved(true);
         setSaveError(null);
         console.log('[CreateStory] Story saved successfully with ID:', result.story_id);
+        
+        // Reload screenplay versions if we created a new version
+        if (editMode && storyId && versionToSave) {
+          try {
+            const versionsResult = await storyAPI.getScreenplayVersions(storyId);
+            if (versionsResult && versionsResult.success && versionsResult.versions) {
+              setScreenplayVersions(versionsResult.versions);
+              // Set the new version as active
+              const newVersion = versionsResult.versions.find(v => v.is_active);
+              if (newVersion) {
+                setActiveVersionId(newVersion.id);
+              }
+            }
+          } catch (e) {
+            console.error('[CreateStory] Error reloading versions:', e);
+          }
+        }
+        
         // Don't auto-navigate if called automatically from generate
         if (!isAutoSave) {
           setTimeout(() => {
@@ -520,10 +765,7 @@ FAILURE CONDITIONS:
 
   return (
     <div className="create-story-page">
-      <div className="create-story-container">
-        <div className="create-story-header">
-          <h1>{editMode ? 'Edit Story' : 'Create Story'}</h1>
-        </div>
+      <div className="create-story-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div className="create-story-layout">
           {/* Left Panel - Form */}
           <div className="create-story-left-panel">
@@ -562,7 +804,7 @@ FAILURE CONDITIONS:
                   onClick={handleGenerateScreenplay}
                   disabled={generatingScreenplay || !plot.trim() || selectedPersonas.length === 0}
                 >
-                  {generatingScreenplay ? 'Generating...' : 'Generate'}
+                  {generatingScreenplay ? 'Generating...' : 'Generate Story'}
                 </button>
               </div>
 
@@ -642,7 +884,7 @@ FAILURE CONDITIONS:
 
               {/* Personas Section */}
               <div className="create-story-field">
-                <label className="create-story-label">Personas</label>
+                <label className="create-story-label">Cast</label>
                 <div className="create-story-personas-list">
                   {personasLoading ? (
                     <div className="create-story-loading">Loading personas...</div>
@@ -711,12 +953,57 @@ FAILURE CONDITIONS:
             ) : (screenplay || screenplayData) ? (
               <div className="create-story-screenplay-panel">
                 <div className="create-story-screenplay-header">
-                  <h2>Generated Screenplay</h2>
-                  {screenplayData && (
-                    <div className="create-story-screenplay-stats">
-                      {screenplayData.script?.length || 0} lines
-                    </div>
-                  )}
+                  <div className="create-story-screenplay-header-left">
+                    <h2>Generated Screenplay</h2>
+                    <button
+                      className="create-story-audio-btn"
+                      disabled={!screenplayData || !screenplayData.script || screenplayData.script.length === 0 || selectedItems.size === 0 || !storyId || !editMode || generatingAudio}
+                      onClick={handleCreateAudio}
+                    >
+                      {generatingAudio ? 'Generating...' : 'Create Audio'}
+                    </button>
+                  </div>
+                  <div className="create-story-screenplay-header-right">
+                    {screenplayVersions.length > 0 && (
+                      <select
+                        className="create-story-screenplay-version-select"
+                        value={activeVersionId || ''}
+                        onChange={async (e) => {
+                          const versionId = parseInt(e.target.value);
+                          const version = screenplayVersions.find(v => v.id === versionId);
+                          if (version) {
+                            setActiveVersionId(versionId);
+                            loadScreenplayVersion(version.screenplay);
+                            
+                            // Activate the version on the server
+                            if (editMode && storyId) {
+                              try {
+                                await storyAPI.setActiveVersion(storyId, versionId);
+                                // Reload versions to update active status
+                                const versionsResult = await storyAPI.getScreenplayVersions(storyId);
+                                if (versionsResult && versionsResult.success && versionsResult.versions) {
+                                  setScreenplayVersions(versionsResult.versions);
+                                }
+                              } catch (e) {
+                                console.error('[CreateStory] Error activating version:', e);
+                              }
+                            }
+                          }
+                        }}
+                      >
+                        {screenplayVersions.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            Version {v.version_number} {v.is_active ? '(Active)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {screenplayData && (
+                      <div className="create-story-screenplay-stats">
+                        {screenplayData.script?.length || 0} lines
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="create-story-screenplay">
                   {screenplayData && screenplayData.script && Array.isArray(screenplayData.script) ? (
@@ -725,15 +1012,66 @@ FAILURE CONDITIONS:
                         const speaker = item.speaker || 'unknown';
                         const text = item.text || '';
                         const isNarrator = speaker.toLowerCase() === 'narrator';
+                        const isSelected = selectedItems.has(index);
+                        const isEditing = editingItemIndex === index;
                         
                         return (
-                          <div key={index} className={`create-story-screenplay-item ${isNarrator ? 'narrator' : 'character'}`}>
-                            <div className="create-story-screenplay-speaker">
-                              {speaker.toUpperCase()}
+                          <div key={index} className={`create-story-screenplay-item ${isNarrator ? 'narrator' : 'character'} ${isSelected ? 'selected' : ''}`}>
+                            <div className="create-story-screenplay-item-header">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleItem(index)}
+                                className="create-story-screenplay-checkbox"
+                              />
+                              <div className="create-story-screenplay-speaker">
+                                {speaker.toUpperCase()}
+                              </div>
+                              <div className="create-story-screenplay-actions">
+                                <button
+                                  className="create-story-screenplay-edit-btn"
+                                  onClick={() => handleEditItem(index)}
+                                  title="Edit"
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  className="create-story-screenplay-delete-btn"
+                                  onClick={() => handleDeleteItem(index)}
+                                  title="Delete"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
                             </div>
-                            <div className="create-story-screenplay-text">
-                              {text}
-                            </div>
+                            {isEditing ? (
+                              <div className="create-story-screenplay-edit">
+                                <textarea
+                                  className="create-story-screenplay-edit-textarea"
+                                  value={editingItemText}
+                                  onChange={(e) => setEditingItemText(e.target.value)}
+                                  rows={3}
+                                />
+                                <div className="create-story-screenplay-edit-actions">
+                                  <button
+                                    className="create-story-screenplay-save-btn"
+                                    onClick={handleSaveItem}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    className="create-story-screenplay-cancel-btn"
+                                    onClick={handleCancelItemEdit}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="create-story-screenplay-text">
+                                {text}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -746,6 +1084,64 @@ FAILURE CONDITIONS:
             ) : (
               <div className="create-story-empty-panel">
                 <p>Generated screenplay will appear here</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Timeline Footer */}
+        <div className="create-story-timeline-footer">
+          <div className="create-story-timeline-header">
+            <h2>Timeline</h2>
+          </div>
+          <div className="create-story-timeline-content">
+            {screenplayData && screenplayData.script && screenplayData.script.length > 0 ? (
+              (() => {
+                // Filter to only show items that have audio files, maintaining screenplay order
+                const itemsWithAudio = screenplayData.script
+                  .map((item, index) => ({ item, index, audioFile: audioFiles[index] }))
+                  .filter(({ audioFile }) => audioFile !== undefined && audioFile !== null);
+                
+                console.log('[CreateStory] Timeline render - screenplayData.script.length:', screenplayData.script.length);
+                console.log('[CreateStory] Timeline render - audioFiles keys:', Object.keys(audioFiles));
+                console.log('[CreateStory] Timeline render - itemsWithAudio.length:', itemsWithAudio.length);
+                
+                if (itemsWithAudio.length === 0) {
+                  return (
+                    <div className="create-story-timeline-empty">
+                      <p>Select items and click "Create Audio" to generate audio files</p>
+                    </div>
+                  );
+                }
+                
+                return (
+                  <div className="create-story-timeline-items">
+                    {itemsWithAudio.map(({ item, index, audioFile }) => {
+                      const speaker = item.speaker || 'unknown';
+                      const text = item.text || '';
+                      
+                      return (
+                        <div key={index} className="create-story-timeline-item">
+                          <div className="create-story-timeline-item-header">
+                            <span className="create-story-timeline-item-index">{index + 1}</span>
+                            <span className="create-story-timeline-item-speaker">{speaker.toUpperCase()}</span>
+                          </div>
+                          <div className="create-story-timeline-item-text">{text}</div>
+                          <div className="create-story-timeline-item-audio">
+                            <audio controls className="create-story-timeline-audio-player">
+                              <source src={`/${audioFile.file_path}`} type="audio/mpeg" />
+                              Your browser does not support the audio element.
+                            </audio>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="create-story-timeline-empty">
+                <p>Generate screenplay and audio to see timeline</p>
               </div>
             )}
           </div>
