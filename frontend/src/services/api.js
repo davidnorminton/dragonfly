@@ -182,6 +182,12 @@ export const storyAPI = {
   getAudioFiles: (storyId) => {
     return api.get(`/stories/${storyId}/audio-files`).then(res => res.data);
   },
+  buildAudio: (storyId, data) => {
+    return api.post(`/stories/${storyId}/build`, data).then(res => res.data);
+  },
+  getCompleteStories: () => {
+    return api.get('/stories/complete').then(res => res.data);
+  },
 };
 
 export const personaAPI = {

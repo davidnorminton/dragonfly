@@ -26,7 +26,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -13044,6 +13044,168 @@ async def get_stories(user_id: Optional[int] = None):
         logger.error(f"Error getting stories: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/stories/complete")
+async def get_complete_stories():
+    """Get all complete stories. Also syncs filesystem files with database."""
+    try:
+        project_root = Path(__file__).parent.parent
+        complete_dir = project_root / "data" / "story" / "complete"
+        
+        async with AsyncSessionLocal() as session:
+            # Get existing database records
+            result = await session.execute(
+                select(StoryComplete).order_by(desc(StoryComplete.created_at))
+            )
+            complete_stories = result.scalars().all()
+            
+            # Get audio paths from database
+            db_audio_paths = {story.audio for story in complete_stories}
+            
+            # Scan filesystem for MP3 files
+            if complete_dir.exists():
+                filesystem_files = list(complete_dir.glob("*.mp3"))
+                logger.info(f"[GET COMPLETE STORIES] Found {len(filesystem_files)} files in filesystem")
+                
+                # Create database records for files that don't exist in DB
+                for file_path in filesystem_files:
+                    relative_path = f"data/story/complete/{file_path.name}"
+                    
+                    if relative_path not in db_audio_paths:
+                        # Extract title from filename (remove timestamp and .mp3)
+                        # Format: title_YYYYMMDD_HHMMSS.mp3
+                        filename_without_ext = file_path.stem
+                        # Remove timestamp pattern _YYYYMMDD_HHMMSS
+                        import re
+                        title_match = re.match(r'^(.+)_\d{8}_\d{6}$', filename_without_ext)
+                        if title_match:
+                            title = title_match.group(1).replace('-', ' ')
+                        else:
+                            # Fallback: use filename without extension
+                            title = filename_without_ext.replace('-', ' ')
+                        
+                        logger.info(f"[GET COMPLETE STORIES] Creating missing DB record for: {title} - {relative_path}")
+                        
+                        # Create new record with all required fields
+                        try:
+                            story_complete = StoryComplete(
+                                title=title,
+                                image=None,
+                                story="(Story text not available - file synced from filesystem)",  # Required field, can't be empty
+                                audio=relative_path,
+                                narrator=None,  # Can't recover from filename
+                                cast=None,  # Can't recover from filename
+                                screenplay=None  # Can't recover from filename
+                            )
+                            session.add(story_complete)
+                        except Exception as create_error:
+                            logger.error(f"[GET COMPLETE STORIES] Error creating record for {file_path.name}: {create_error}", exc_info=True)
+                            # Continue with other files
+                            continue
+                
+                # Commit new records if any were added
+                try:
+                    if len(filesystem_files) > len(complete_stories):
+                        await session.commit()
+                        logger.info(f"[GET COMPLETE STORIES] Created {len(filesystem_files) - len(complete_stories)} missing database records")
+                        
+                        # Re-fetch after adding new records
+                        result = await session.execute(
+                            select(StoryComplete).order_by(desc(StoryComplete.created_at))
+                        )
+                        complete_stories = result.scalars().all()
+                except Exception as commit_error:
+                    logger.error(f"[GET COMPLETE STORIES] Error committing new records: {commit_error}", exc_info=True)
+                    await session.rollback()
+                    # Continue with existing records
+            
+            logger.info(f"[GET COMPLETE STORIES] Found {len(complete_stories)} complete stories")
+            
+            stories_list = []
+            for story in complete_stories:
+                try:
+                    # Build story dict with only basic required fields first
+                    story_dict = {
+                        "id": int(story.id) if story.id else 0,
+                        "title": str(story.title) if story.title else "",
+                        "audio": str(story.audio) if story.audio else "",
+                        "created_at": story.created_at.isoformat() if story.created_at else None,
+                    }
+                    
+                    # Try to add optional fields, but don't fail if they don't exist
+                    try:
+                        story_dict["narrator"] = str(story.narrator) if story.narrator else None
+                    except (AttributeError, KeyError):
+                        story_dict["narrator"] = None
+                    
+                    # Handle JSON cast field - it might be stored as string in SQLite
+                    cast_data = None
+                    try:
+                        cast_attr = getattr(story, 'cast', None)
+                        if cast_attr is not None:
+                            if isinstance(cast_attr, str):
+                                try:
+                                    cast_data = json.loads(cast_attr)
+                                except:
+                                    cast_data = None
+                            elif isinstance(cast_attr, (dict, list)):
+                                cast_data = cast_attr
+                            else:
+                                cast_data = None
+                    except (AttributeError, KeyError):
+                        cast_data = None
+                    
+                    story_dict["cast"] = cast_data
+                    
+                    try:
+                        story_dict["screenplay"] = str(story.screenplay) if story.screenplay else None
+                    except (AttributeError, KeyError):
+                        story_dict["screenplay"] = None
+                    
+                    stories_list.append(story_dict)
+                    logger.debug(f"[GET COMPLETE STORIES] Story: {story.id} - {story.title} - {story.audio}")
+                except Exception as story_error:
+                    logger.error(f"[GET COMPLETE STORIES] Error processing story {story.id}: {story_error}", exc_info=True)
+                    logger.error(f"[GET COMPLETE STORIES] Story object type: {type(story)}", exc_info=True)
+                    # Skip this story but continue with others
+                    continue
+            
+            logger.info(f"[GET COMPLETE STORIES] Returning {len(stories_list)} stories")
+            logger.info(f"[GET COMPLETE STORIES] Sample story dict: {stories_list[0] if stories_list else 'No stories'}")
+            
+            response_data = {
+                "success": True,
+                "stories": stories_list
+            }
+            
+            # Validate JSON serialization before returning
+            try:
+                json.dumps(response_data)
+                logger.info("[GET COMPLETE STORIES] Response data is JSON-serializable")
+            except Exception as json_error:
+                logger.error(f"[GET COMPLETE STORIES] JSON serialization error: {json_error}", exc_info=True)
+                # Return minimal response if serialization fails
+                return {
+                    "success": False,
+                    "error": f"Serialization error: {str(json_error)}",
+                    "stories": []
+                }
+            
+            return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting complete stories: {e}", exc_info=True)
+        logger.error(f"Error type: {type(e).__name__}", exc_info=True)
+        # Return error response instead of raising to avoid 422
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e),
+                "stories": []
+            }
+        )
+
 @app.get("/api/stories/{story_id}")
 async def get_story(story_id: int):
     """Get a specific story with plot and cast."""
@@ -13531,6 +13693,404 @@ async def generate_story_audio(story_id: int, request: Request):
     except Exception as e:
         logger.error(f"Error generating story audio: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/stories/complete")
+async def get_complete_stories():
+    """Get all complete stories. Also syncs filesystem files with database."""
+    try:
+        project_root = Path(__file__).parent.parent
+        complete_dir = project_root / "data" / "story" / "complete"
+        
+        async with AsyncSessionLocal() as session:
+            # Get existing database records
+            result = await session.execute(
+                select(StoryComplete).order_by(desc(StoryComplete.created_at))
+            )
+            complete_stories = result.scalars().all()
+            
+            # Get audio paths from database
+            db_audio_paths = {story.audio for story in complete_stories}
+            
+            # Scan filesystem for MP3 files
+            if complete_dir.exists():
+                filesystem_files = list(complete_dir.glob("*.mp3"))
+                logger.info(f"[GET COMPLETE STORIES] Found {len(filesystem_files)} files in filesystem")
+                
+                # Create database records for files that don't exist in DB
+                for file_path in filesystem_files:
+                    relative_path = f"data/story/complete/{file_path.name}"
+                    
+                    if relative_path not in db_audio_paths:
+                        # Extract title from filename (remove timestamp and .mp3)
+                        # Format: title_YYYYMMDD_HHMMSS.mp3
+                        filename_without_ext = file_path.stem
+                        # Remove timestamp pattern _YYYYMMDD_HHMMSS
+                        import re
+                        title_match = re.match(r'^(.+)_\d{8}_\d{6}$', filename_without_ext)
+                        if title_match:
+                            title = title_match.group(1).replace('-', ' ')
+                        else:
+                            # Fallback: use filename without extension
+                            title = filename_without_ext.replace('-', ' ')
+                        
+                        logger.info(f"[GET COMPLETE STORIES] Creating missing DB record for: {title} - {relative_path}")
+                        
+                        # Create new record with all required fields
+                        try:
+                            story_complete = StoryComplete(
+                                title=title,
+                                image=None,
+                                story="(Story text not available - file synced from filesystem)",  # Required field, can't be empty
+                                audio=relative_path,
+                                narrator=None,  # Can't recover from filename
+                                cast=None,  # Can't recover from filename
+                                screenplay=None  # Can't recover from filename
+                            )
+                            session.add(story_complete)
+                        except Exception as create_error:
+                            logger.error(f"[GET COMPLETE STORIES] Error creating record for {file_path.name}: {create_error}", exc_info=True)
+                            # Continue with other files
+                            continue
+                
+                # Commit new records if any were added
+                try:
+                    if len(filesystem_files) > len(complete_stories):
+                        await session.commit()
+                        logger.info(f"[GET COMPLETE STORIES] Created {len(filesystem_files) - len(complete_stories)} missing database records")
+                        
+                        # Re-fetch after adding new records
+                        result = await session.execute(
+                            select(StoryComplete).order_by(desc(StoryComplete.created_at))
+                        )
+                        complete_stories = result.scalars().all()
+                except Exception as commit_error:
+                    logger.error(f"[GET COMPLETE STORIES] Error committing new records: {commit_error}", exc_info=True)
+                    await session.rollback()
+                    # Continue with existing records
+            
+            logger.info(f"[GET COMPLETE STORIES] Found {len(complete_stories)} complete stories")
+            
+            stories_list = []
+            for story in complete_stories:
+                try:
+                    # Build story dict with only basic required fields first
+                    story_dict = {
+                        "id": int(story.id) if story.id else 0,
+                        "title": str(story.title) if story.title else "",
+                        "audio": str(story.audio) if story.audio else "",
+                        "created_at": story.created_at.isoformat() if story.created_at else None,
+                    }
+                    
+                    # Try to add optional fields, but don't fail if they don't exist
+                    try:
+                        story_dict["narrator"] = str(story.narrator) if story.narrator else None
+                    except (AttributeError, KeyError):
+                        story_dict["narrator"] = None
+                    
+                    # Handle JSON cast field - it might be stored as string in SQLite
+                    cast_data = None
+                    try:
+                        cast_attr = getattr(story, 'cast', None)
+                        if cast_attr is not None:
+                            if isinstance(cast_attr, str):
+                                try:
+                                    cast_data = json.loads(cast_attr)
+                                except:
+                                    cast_data = None
+                            elif isinstance(cast_attr, (dict, list)):
+                                cast_data = cast_attr
+                            else:
+                                cast_data = None
+                    except (AttributeError, KeyError):
+                        cast_data = None
+                    
+                    story_dict["cast"] = cast_data
+                    
+                    try:
+                        story_dict["screenplay"] = str(story.screenplay) if story.screenplay else None
+                    except (AttributeError, KeyError):
+                        story_dict["screenplay"] = None
+                    
+                    stories_list.append(story_dict)
+                    logger.debug(f"[GET COMPLETE STORIES] Story: {story.id} - {story.title} - {story.audio}")
+                except Exception as story_error:
+                    logger.error(f"[GET COMPLETE STORIES] Error processing story {story.id}: {story_error}", exc_info=True)
+                    logger.error(f"[GET COMPLETE STORIES] Story object type: {type(story)}", exc_info=True)
+                    # Skip this story but continue with others
+                    continue
+            
+            logger.info(f"[GET COMPLETE STORIES] Returning {len(stories_list)} stories")
+            logger.info(f"[GET COMPLETE STORIES] Sample story dict: {stories_list[0] if stories_list else 'No stories'}")
+            
+            response_data = {
+                "success": True,
+                "stories": stories_list
+            }
+            
+            # Validate JSON serialization before returning
+            try:
+                json.dumps(response_data)
+                logger.info("[GET COMPLETE STORIES] Response data is JSON-serializable")
+            except Exception as json_error:
+                logger.error(f"[GET COMPLETE STORIES] JSON serialization error: {json_error}", exc_info=True)
+                # Return minimal response if serialization fails
+                return {
+                    "success": False,
+                    "error": f"Serialization error: {str(json_error)}",
+                    "stories": []
+                }
+            
+            return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting complete stories: {e}", exc_info=True)
+        logger.error(f"Error type: {type(e).__name__}", exc_info=True)
+        # Return error response instead of raising to avoid 422
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e),
+                "stories": []
+            }
+        )
+
+@app.post("/api/stories/{story_id}/build")
+async def build_story_audio(story_id: int, request: Request):
+    """Build complete audio file by concatenating timeline audio files with pauses."""
+    try:
+        try:
+            from pydub import AudioSegment
+        except ImportError:
+            raise HTTPException(
+                status_code=500, 
+                detail="pydub is not installed. Please run: pip install pydub"
+            )
+        import re
+        
+        project_root = Path(__file__).parent.parent
+        
+        data = await request.json()
+        timeline_items = data.get("timeline_items", [])  # [{index, speaker, text}]
+        pauses = data.get("pauses", {})  # {index: duration_ms}
+        
+        if not timeline_items:
+            raise HTTPException(status_code=400, detail="No timeline items provided")
+        
+        async with AsyncSessionLocal() as session:
+            # Get story
+            story_result = await session.execute(
+                select(Story).where(Story.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            if not story.title:
+                raise HTTPException(status_code=400, detail="Story title is required")
+            
+            # Get story audio directory
+            story_audio_dir = project_root / "data" / "story" / str(story_id)
+            if not story_audio_dir.exists():
+                raise HTTPException(status_code=400, detail="No audio files found for story")
+            
+            # Get audio files for timeline items only (using current timeline state)
+            audio_files = []
+            for timeline_item in timeline_items:
+                index = timeline_item.get("index")
+                if index is None:
+                    continue
+                
+                # Look for audio file matching pattern: item_XXXX_speaker.mp3
+                pattern = f"item_{index:04d}_*.mp3"
+                matching_files = list(story_audio_dir.glob(pattern))
+                if matching_files:
+                    audio_files.append({
+                        "index": index,
+                        "filepath": matching_files[0],
+                        "speaker": timeline_item.get("speaker", ""),
+                        "text": timeline_item.get("text", "")
+                    })
+                else:
+                    logger.warning(f"No audio file found for timeline item at index {index}")
+            
+            if not audio_files:
+                raise HTTPException(status_code=400, detail="No audio files found for timeline items")
+            
+            # Sort by index to maintain order
+            audio_files.sort(key=lambda x: x["index"])
+            
+            # Concatenate audio files with pauses
+            combined_audio = None
+            
+            for i, audio_file_info in enumerate(audio_files):
+                index = audio_file_info["index"]
+                filepath = audio_file_info["filepath"]
+                
+                # Load audio file
+                try:
+                    audio_segment = AudioSegment.from_mp3(str(filepath))
+                    logger.info(f"Loaded audio file {filepath.name}: {len(audio_segment)}ms")
+                except Exception as e:
+                    error_msg = f"Error loading audio file {filepath}: {e}"
+                    logger.error(error_msg, exc_info=True)
+                    # If it's a critical error (like missing ffmpeg), raise it
+                    if "ffmpeg" in str(e).lower() or "ffprobe" in str(e).lower():
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"ffmpeg is required for audio processing. Error: {e}"
+                        )
+                    # Otherwise, log and continue (skip this file)
+                    continue
+                
+                # Add to combined audio
+                if combined_audio is None:
+                    combined_audio = audio_segment
+                else:
+                    combined_audio += audio_segment
+                
+                # Add pause after this audio (if not the last item)
+                if i < len(audio_files) - 1:
+                    pause_duration_ms = pauses.get(str(index), 0)
+                    if pause_duration_ms > 0:
+                        # Create silence segment
+                        silence = AudioSegment.silent(duration=pause_duration_ms)
+                        combined_audio += silence
+                        logger.info(f"Added pause of {pause_duration_ms}ms after item {index}")
+            
+            if combined_audio is None:
+                raise HTTPException(status_code=500, detail="Failed to combine audio files")
+            
+            # Create complete directory
+            complete_dir = project_root / "data" / "story" / "complete"
+            complete_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Sanitize story title for filename
+            safe_title = re.sub(r'[^\w\s-]', '', story.title).strip()
+            safe_title = re.sub(r'[-\s]+', '-', safe_title)
+            
+            # Add timestamp to filename
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{safe_title}_{timestamp}.mp3"
+            output_path = complete_dir / filename
+            
+            # Export combined audio
+            combined_audio.export(str(output_path), format="mp3")
+            logger.info(f"Built complete audio file: {output_path} ({len(combined_audio)}ms)")
+            
+            # Return relative path
+            relative_path = f"data/story/complete/{filename}"
+            
+            # Format screenplay text as <speaker>#text (one per line)
+            # Use current timeline items (which may have been edited)
+            formatted_story_lines = []
+            for audio_file_info in audio_files:
+                speaker = audio_file_info.get("speaker", "")
+                text = audio_file_info.get("text", "")
+                if speaker and text:
+                    formatted_story_lines.append(f"<{speaker}>#{text}")
+            
+            formatted_story_text = "\n".join(formatted_story_lines)
+            
+            # Get cast and narrator information
+            cast_result = await session.execute(
+                select(StoryCast).where(StoryCast.story_id == story_id)
+            )
+            cast_members = cast_result.scalars().all()
+            cast_data = [
+                {
+                    "persona_name": c.persona_name,
+                    "custom_context": c.custom_context or ""
+                }
+                for c in cast_members
+            ]
+            
+            narrator_persona = story.narrator_persona or None
+            
+            # Get original screenplay JSON
+            screenplay_json = None
+            version_result = await session.execute(
+                select(StoryScreenplayVersion)
+                .where(StoryScreenplayVersion.story_id == story_id, StoryScreenplayVersion.is_active == True)
+            )
+            active_version = version_result.scalar_one_or_none()
+            
+            if active_version:
+                screenplay_json = active_version.screenplay
+            elif story.screenplay:
+                screenplay_json = story.screenplay
+            
+            # Save to stories_complete table
+            try:
+                logger.info(f"[BUILD] Saving complete story to database: title={story.title}, audio={relative_path}")
+                logger.info(f"[BUILD] Cast: {len(cast_data)} members, Narrator: {narrator_persona}")
+                logger.info(f"[BUILD] Story text length: {len(formatted_story_text)}, Screenplay: {bool(screenplay_json)}")
+                
+                story_complete = StoryComplete(
+                    title=story.title,
+                    image=None,  # Placeholder - will be added later
+                    story=formatted_story_text,
+                    audio=relative_path,
+                    narrator=narrator_persona,
+                    cast=cast_data,
+                    screenplay=screenplay_json
+                )
+                session.add(story_complete)
+                await session.commit()
+                
+                logger.info(f"[BUILD] ✅ Successfully saved complete story to database: id={story_complete.id}, title={story.title}")
+            except Exception as db_error:
+                logger.error(f"[BUILD] ❌ Error saving to stories_complete table: {db_error}", exc_info=True)
+                # If table doesn't exist, provide helpful error message
+                error_msg = str(db_error)
+                if "stories_complete" in error_msg.lower() or "does not exist" in error_msg.lower() or "no such table" in error_msg.lower():
+                    raise HTTPException(
+                        status_code=500, 
+                        detail="stories_complete table does not exist. Please run: python scripts/add_stories_complete_table.py"
+                    )
+                # Don't raise here - log the error but still return success for the audio file
+                logger.error(f"[BUILD] Database save failed but audio file was created: {relative_path}")
+                # Return success anyway since audio was created
+                return {
+                    "success": True,
+                    "file_path": relative_path,
+                    "filename": filename,
+                    "duration_ms": len(combined_audio),
+                    "story_complete_id": None,
+                    "database_save_error": error_msg,
+                    "message": f"Built complete audio file: {filename} (database save failed: {error_msg})"
+                }
+            
+            return {
+                "success": True,
+                "file_path": relative_path,
+                "filename": filename,
+                "duration_ms": len(combined_audio),
+                "story_complete_id": story_complete.id,
+                "message": f"Built complete audio file: {filename}"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_detail = str(e)
+        logger.error(f"Error building story audio: {error_detail}", exc_info=True)
+        # Provide more helpful error messages
+        if "pydub" in error_detail.lower() or "AudioSegment" in error_detail:
+            raise HTTPException(
+                status_code=500, 
+                detail="pydub is not installed. Please run: pip install pydub"
+            )
+        elif "ffmpeg" in error_detail.lower() or "ffprobe" in error_detail.lower():
+            raise HTTPException(
+                status_code=500,
+                detail="ffmpeg is required for audio processing. Please install ffmpeg."
+            )
+        else:
+            raise HTTPException(status_code=500, detail=f"Error building audio: {error_detail}")
 
 @app.get("/api/devices/health")
 async def get_devices_health():

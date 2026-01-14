@@ -38,6 +38,7 @@ beautifulsoup4==4.12.2
 python-multipart==0.0.6
 vosk==0.3.44
 soundfile==0.12.1
+pydub==0.25.1
 
 # Testing
 pytest==7.4.3

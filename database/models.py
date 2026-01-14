@@ -736,3 +736,22 @@ class StoryScreenplayVersion(Base):
     def __repr__(self):
         return f"<StoryScreenplayVersion {self.id} for story {self.story_id} v{self.version_number}>"
 
+
+class StoryComplete(Base):
+    """Model for storing completed/built stories with audio."""
+    __tablename__ = "stories_complete"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String, nullable=False, index=True)  # Story title
+    image = Column(String, nullable=True)  # Image path (placeholder for now)
+    story = Column(Text, nullable=False)  # Formatted screenplay text: <speaker>#text
+    audio = Column(String, nullable=False)  # Path to complete audio file
+    narrator = Column(String, nullable=True)  # Narrator persona name
+    cast = Column("cast", JSON, nullable=True)  # Cast personas: [{"persona_name": "...", "custom_context": "..."}]
+    screenplay = Column(Text, nullable=True)  # Original screenplay JSON used to create audio
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<StoryComplete {self.id}: {self.title}>"
+

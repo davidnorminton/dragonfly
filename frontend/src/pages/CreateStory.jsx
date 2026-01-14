@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePersonas } from '../hooks/usePersonas';
 import { getPersonaImageUrl } from '../utils/personaImageHelper';
 import { personaAPI, storyAPI, aiAPI } from '../services/api';
@@ -28,6 +28,28 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
   const [loadingStory, setLoadingStory] = useState(false);
   const [generatingAudio, setGeneratingAudio] = useState(false);
   const [audioFiles, setAudioFiles] = useState({}); // {index: {file_path, speaker, filename}}
+  const [isPlayingTimeline, setIsPlayingTimeline] = useState(false);
+  const [currentPlayingIndex, setCurrentPlayingIndex] = useState(null);
+  const [timelineProgress, setTimelineProgress] = useState(0); // 0-100
+  const [pauses, setPauses] = useState({}); // {index: pauseDurationInMs} - pause after item at index
+  const [editingPause, setEditingPause] = useState(null); // {index: index, startX: number} when dragging
+  const [timelineMenuOpen, setTimelineMenuOpen] = useState(null); // index of item with open menu
+  const [editingTimelineItem, setEditingTimelineItem] = useState(null); // {index, originalText} when editing
+  const [timelineEditText, setTimelineEditText] = useState(''); // Text being edited in timeline item
+  const [isPausing, setIsPausing] = useState(false); // Whether currently in a pause
+  const [buildCompleteModal, setBuildCompleteModal] = useState(null); // {title, audioUrl} when build is complete
+  const buildAudioRef = useRef(null); // Ref for the complete audio player
+  const pauseTimeoutRef = useRef(null); // Ref to track pause timeout
+  const pauseIntervalRef = useRef(null); // Ref to track pause progress interval
+  const resumeStateRef = useRef(null); // {indices, currentIndex, pausedAtTime} for resuming
+  const audioRefs = useRef({}); // {index: audioElement}
+  const totalDurationRef = useRef(0); // Total duration of all audio files
+  const currentTimeRef = useRef(0); // Current playback time across all files
+  const progressIntervalRef = useRef(null); // Interval for updating progress
+  const isPlayingRef = useRef(false); // Ref to track playing state
+  const durationsRef = useRef({}); // {index: duration}
+  const indicesWithAudioRef = useRef([]); // Array of indices with audio
+  const currentPlayingIndexRef = useRef(null); // Ref to track current playing index
 
   // Load story data when in edit mode
   useEffect(() => {
@@ -68,6 +90,50 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
       }
     }
   }, [editMode, storyId, screenplayData]);
+
+  // Handle pause editing (dragging)
+  useEffect(() => {
+    if (!editingPause) return;
+
+    const handleMouseMove = (e) => {
+      const deltaX = e.clientX - editingPause.startX;
+      // Convert pixel movement to milliseconds (1px = 10ms)
+      const deltaMs = deltaX * 10;
+      const newDuration = Math.max(0, editingPause.startWidth + deltaMs);
+      setPauses(prev => ({
+        ...prev,
+        [editingPause.index]: newDuration
+      }));
+    };
+
+    const handleMouseUp = () => {
+      setEditingPause(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [editingPause]);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (timelineMenuOpen !== null && !e.target.closest('.create-story-timeline-item-menu-container')) {
+        setTimelineMenuOpen(null);
+      }
+    };
+
+    if (timelineMenuOpen !== null) {
+      document.addEventListener('click', handleClickOutside);
+      return () => {
+        document.removeEventListener('click', handleClickOutside);
+      };
+    }
+  }, [timelineMenuOpen]);
 
   const loadStoryData = async () => {
     setLoadingStory(true);
@@ -255,6 +321,635 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
       newSelected.add(index);
     }
     setSelectedItems(newSelected);
+  };
+
+  const handleRemoveTimelineItem = (index) => {
+    // Remove audio file from state
+    const newAudioFiles = { ...audioFiles };
+    delete newAudioFiles[index];
+    setAudioFiles(newAudioFiles);
+    
+    // Remove from selected items
+    const newSelected = new Set(selectedItems);
+    newSelected.delete(index);
+    setSelectedItems(newSelected);
+    
+    // Remove pause if exists
+    const newPauses = { ...pauses };
+    delete newPauses[index];
+    setPauses(newPauses);
+    
+    console.log('[CreateStory] Removed timeline item:', index);
+  };
+
+  const handleEditTimelineItem = (index, originalText) => {
+    setEditingTimelineItem({ index, originalText });
+    setTimelineEditText(originalText);
+  };
+
+  const handleSaveTimelineItemEdit = async () => {
+    if (!editingTimelineItem || !storyId || !editMode) {
+      return;
+    }
+
+    const { index } = editingTimelineItem;
+    const newText = timelineEditText.trim();
+
+    if (!newText) {
+      alert('Text cannot be empty');
+      return;
+    }
+
+    // Update the screenplay data
+    if (screenplayData && screenplayData.script && screenplayData.script[index]) {
+      const updatedScript = [...screenplayData.script];
+      updatedScript[index] = {
+        ...updatedScript[index],
+        text: newText
+      };
+      setScreenplayData({ ...screenplayData, script: updatedScript });
+    }
+
+    // Generate new audio for this item
+    try {
+      console.log('[CreateStory] Regenerating audio for item:', index);
+      const result = await storyAPI.generateAudio(storyId, [index]);
+      
+      if (result && result.success && result.audio_files && result.audio_files.length > 0) {
+        const audioFile = result.audio_files[0];
+        const newAudioFiles = { ...audioFiles };
+        newAudioFiles[index] = {
+          file_path: audioFile.file_path,
+          speaker: audioFile.speaker,
+          filename: audioFile.filename
+        };
+        setAudioFiles(newAudioFiles);
+        console.log('[CreateStory] Audio regenerated for item:', index);
+      } else {
+        throw new Error('Failed to generate audio');
+      }
+    } catch (error) {
+      console.error('[CreateStory] Error regenerating audio:', error);
+      alert(`Error regenerating audio: ${error.message || 'Unknown error'}`);
+    }
+
+    setEditingTimelineItem(null);
+    setTimelineEditText('');
+  };
+
+  const handleCancelTimelineItemEdit = () => {
+    setEditingTimelineItem(null);
+    setTimelineEditText('');
+  };
+
+  const handleBuild = async () => {
+    if (!storyId || !editMode || !screenplayData || !screenplayData.script) {
+      alert('Please save the story first');
+      return;
+    }
+
+    if (Object.keys(audioFiles).length === 0) {
+      alert('No audio files to build');
+      return;
+    }
+
+    try {
+      console.log('[CreateStory] Building complete audio file...');
+      console.log('[CreateStory] Pauses:', pauses);
+      console.log('[CreateStory] Audio files:', audioFiles);
+      
+      // Get timeline items: only indices that have audio files, sorted by index
+      const timelineIndices = Object.keys(audioFiles)
+        .map(Number)
+        .sort((a, b) => a - b);
+      
+      // Get current screenplay text for each timeline item (may have been edited)
+      const timelineItems = timelineIndices.map(index => {
+        const screenplayItem = screenplayData.script[index];
+        return {
+          index: index,
+          speaker: screenplayItem?.speaker || '',
+          text: screenplayItem?.text || ''
+        };
+      });
+      
+      console.log('[CreateStory] Timeline items to build:', timelineItems);
+      
+      // Convert pauses object keys to strings if needed (for JSON serialization)
+      const pausesForAPI = {};
+      Object.keys(pauses).forEach(key => {
+        pausesForAPI[String(key)] = pauses[key];
+      });
+      
+      const result = await storyAPI.buildAudio(storyId, {
+        timeline_items: timelineItems,
+        pauses: pausesForAPI
+      });
+      
+      if (result && result.success) {
+        console.log('[CreateStory] Build complete:', result);
+        // Show modal with play button
+        // The file_path is relative like "data/story/complete/filename.mp3"
+        // The data directory is mounted at /data, so the URL is /data/story/complete/filename.mp3
+        const audioUrl = `/${result.file_path}`;
+        setBuildCompleteModal({
+          title: storyTitle,
+          audioUrl: audioUrl,
+          filename: result.filename,
+          duration: (result.duration_ms / 1000).toFixed(1),
+          savedToDb: result.story_complete_id !== null && result.story_complete_id !== undefined
+        });
+      } else {
+        throw new Error(result?.error || 'Build failed');
+      }
+    } catch (error) {
+      console.error('[CreateStory] Error building audio:', error);
+      alert(`Error building audio: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handlePlayTimeline = () => {
+    if (isPlayingTimeline) {
+      // Pause - stop all audio and save state for resuming
+      Object.values(audioRefs.current).forEach(audioElement => {
+        if (audioElement) {
+          audioElement.pause();
+        }
+      });
+      
+      // Save current state for resuming
+      if (currentPlayingIndexRef.current !== null) {
+        const currentIndex = currentPlayingIndexRef.current;
+        const indicesWithAudio = Object.keys(audioFiles)
+          .map(Number)
+          .sort((a, b) => a - b);
+        
+        // Find which index in the array we're at
+        const arrayIndex = indicesWithAudio.indexOf(currentIndex);
+        
+        // Get current time in the audio if playing, or 0 if in pause
+        let pausedAtTime = 0;
+        if (!isPausing && currentIndex !== null) {
+          const audioElement = audioRefs.current[currentIndex];
+          if (audioElement) {
+            pausedAtTime = audioElement.currentTime || 0;
+          }
+        }
+        
+        resumeStateRef.current = {
+          indices: indicesWithAudio,
+          currentIndex: arrayIndex,
+          pausedAtTime: pausedAtTime,
+          pausedAtItemIndex: currentIndex
+        };
+      }
+      
+      setIsPlayingTimeline(false);
+      isPlayingRef.current = false;
+      setIsPausing(false);
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      if (pauseTimeoutRef.current) {
+        clearTimeout(pauseTimeoutRef.current);
+        pauseTimeoutRef.current = null;
+      }
+      if (pauseIntervalRef.current) {
+        clearInterval(pauseIntervalRef.current);
+        pauseIntervalRef.current = null;
+      }
+    } else {
+      // Play - start playing from the first item with audio or resume from where we left off
+      if (!screenplayData || !screenplayData.script) return;
+      
+      // Get all indices that have audio, sorted by index
+      const indicesWithAudio = Object.keys(audioFiles)
+        .map(Number)
+        .sort((a, b) => a - b);
+      
+      if (indicesWithAudio.length === 0) return;
+      
+      // Check if we should resume from a previous pause
+      if (resumeStateRef.current) {
+        const resumeState = resumeStateRef.current;
+        const resumeIndex = resumeState.currentIndex;
+        const resumeItemIndex = resumeState.pausedAtItemIndex;
+        const resumeTime = resumeState.pausedAtTime;
+        
+        console.log('[CreateStory] Resuming playback:', {
+          resumeIndex,
+          resumeItemIndex,
+          resumeTime,
+          isPausing
+        });
+        
+        // Calculate durations first
+        const calculateDurations = () => {
+          let totalDuration = 0;
+          const durations = {};
+          let allLoaded = true;
+          
+          indicesWithAudio.forEach(index => {
+            const audioEl = audioRefs.current[index];
+            if (audioEl && audioEl.duration && !isNaN(audioEl.duration) && isFinite(audioEl.duration) && audioEl.duration > 0) {
+              durations[index] = audioEl.duration;
+              totalDuration += audioEl.duration;
+              const pauseDur = pauses[index] || 0;
+              if (pauseDur > 0) {
+                totalDuration += pauseDur / 1000;
+              }
+            } else {
+              allLoaded = false;
+            }
+          });
+          
+          if (allLoaded && totalDuration > 0) {
+            totalDurationRef.current = totalDuration;
+            startProgressTracking(indicesWithAudio, durations);
+            return durations;
+          }
+          return null;
+        };
+        
+        const durations = calculateDurations();
+        if (!durations) {
+          // If durations not ready, wait a bit and try normal start
+          setTimeout(() => {
+            if (calculateDurations()) {
+              setIsPlayingTimeline(true);
+              isPlayingRef.current = true;
+              playAudioSequence(indicesWithAudio, 0);
+            }
+          }, 500);
+          return;
+        }
+        
+        setIsPlayingTimeline(true);
+        isPlayingRef.current = true;
+        
+        // If we were in a pause, continue to next item
+        if (isPausing || resumeTime === 0) {
+          setIsPausing(false);
+          if (pauseTimeoutRef.current) {
+            clearTimeout(pauseTimeoutRef.current);
+            pauseTimeoutRef.current = null;
+          }
+          if (pauseIntervalRef.current) {
+            clearInterval(pauseIntervalRef.current);
+            pauseIntervalRef.current = null;
+          }
+          // Continue from next item after pause
+          playAudioSequence(indicesWithAudio, resumeIndex + 1);
+        } else if (resumeTime > 0 && resumeItemIndex !== null) {
+          // Resume from specific time in current audio
+          const audioElement = audioRefs.current[resumeItemIndex];
+          if (audioElement) {
+            audioElement.currentTime = resumeTime;
+            setCurrentPlayingIndex(resumeItemIndex);
+            currentPlayingIndexRef.current = resumeItemIndex;
+            
+            // Set up event listener to continue after this audio ends
+            const handleEnded = () => {
+              audioElement.removeEventListener('ended', handleEnded);
+              const pauseDuration = pauses[resumeItemIndex] || 0;
+              if (pauseDuration > 0) {
+                setIsPausing(true);
+                const pauseStartTime = Date.now();
+                const pauseDurationSeconds = pauseDuration / 1000;
+                
+                pauseIntervalRef.current = setInterval(() => {
+                  if (!isPlayingRef.current) {
+                    if (pauseIntervalRef.current) {
+                      clearInterval(pauseIntervalRef.current);
+                      pauseIntervalRef.current = null;
+                    }
+                    setIsPausing(false);
+                    return;
+                  }
+                  
+                  const elapsedPause = (Date.now() - pauseStartTime) / 1000;
+                  const pauseProgress = Math.min(1, elapsedPause / pauseDurationSeconds);
+                  
+                  let currentTime = 0;
+                  const currentIdx = currentPlayingIndexRef.current;
+                  
+                  indicesWithAudioRef.current.forEach(idx => {
+                    if (currentIdx !== null && idx < currentIdx) {
+                      currentTime += durationsRef.current[idx] || 0;
+                      const pauseDur = pauses[idx] || 0;
+                      if (pauseDur > 0) {
+                        currentTime += pauseDur / 1000;
+                      }
+                    } else if (currentIdx !== null && idx === currentIdx) {
+                      currentTime += durationsRef.current[idx] || 0;
+                      if (idx === resumeItemIndex) {
+                        currentTime += pauseDurationSeconds * pauseProgress;
+                      }
+                    }
+                  });
+                  
+                  if (totalDurationRef.current > 0) {
+                    const progress = (currentTime / totalDurationRef.current) * 100;
+                    setTimelineProgress(Math.min(100, Math.max(0, progress)));
+                  }
+                }, 50);
+                
+                pauseTimeoutRef.current = setTimeout(() => {
+                  if (pauseIntervalRef.current) {
+                    clearInterval(pauseIntervalRef.current);
+                    pauseIntervalRef.current = null;
+                  }
+                  setIsPausing(false);
+                  const nextIndex = indicesWithAudio.indexOf(resumeItemIndex) + 1;
+                  if (nextIndex < indicesWithAudio.length) {
+                    playAudioSequence(indicesWithAudio, nextIndex);
+                  }
+                }, pauseDuration);
+              } else {
+                const nextIndex = indicesWithAudio.indexOf(resumeItemIndex) + 1;
+                if (nextIndex < indicesWithAudio.length) {
+                  playAudioSequence(indicesWithAudio, nextIndex);
+                }
+              }
+            };
+            
+            audioElement.addEventListener('ended', handleEnded);
+            
+            audioElement.play().catch(error => {
+              console.error('[CreateStory] Error resuming audio:', error);
+            });
+          } else {
+            // Audio element not found, continue from next
+            playAudioSequence(indicesWithAudio, resumeIndex + 1);
+          }
+        } else {
+          // Resume from next item
+          playAudioSequence(indicesWithAudio, resumeIndex);
+        }
+        
+        resumeStateRef.current = null;
+        return;
+      }
+      
+      // Calculate total duration - wait for metadata to load if needed
+      const calculateDurations = () => {
+        let totalDuration = 0;
+        const durations = {};
+        let allLoaded = true;
+        
+        indicesWithAudio.forEach(index => {
+          const audioElement = audioRefs.current[index];
+          if (audioElement) {
+            // Check if duration is available and valid
+            if (audioElement.duration && !isNaN(audioElement.duration) && isFinite(audioElement.duration) && audioElement.duration > 0) {
+              durations[index] = audioElement.duration;
+              totalDuration += audioElement.duration;
+              // Add pause duration after this item (except for last item)
+              const pauseDuration = pauses[index] || 0;
+              if (pauseDuration > 0) {
+                totalDuration += pauseDuration / 1000; // Convert ms to seconds
+              }
+              console.log(`[CreateStory] Audio ${index} duration: ${audioElement.duration}, pause: ${pauseDuration}ms`);
+            } else {
+              console.log(`[CreateStory] Audio ${index} duration not ready:`, audioElement.duration);
+              allLoaded = false;
+            }
+          } else {
+            console.log(`[CreateStory] Audio element ${index} not found`);
+            allLoaded = false;
+          }
+        });
+        
+        console.log('[CreateStory] Duration calculation:', {
+          allLoaded,
+          totalDuration,
+          durations,
+          audioElementsCount: Object.keys(audioRefs.current).length
+        });
+        
+        if (allLoaded && totalDuration > 0) {
+          totalDurationRef.current = totalDuration;
+          currentTimeRef.current = 0;
+          setTimelineProgress(0);
+          startProgressTracking(indicesWithAudio, durations);
+          return true;
+        }
+        return false;
+      };
+      
+      // Wait for all audio elements to load their metadata
+      const waitForMetadata = async () => {
+        let attempts = 0;
+        const maxAttempts = 20; // 2 seconds max wait
+        
+        while (attempts < maxAttempts) {
+          if (calculateDurations()) {
+            setIsPlayingTimeline(true);
+            isPlayingRef.current = true;
+            playAudioSequence(indicesWithAudio, 0);
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+          attempts++;
+        }
+        
+        // If still not loaded, start anyway with what we have
+        console.warn('[CreateStory] Some audio metadata not loaded, starting playback anyway');
+        const durations = {};
+        let totalDuration = 0;
+        indicesWithAudio.forEach(index => {
+          const audioElement = audioRefs.current[index];
+          if (audioElement && audioElement.duration && !isNaN(audioElement.duration)) {
+            durations[index] = audioElement.duration;
+            totalDuration += audioElement.duration;
+          } else {
+            durations[index] = 0; // Placeholder
+          }
+        });
+        totalDurationRef.current = totalDuration || 1; // Avoid division by zero
+        startProgressTracking(indicesWithAudio, durations);
+        setIsPlayingTimeline(true);
+        isPlayingRef.current = true;
+        playAudioSequence(indicesWithAudio, 0);
+      };
+      
+      waitForMetadata();
+    }
+  };
+
+  const startProgressTracking = (indicesWithAudio, durations) => {
+    // Store refs for use in interval
+    indicesWithAudioRef.current = indicesWithAudio;
+    durationsRef.current = durations;
+    
+    // Clear any existing interval
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+    
+    console.log('[CreateStory] Starting progress tracking:', {
+      indicesWithAudio,
+      durations,
+      totalDuration: totalDurationRef.current
+    });
+    
+    // Update progress every 100ms
+    progressIntervalRef.current = setInterval(() => {
+      if (!isPlayingRef.current) {
+        return;
+      }
+      
+      // Calculate current time across all files using ref for current index
+      let currentTime = 0;
+      const currentIndex = currentPlayingIndexRef.current;
+      
+      // Add time from completed files
+      indicesWithAudioRef.current.forEach(index => {
+        if (currentIndex !== null && index < currentIndex) {
+          const duration = durationsRef.current[index] || 0;
+          currentTime += duration;
+          // Add pause duration after this item
+          const pauseDuration = pauses[index] || 0;
+          if (pauseDuration > 0) {
+            currentTime += pauseDuration / 1000; // Convert ms to seconds
+          }
+        } else if (currentIndex !== null && index === currentIndex) {
+          // Add current time from currently playing file
+          const audioElement = audioRefs.current[index];
+          if (audioElement && !isNaN(audioElement.currentTime) && isFinite(audioElement.currentTime)) {
+            currentTime += audioElement.currentTime;
+          }
+        }
+      });
+      
+      currentTimeRef.current = currentTime;
+      
+      // Calculate progress percentage
+      if (totalDurationRef.current > 0) {
+        const progress = (currentTime / totalDurationRef.current) * 100;
+        setTimelineProgress(Math.min(100, Math.max(0, progress)));
+      }
+      
+      // If we've reached the end, stop tracking
+      if (currentTime >= totalDurationRef.current && totalDurationRef.current > 0) {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+          progressIntervalRef.current = null;
+        }
+      }
+    }, 100);
+  };
+
+  const playAudioSequence = (indices, currentIndex) => {
+    if (currentIndex >= indices.length) {
+      // Finished playing all audio
+      setIsPlayingTimeline(false);
+      isPlayingRef.current = false;
+      setCurrentPlayingIndex(null);
+      currentPlayingIndexRef.current = null;
+      setTimelineProgress(100);
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      return;
+    }
+    
+    const index = indices[currentIndex];
+    setCurrentPlayingIndex(index);
+    currentPlayingIndexRef.current = index;
+    
+    const audioElement = audioRefs.current[index];
+    if (audioElement) {
+      // Play this audio
+      const playPromise = audioElement.play();
+      
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            // Audio started playing successfully
+            console.log(`[CreateStory] Playing audio for item ${index}`);
+          })
+          .catch(error => {
+            console.error(`[CreateStory] Error playing audio for item ${index}:`, error);
+            // Continue to next audio even if this one fails
+            setTimeout(() => playAudioSequence(indices, currentIndex + 1), 100);
+          });
+      }
+      
+      // When this audio ends, play the next one (with pause if configured)
+      const handleEnded = () => {
+        audioElement.removeEventListener('ended', handleEnded);
+        // Check if there's a pause after this item
+        const pauseDuration = pauses[index] || 0;
+        if (pauseDuration > 0) {
+          // Set pausing state
+          setIsPausing(true);
+          const pauseStartTime = Date.now();
+          const pauseDurationSeconds = pauseDuration / 1000;
+          
+          // Update progress during pause
+          pauseIntervalRef.current = setInterval(() => {
+            if (!isPlayingRef.current) {
+              if (pauseIntervalRef.current) {
+                clearInterval(pauseIntervalRef.current);
+                pauseIntervalRef.current = null;
+              }
+              setIsPausing(false);
+              return;
+            }
+            
+            const elapsedPause = (Date.now() - pauseStartTime) / 1000;
+            const pauseProgress = Math.min(1, elapsedPause / pauseDurationSeconds);
+            
+            // Calculate current time including pause progress
+            let currentTime = 0;
+            const currentIdx = currentPlayingIndexRef.current;
+            
+            indicesWithAudioRef.current.forEach(idx => {
+              if (currentIdx !== null && idx < currentIdx) {
+                currentTime += durationsRef.current[idx] || 0;
+                const pauseDur = pauses[idx] || 0;
+                if (pauseDur > 0) {
+                  currentTime += pauseDur / 1000;
+                }
+              } else if (currentIdx !== null && idx === currentIdx) {
+                // Add full duration of current audio (it just finished)
+                currentTime += durationsRef.current[idx] || 0;
+                // Add pause progress
+                if (idx === index) {
+                  currentTime += pauseDurationSeconds * pauseProgress;
+                }
+              }
+            });
+            
+            if (totalDurationRef.current > 0) {
+              const progress = (currentTime / totalDurationRef.current) * 100;
+              setTimelineProgress(Math.min(100, Math.max(0, progress)));
+            }
+          }, 50); // Update every 50ms for smooth pause progress
+          
+          // Wait for pause duration before playing next
+          pauseTimeoutRef.current = setTimeout(() => {
+            if (pauseIntervalRef.current) {
+              clearInterval(pauseIntervalRef.current);
+              pauseIntervalRef.current = null;
+            }
+            setIsPausing(false);
+            playAudioSequence(indices, currentIndex + 1);
+          }, pauseDuration);
+        } else {
+          // Continue immediately to next audio
+          playAudioSequence(indices, currentIndex + 1);
+        }
+      };
+      audioElement.addEventListener('ended', handleEnded);
+    } else {
+      // If audio element not available, skip to next
+      console.warn(`[CreateStory] Audio element not available for item ${index}, skipping`);
+      setTimeout(() => playAudioSequence(indices, currentIndex + 1), 100);
+    }
   };
 
   const handleCreateAudio = async () => {
@@ -1093,6 +1788,22 @@ FAILURE CONDITIONS:
         <div className="create-story-timeline-footer">
           <div className="create-story-timeline-header">
             <h2>Timeline</h2>
+            <div className="create-story-timeline-header-buttons">
+              <button
+                className="create-story-timeline-play-btn"
+                onClick={handlePlayTimeline}
+                disabled={!screenplayData || !screenplayData.script || Object.keys(audioFiles).length === 0}
+              >
+                {isPlayingTimeline ? '⏸️ Pause' : '▶️ Play All'}
+              </button>
+              <button
+                className="create-story-timeline-build-btn"
+                onClick={handleBuild}
+                disabled={!screenplayData || !screenplayData.script || Object.keys(audioFiles).length === 0 || !storyId || !editMode}
+              >
+                🔨 Build
+              </button>
+            </div>
           </div>
           <div className="create-story-timeline-content">
             {screenplayData && screenplayData.script && screenplayData.script.length > 0 ? (
@@ -1116,24 +1827,125 @@ FAILURE CONDITIONS:
                 
                 return (
                   <div className="create-story-timeline-items">
-                    {itemsWithAudio.map(({ item, index, audioFile }) => {
+                    {itemsWithAudio.map(({ item, index, audioFile }, itemIndex) => {
                       const speaker = item.speaker || 'unknown';
                       const text = item.text || '';
+                      const isCurrentlyPlaying = currentPlayingIndex === index;
+                      const pauseDuration = pauses[index] || 0; // Pause after this item
+                      const pauseDurationSeconds = Math.floor(pauseDuration / 1000);
+                      const pauseDurationMs = pauseDuration % 1000;
                       
                       return (
-                        <div key={index} className="create-story-timeline-item">
-                          <div className="create-story-timeline-item-header">
-                            <span className="create-story-timeline-item-index">{index + 1}</span>
-                            <span className="create-story-timeline-item-speaker">{speaker.toUpperCase()}</span>
+                        <React.Fragment key={index}>
+                          <div className={`create-story-timeline-item ${isCurrentlyPlaying ? 'playing' : ''}`}>
+                            <div className="create-story-timeline-item-header">
+                              <span className="create-story-timeline-item-index">{index + 1}</span>
+                              <span className="create-story-timeline-item-speaker">{speaker.toUpperCase()}</span>
+                              {isCurrentlyPlaying && (
+                                <span className="create-story-timeline-item-playing-indicator">🔊</span>
+                              )}
+                              <div className="create-story-timeline-item-menu-container">
+                                <button
+                                  className="create-story-timeline-item-menu-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setTimelineMenuOpen(timelineMenuOpen === index ? null : index);
+                                  }}
+                                  title="Options"
+                                >
+                                  ⋮
+                                </button>
+                                {timelineMenuOpen === index && (
+                                  <div className="create-story-timeline-item-menu">
+                                    <button
+                                      className="create-story-timeline-item-menu-item"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveTimelineItem(index);
+                                        setTimelineMenuOpen(null);
+                                      }}
+                                    >
+                                      🗑️ Remove
+                                    </button>
+                                    <button
+                                      className="create-story-timeline-item-menu-item"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditTimelineItem(index, text);
+                                        setTimelineMenuOpen(null);
+                                      }}
+                                    >
+                                      ✏️ Edit
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="create-story-timeline-item-text">{text}</div>
+                            <div className="create-story-timeline-item-audio">
+                              <audio 
+                                ref={(el) => {
+                                  if (el) {
+                                    audioRefs.current[index] = el;
+                                    // Load metadata to get duration
+                                    el.addEventListener('loadedmetadata', () => {
+                                      // Duration is now available
+                                    });
+                                  } else {
+                                    delete audioRefs.current[index];
+                                  }
+                                }}
+                                controls 
+                                className="create-story-timeline-audio-player"
+                                onPlay={() => {
+                                  // If manually playing an audio, update current playing index
+                                  if (!isPlayingTimeline) {
+                                    setCurrentPlayingIndex(index);
+                                  }
+                                }}
+                                onPause={() => {
+                                  // If manually pausing, clear playing state if not in sequence mode
+                                  if (!isPlayingTimeline && currentPlayingIndex === index) {
+                                    setCurrentPlayingIndex(null);
+                                  }
+                                }}
+                                onLoadedMetadata={(e) => {
+                                  // Audio metadata loaded, duration is now available
+                                  const audioElement = e.target;
+                                  if (audioElement && audioElement.duration) {
+                                    // Duration is available for progress calculation
+                                  }
+                                }}
+                              >
+                                <source src={`/${audioFile.file_path}`} type="audio/mpeg" />
+                                Your browser does not support the audio element.
+                              </audio>
+                            </div>
                           </div>
-                          <div className="create-story-timeline-item-text">{text}</div>
-                          <div className="create-story-timeline-item-audio">
-                            <audio controls className="create-story-timeline-audio-player">
-                              <source src={`/${audioFile.file_path}`} type="audio/mpeg" />
-                              Your browser does not support the audio element.
-                            </audio>
-                          </div>
-                        </div>
+                          {/* Pause element between items (except after last item) */}
+                          {itemIndex < itemsWithAudio.length - 1 && (
+                            <div 
+                              className={`create-story-timeline-pause ${isPausing && currentPlayingIndex === index ? 'pausing' : ''}`}
+                              style={{ 
+                                width: `${Math.max(40, pauseDuration / 10)}px`,
+                                minWidth: '40px'
+                              }}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setEditingPause({ index, startX: e.clientX, startWidth: pauseDuration });
+                              }}
+                              title={`Pause: ${pauseDurationSeconds}s ${pauseDurationMs}ms (Drag to adjust)`}
+                            >
+                              <div className="create-story-timeline-pause-handle">
+                                <div className="create-story-timeline-pause-drag-indicator">⋮⋮</div>
+                                <div className="create-story-timeline-pause-duration">
+                                  {pauseDurationSeconds > 0 ? `${pauseDurationSeconds}s` : ''}
+                                  {pauseDurationMs > 0 ? ` ${pauseDurationMs}ms` : pauseDurationSeconds === 0 ? '0ms' : ''}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </div>
@@ -1142,6 +1954,17 @@ FAILURE CONDITIONS:
             ) : (
               <div className="create-story-timeline-empty">
                 <p>Generate screenplay and audio to see timeline</p>
+              </div>
+            )}
+            {/* Progress Bar */}
+            {screenplayData && screenplayData.script && Object.keys(audioFiles).length > 0 && (
+              <div className="create-story-timeline-progress-container">
+                <div className="create-story-timeline-progress-bar">
+                  <div 
+                    className="create-story-timeline-progress-fill"
+                    style={{ width: `${timelineProgress}%` }}
+                  ></div>
+                </div>
               </div>
             )}
           </div>
@@ -1180,6 +2003,98 @@ FAILURE CONDITIONS:
               </button>
               <button className="create-story-modal-save" onClick={handleSaveContext}>
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timeline Item Edit Modal */}
+      {editingTimelineItem && (
+        <div className="create-story-modal-overlay" onClick={handleCancelTimelineItemEdit}>
+          <div className="create-story-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="create-story-modal-header">
+              <h3>Edit Timeline Item</h3>
+              <button
+                className="create-story-modal-close"
+                onClick={handleCancelTimelineItemEdit}
+              >
+                ×
+              </button>
+            </div>
+            <div className="create-story-modal-content">
+              <div className="create-story-field">
+                <label className="create-story-label">Text</label>
+                <textarea
+                  className="create-story-input"
+                  value={timelineEditText}
+                  onChange={(e) => setTimelineEditText(e.target.value)}
+                  rows={6}
+                  placeholder="Enter text..."
+                />
+              </div>
+            </div>
+            <div className="create-story-modal-actions">
+              <button
+                className="create-story-modal-btn create-story-modal-cancel"
+                onClick={handleCancelTimelineItemEdit}
+              >
+                Cancel
+              </button>
+              <button
+                className="create-story-modal-btn create-story-modal-save"
+                onClick={handleSaveTimelineItemEdit}
+              >
+                Save & Regenerate Audio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Build Complete Modal */}
+      {buildCompleteModal && (
+        <div className="create-story-modal-overlay" onClick={() => setBuildCompleteModal(null)}>
+          <div className="create-story-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="create-story-modal-header">
+              <h3>Complete Audio Generated</h3>
+              <button
+                className="create-story-modal-close"
+                onClick={() => setBuildCompleteModal(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="create-story-modal-content">
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ marginBottom: '10px', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {buildCompleteModal.title}
+                  {buildCompleteModal.savedToDb && (
+                    <span style={{ color: '#16c782', fontSize: '1.5rem' }} title="Saved to database">✓</span>
+                  )}
+                </h4>
+                <p style={{ color: '#888', fontSize: '0.9rem', marginBottom: '10px' }}>
+                  Duration: {buildCompleteModal.duration}s
+                </p>
+                <p style={{ color: '#888', fontSize: '0.85rem' }}>
+                  File: {buildCompleteModal.filename}
+                </p>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '20px' }}>
+                <audio
+                  ref={buildAudioRef}
+                  src={buildCompleteModal.audioUrl}
+                  controls
+                  style={{ width: '100%', maxWidth: '500px' }}
+                />
+              </div>
+            </div>
+            <div className="create-story-modal-actions">
+              <button
+                className="create-story-modal-btn create-story-modal-save"
+                onClick={() => setBuildCompleteModal(null)}
+              >
+                Close
               </button>
             </div>
           </div>
