@@ -137,6 +137,36 @@ class AIService(BaseService):
             self.logger.warning(f"Could not get pre-context prompt from system config: {e}", exc_info=True)
         return None
     
+    async def _get_system_max_tokens(self) -> Optional[int]:
+        """Get max_tokens from system config."""
+        try:
+            from database.models import SystemConfig
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import select
+                result = await session.execute(
+                    select(SystemConfig).where(SystemConfig.config_key == "max_tokens")
+                )
+                system_config = result.scalar_one_or_none()
+                if system_config and system_config.config_value is not None:
+                    max_tokens = system_config.config_value
+                    # Handle both int and string formats
+                    if isinstance(max_tokens, (int, float)):
+                        max_tokens_int = int(max_tokens)
+                        if max_tokens_int > 0:
+                            self.logger.info(f"Found max_tokens in system config: {max_tokens_int}")
+                            return max_tokens_int
+                    elif isinstance(max_tokens, str):
+                        try:
+                            max_tokens_int = int(max_tokens)
+                            if max_tokens_int > 0:
+                                self.logger.info(f"Found max_tokens in system config: {max_tokens_int}")
+                                return max_tokens_int
+                        except (ValueError, TypeError):
+                            pass
+        except Exception as e:
+            self.logger.warning(f"Could not get max_tokens from system config: {e}", exc_info=True)
+        return None
+    
     async def _build_system_prompt_with_pre_context(self, user_id: Optional[int] = None) -> Optional[str]:
         """Build system prompt including pre-context prompt with user name."""
         system_prompt_parts = []
@@ -322,13 +352,18 @@ class AIService(BaseService):
                 except Exception as e:
                     self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
             
+            # Get max_tokens from input_data first, then check system config only if explicitly requested (for AI focus mode/test persona)
+            max_tokens_override = input_data.get("max_tokens")
+            if max_tokens_override is None and input_data.get("use_system_max_tokens"):
+                max_tokens_override = await self._get_system_max_tokens()
+            
             # Get persona settings or use defaults
             persona_settings = {}
             if self.persona_config and "anthropic" in self.persona_config:
                 anthropic_cfg = self.persona_config["anthropic"]
                 persona_settings = {
                     "model": anthropic_cfg.get("anthropic_model", settings.ai_model),
-                    "max_tokens": anthropic_cfg.get("max_tokens", 1024),
+                    "max_tokens": max_tokens_override if max_tokens_override is not None else anthropic_cfg.get("max_tokens", 1024),
                     "temperature": anthropic_cfg.get("temperature"),
                     "top_p": anthropic_cfg.get("top_p"),
                 }
@@ -338,7 +373,7 @@ class AIService(BaseService):
                 # Default behavior without persona
                 persona_settings = {
                     "model": settings.ai_model,
-                    "max_tokens": 1024
+                    "max_tokens": max_tokens_override if max_tokens_override is not None else 1024
                 }
             
             # Build system prompt with pre-context
@@ -566,14 +601,19 @@ class AIService(BaseService):
                             self.logger.warning(f"⚠️ ChatSession {session_id} found but user_id is {getattr(chat_session, 'user_id', 'N/A') if chat_session else 'session not found'}")
                 except Exception as e:
                     self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
-            
+
+            # Get max_tokens from input_data first, then check system config only if explicitly requested (for AI focus mode/test persona)
+            max_tokens_override = input_data.get("max_tokens")
+            if max_tokens_override is None and input_data.get("use_system_max_tokens"):
+                max_tokens_override = await self._get_system_max_tokens()
+
             # Get persona settings or use defaults
             persona_settings = {}
             if self.persona_config and "anthropic" in self.persona_config:
                 anthropic_cfg = self.persona_config["anthropic"]
                 persona_settings = {
                     "model": anthropic_cfg.get("anthropic_model", settings.ai_model),
-                    "max_tokens": anthropic_cfg.get("max_tokens", 1024),
+                    "max_tokens": max_tokens_override if max_tokens_override is not None else anthropic_cfg.get("max_tokens", 1024),
                     "temperature": anthropic_cfg.get("temperature"),
                     "top_p": anthropic_cfg.get("top_p"),
                 }
@@ -582,7 +622,7 @@ class AIService(BaseService):
             else:
                 persona_settings = {
                     "model": settings.ai_model,
-                    "max_tokens": 1024
+                    "max_tokens": max_tokens_override if max_tokens_override is not None else 1024
                 }
             
             # Build system prompt with pre-context

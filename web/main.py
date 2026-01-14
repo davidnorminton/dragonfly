@@ -730,7 +730,7 @@ async def ai_ask_question_stream(request: Request):
                 
                 logger.info(f"[AI ASK STREAM] 🚀 Starting text stream...")
                 
-                async for text_chunk in ai.async_stream_execute({"question": question}):
+                async for text_chunk in ai.async_stream_execute({"question": question, "use_system_max_tokens": True}):
                     chunk_count += 1
                     if first_chunk_time is None:
                         first_chunk_time = time.time() - start_time
@@ -1177,7 +1177,9 @@ async def ai_ask_question(request: Request):
             import time
             start_time = time.time()
             
-            result = await ai.execute({"question": question})
+            # Check if this is a test persona call (has persona parameter) - use system max_tokens
+            use_system_max_tokens = bool(persona_name)
+            result = await ai.execute({"question": question, "use_system_max_tokens": use_system_max_tokens})
             
             elapsed = time.time() - start_time
             logger.info(f"[AI ASK] Response in {elapsed:.2f}s, has_answer={bool(result.get('answer'))}")
@@ -1609,8 +1611,10 @@ async def ai_ask_question_audio(request: Request):
                 logger.info("[AI ASK AUDIO] Calling AIService")
                 from services.ai_service import AIService
                 ai = AIService()
-                
-                result = await ai.execute({"question": question})
+
+                # Check if this is a test persona call (has persona parameter) - use system max_tokens
+                use_system_max_tokens = bool(persona_name)
+                result = await ai.execute({"question": question, "use_system_max_tokens": use_system_max_tokens})
                 
                 ai_time = time.time() - start_time
                 logger.info(f"[AI ASK AUDIO] AI response in {ai_time:.2f}s, has_answer={bool(result.get('answer'))}")

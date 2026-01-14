@@ -2493,6 +2493,26 @@ export function SettingsPage({ onNavigate }) {
                       This prompt will be prepended to all persona system prompts. The {"{user_name}"} placeholder will be automatically replaced with the actual user's name from the database.
                     </span>
                   </div>
+                  <div className="form-group">
+                    <label>
+                      Max Tokens (for AI Focus Mode and Test Persona)
+                      <span className="field-hint">
+                        Maximum number of tokens for AI responses in AI Focus Mode and Test Persona modal. Default: 1024
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      value={systemFields.max_tokens || ''}
+                      onChange={(e) => updateSystemField('max_tokens', parseInt(e.target.value) || 1024)}
+                      className="config-input"
+                      min="1"
+                      max="4096"
+                      placeholder="1024"
+                    />
+                    <span className="form-help">
+                      Controls the maximum length of AI responses in AI Focus Mode and Test Persona modal.
+                    </span>
+                  </div>
                   </div>
                   )}
                 </div>
