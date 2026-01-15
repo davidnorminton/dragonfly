@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { usePersonas } from '../hooks/usePersonas';
 import { getProfileImageUrl } from '../utils/profileImageHelper';
 
-export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, onAiFocusClick, selectedUser, onSearchClick }) {
+export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, selectedUser, onSearchClick }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [mediaMenuOpen, setMediaMenuOpen] = useState(false);
+  const [funMenuOpen, setFunMenuOpen] = useState(false);
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
   const { currentTitle } = usePersonas();
   
   // Check if selected user is an admin
@@ -28,6 +31,13 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
       document.removeEventListener('MSFullscreenChange', checkFullscreen);
     };
   }, []);
+
+  // Close all submenus
+  const closeAllSubmenus = () => {
+    setMediaMenuOpen(false);
+    setFunMenuOpen(false);
+    setToolsMenuOpen(false);
+  };
 
   // Toggle fullscreen
   const toggleFullscreen = async () => {
@@ -65,7 +75,10 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
       {isAdmin && (
         <button
           className={`side-nav-button ${activePage === 'dashboard' ? 'active' : ''}`}
-          onClick={() => onNavigate?.('dashboard')}
+          onClick={() => {
+            closeAllSubmenus();
+            onNavigate?.('dashboard');
+          }}
           title="Home"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
@@ -76,7 +89,10 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
 
       <button
         className={`side-nav-button ${activePage === 'chat' ? 'active' : ''}`}
-        onClick={() => onNavigate?.('chat')}
+        onClick={() => {
+          closeAllSubmenus();
+          onNavigate?.('chat');
+        }}
         title="Chat"
         style={{
           width: '44px',
@@ -109,150 +125,199 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
         </svg>
       </button>
 
+      {/* Media Menu Button */}
       <button
-        className={`side-nav-button ${activePage === 'music' ? 'active' : ''}`}
-        onClick={() => onNavigate?.('music')}
-        title="Music"
+        className={`side-nav-button ${mediaMenuOpen ? 'active' : ''}`}
+        onClick={() => {
+          const wasOpen = mediaMenuOpen;
+          setFunMenuOpen(false);
+          setToolsMenuOpen(false);
+          if (!wasOpen) {
+            setMediaMenuOpen(true);
+          } else {
+            setMediaMenuOpen(false);
+          }
+        }}
+        title="Media"
         style={{
           width: '44px',
           height: '44px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: activePage === 'music' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+          background: mediaMenuOpen ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
           border: 'none',
           borderRadius: '8px',
           cursor: 'pointer',
-          color: activePage === 'music' ? '#fff' : '#9da7b8',
-          transition: 'all 0.2s ease'
+          color: mediaMenuOpen ? '#fff' : '#9da7b8',
+          transition: 'all 0.2s ease',
+          position: 'relative'
         }}
         onMouseEnter={(e) => {
-          if (activePage !== 'music') {
+          if (!mediaMenuOpen) {
             e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
             e.currentTarget.style.color = '#fff';
           }
         }}
         onMouseLeave={(e) => {
-          if (activePage !== 'music') {
+          if (!mediaMenuOpen) {
             e.currentTarget.style.background = 'transparent';
             e.currentTarget.style.color = '#9da7b8';
           }
         }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9h-4v4h-2v-4H9V9h4V5h2v4h4v2z"/>
         </svg>
       </button>
 
-      <button
-        className={`side-nav-button ${activePage === 'videos' ? 'active' : ''}`}
-        onClick={() => onNavigate?.('videos')}
-        title="Videos"
-        style={{
-          width: '44px',
-          height: '44px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: activePage === 'videos' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          color: activePage === 'videos' ? '#fff' : '#9da7b8',
-          transition: 'all 0.2s ease'
-        }}
-        onMouseEnter={(e) => {
-          if (activePage !== 'videos') {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-            e.currentTarget.style.color = '#fff';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (activePage !== 'videos') {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = '#9da7b8';
-          }
-        }}
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
-        </svg>
-      </button>
+      {/* Media Submenu */}
+      {mediaMenuOpen && (
+        <div className="side-nav-media-submenu">
+          <div className="side-nav-media-submenu-header">
+            <h3>Media</h3>
+            <button
+              className="side-nav-media-submenu-close"
+              onClick={() => setMediaMenuOpen(false)}
+              title="Close"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+              </svg>
+            </button>
+          </div>
+          <div className="side-nav-media-submenu-items">
+            <button
+              className={`side-nav-media-submenu-item ${activePage === 'music' ? 'active' : ''}`}
+              onClick={() => {
+                closeAllSubmenus();
+                onNavigate?.('music');
+              }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+              </svg>
+              <span>Music</span>
+            </button>
+            <button
+              className={`side-nav-media-submenu-item ${activePage === 'videos' ? 'active' : ''}`}
+              onClick={() => {
+                closeAllSubmenus();
+                onNavigate?.('videos');
+              }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+              </svg>
+              <span>Movies</span>
+            </button>
+            {isAdmin && (
+              <button
+                className={`side-nav-media-submenu-item ${activePage === 'news' ? 'active' : ''}`}
+                onClick={() => {
+                  setMediaMenuOpen(false);
+                  onNavigate?.('news');
+                }}
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                </svg>
+                <span>News</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* News - Admin only */}
+      {/* Fun Menu Button */}
       {isAdmin && (
         <button
-          className={`side-nav-button ${activePage === 'news' ? 'active' : ''}`}
-          onClick={() => onNavigate?.('news')}
-          title="News"
+          className={`side-nav-button ${funMenuOpen ? 'active' : ''}`}
+          onClick={() => {
+            const wasOpen = funMenuOpen;
+            closeAllSubmenus();
+            if (!wasOpen) {
+              setFunMenuOpen(true);
+            }
+          }}
+          title="Fun"
           style={{
             width: '44px',
             height: '44px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: activePage === 'news' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+            background: funMenuOpen ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
             border: 'none',
             borderRadius: '8px',
             cursor: 'pointer',
-            color: activePage === 'news' ? '#fff' : '#9da7b8',
-            transition: 'all 0.2s ease'
+            color: funMenuOpen ? '#fff' : '#9da7b8',
+            transition: 'all 0.2s ease',
+            position: 'relative'
           }}
           onMouseEnter={(e) => {
-            if (activePage !== 'news') {
+            if (!funMenuOpen) {
               e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
               e.currentTarget.style.color = '#fff';
             }
           }}
           onMouseLeave={(e) => {
-            if (activePage !== 'news') {
+            if (!funMenuOpen) {
               e.currentTarget.style.background = 'transparent';
               e.currentTarget.style.color = '#9da7b8';
             }
           }}
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
           </svg>
         </button>
       )}
 
-      {/* Stories - Admin only */}
-      {isAdmin && (
-        <button
-          className={`side-nav-button ${activePage === 'stories' || activePage === 'create-story' ? 'active' : ''}`}
-          onClick={() => onNavigate?.('stories')}
-          title="Stories"
-          style={{
-            width: '44px',
-            height: '44px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: (activePage === 'stories' || activePage === 'create-story') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            color: (activePage === 'stories' || activePage === 'create-story') ? '#fff' : '#9da7b8',
-            transition: 'all 0.2s ease'
-          }}
-          onMouseEnter={(e) => {
-            if (activePage !== 'stories' && activePage !== 'create-story') {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-              e.currentTarget.style.color = '#fff';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (activePage !== 'stories' && activePage !== 'create-story') {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = '#9da7b8';
-            }
-          }}
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
-          </svg>
-        </button>
+      {/* Fun Submenu */}
+      {funMenuOpen && (
+        <div className="side-nav-fun-submenu">
+          <div className="side-nav-fun-submenu-header">
+            <h3>Fun</h3>
+            <button
+              className="side-nav-fun-submenu-close"
+              onClick={closeAllSubmenus}
+              title="Close"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+              </svg>
+            </button>
+          </div>
+          <div className="side-nav-fun-submenu-items">
+            <button
+              className={`side-nav-fun-submenu-item ${activePage === 'stories' || activePage === 'create-story' ? 'active' : ''}`}
+              onClick={() => {
+                closeAllSubmenus();
+                onNavigate?.('stories');
+              }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+              </svg>
+              <span>Stories</span>
+            </button>
+            <button
+              className="side-nav-fun-submenu-item"
+              onClick={() => {
+                closeAllSubmenus();
+                // Placeholder for games - no navigation yet
+              }}
+              style={{ opacity: 0.5, cursor: 'not-allowed' }}
+              disabled
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M15.5 12c0 .38-.21.71-.53.88l-3.17 1.83c-.16.09-.33.13-.5.13s-.34-.04-.5-.13l-3.17-1.83c-.32-.17-.53-.5-.53-.88V8.12c0-.38.21-.71.53-.88l3.17-1.83c.16-.09.33-.13.5-.13s.34.04.5.13l3.17 1.83c.32.17.53.5.53.88V12zm-4-2.5l2.5 1.44-2.5 1.44v-2.88z"/>
+              </svg>
+              <span>Games</span>
+            </button>
+          </div>
+        </div>
       )}
 
       <div style={{ flex: 1 }} />
@@ -266,6 +331,7 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
             <button
               className="side-nav-button"
               onClick={() => {
+                closeAllSubmenus();
                 // Toggle search overlay (don't close if clicking search icon)
                 if (onSearchClick) {
                   onSearchClick();
@@ -285,24 +351,13 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
 
 
       <button
-        className="side-nav-button"
-        onClick={toggleFullscreen}
-        title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-      >
-        {isFullscreen ? (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
-          </svg>
-        ) : (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
-          </svg>
-        )}
-      </button>
-
-      <button
-        className="side-nav-button"
-        onClick={onAiFocusClick || (() => {})}
+        className={`side-nav-button ${activePage === 'ai-focus' ? 'active' : ''}`}
+        onClick={() => {
+          closeAllSubmenus();
+          if (onNavigate) {
+            onNavigate('ai-focus');
+          }
+        }}
         title="AI Focus Mode"
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
@@ -310,22 +365,112 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
         </svg>
       </button>
 
+      {/* Tools Menu Button */}
+      <button
+        className={`side-nav-button ${toolsMenuOpen ? 'active' : ''}`}
+        onClick={() => {
+          const wasOpen = toolsMenuOpen;
+          closeAllSubmenus();
+          if (!wasOpen) {
+            setToolsMenuOpen(true);
+          }
+        }}
+        title="Tools"
+        style={{
+          width: '44px',
+          height: '44px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: toolsMenuOpen ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+          border: 'none',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          color: toolsMenuOpen ? '#fff' : '#9da7b8',
+          transition: 'all 0.2s ease',
+          position: 'relative'
+        }}
+        onMouseEnter={(e) => {
+          if (!toolsMenuOpen) {
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+            e.currentTarget.style.color = '#fff';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!toolsMenuOpen) {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = '#9da7b8';
+          }
+        }}
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/>
+        </svg>
+      </button>
+
+      {/* Tools Submenu */}
+      {toolsMenuOpen && (
+        <div className="side-nav-tools-submenu">
+          <div className="side-nav-tools-submenu-header">
+            <h3>Tools</h3>
+            <button
+              className="side-nav-tools-submenu-close"
+              onClick={closeAllSubmenus}
+              title="Close"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+              </svg>
+            </button>
+          </div>
+          <div className="side-nav-tools-submenu-items">
+            <button
+              className="side-nav-tools-submenu-item"
+              onClick={() => {
+                closeAllSubmenus();
+                toggleFullscreen();
+              }}
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            >
+              {isFullscreen ? (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
+                </svg>
+              ) : (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+                </svg>
+              )}
+              <span>{isFullscreen ? "Exit Fullscreen" : "Fullscreen"}</span>
+            </button>
+            {isAdmin && (
+              <button
+                className={`side-nav-tools-submenu-item ${activePage === 'alerts' ? 'active' : ''}`}
+                onClick={() => {
+                  closeAllSubmenus();
+                  onNavigate?.('alerts');
+                }}
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
+                </svg>
+                <span>Alerts</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Admin-only controls */}
       {isAdmin && (
         <>
-          <button
-            className={`side-nav-button ${activePage === 'alerts' ? 'active' : ''}`}
-            onClick={() => onNavigate?.('alerts')}
-            title="Alerts"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
-            </svg>
-          </button>
 
           <button
             className={`side-nav-button ${activePage === 'settings' ? 'active' : ''}`}
-            onClick={onSettingsClick}
+            onClick={() => {
+              closeAllSubmenus();
+              if (onSettingsClick) onSettingsClick();
+            }}
             title="Settings"
           >
             <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
@@ -339,7 +484,10 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, o
       {/* Selected User Profile Picture at Bottom */}
       <div
         className="side-nav-profile"
-        onClick={() => onNavigate?.('users')}
+        onClick={() => {
+          closeAllSubmenus();
+          onNavigate?.('users');
+        }}
         title={selectedUser ? `${selectedUser.name} - Click to go to Users` : 'No user selected - Click to go to Users'}
       >
         {(() => {
