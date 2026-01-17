@@ -22,11 +22,12 @@ import os
 import soundfile as sf
 import numpy as np
 import os.path
+import shutil
 from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -63,6 +64,37 @@ from datetime import datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dragonfly Home Assistant")
+
+# Global Faster Whisper model cache (loaded once, reused)
+_faster_whisper_model = None
+_faster_whisper_lock = threading.Lock()
+
+def get_faster_whisper_model():
+    """Get or initialize the Faster Whisper model (thread-safe, cached)."""
+    global _faster_whisper_model
+    
+    if _faster_whisper_model is None:
+        with _faster_whisper_lock:
+            # Double-check after acquiring lock
+            if _faster_whisper_model is None:
+                try:
+                    from faster_whisper import WhisperModel
+                    logger.info("[TRANSCRIBE] Loading Faster Whisper model (first time, this may take 10-30 seconds)...")
+                    start = time.time()
+                    _faster_whisper_model = WhisperModel(
+                        "base.en",
+                        device="cpu",
+                        compute_type="int8",
+                        num_workers=2
+                    )
+                    elapsed = (time.time() - start) * 1000
+                    logger.info(f"[TRANSCRIBE] ✓ Faster Whisper model loaded in {elapsed:.0f}ms")
+                except ImportError:
+                    logger.warning("[TRANSCRIBE] Faster Whisper not installed")
+                except Exception as e:
+                    logger.error(f"[TRANSCRIBE] Failed to load Faster Whisper model: {e}")
+    
+    return _faster_whisper_model
 
 # Background tasks for Octopus Energy
 _octopus_tasks_running = False
@@ -1243,17 +1275,32 @@ async def ai_ask_question(request: Request):
 async def generate_chat_title(session_id: str):
     """Generate a title for a chat session using AI based on conversation context.
     Works for both regular chat sessions (chat-*) and AI focus sessions (ai-focus-*).
+    Also handles legacy session IDs that might have mode/expertType suffixes.
     """
     try:
         logger.info(f"[GENERATE TITLE] Generating title for session: {session_id}")
         async with AsyncSessionLocal() as session:
-            # Get all messages from this conversation (works for both chat-* and ai-focus-* session IDs)
+            # Get all messages from this conversation
+            # First try exact match
             result = await session.execute(
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
                 .order_by(ChatMessage.created_at)
             )
             messages = result.scalars().all()
+            
+            # If no messages found with exact match, try to find messages that start with this session_id
+            # This handles cases where messages might be saved with mode/expertType suffixes
+            if not messages and session_id.startswith('chat-'):
+                logger.info(f"[GENERATE TITLE] No exact match, trying prefix match for {session_id}")
+                result = await session.execute(
+                    select(ChatMessage)
+                    .where(ChatMessage.session_id.like(f"{session_id}_%"))
+                    .order_by(ChatMessage.created_at)
+                )
+                messages = result.scalars().all()
+                if messages:
+                    logger.info(f"[GENERATE TITLE] Found {len(messages)} messages with prefix match")
             
             logger.info(f"[GENERATE TITLE] Found {len(messages)} messages for session {session_id}")
             
@@ -1841,7 +1888,7 @@ async def ai_ask_question_audio(request: Request):
                 logger.info("[AI ASK AUDIO] Calling AIService")
                 from services.ai_service import AIService
                 ai = AIService()
-
+                
                 # Check if this is a test persona call (has persona parameter) - use system max_tokens
                 use_system_max_tokens = bool(persona_name)
                 result = await ai.execute({"question": question, "use_system_max_tokens": use_system_max_tokens})
@@ -12593,101 +12640,149 @@ async def summarize_article(request: Request):
 @app.post("/api/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
     """
-    Transcribe audio offline using Vosk if a model is present at models/vosk/*.
-    If Vosk model is missing, falls back to Whisper if openai_api_key is set.
-    Otherwise returns a placeholder transcript.
+    Transcribe audio using Faster Whisper (primary) or Vosk (fallback).
+    Priority: Faster Whisper → Vosk
     """
+    import time
+    
     try:
         content = await file.read()
-
-        # Try Vosk offline (local-only)
+        start_time = time.time()
+        
         transcript_text = None
-        placeholder = False
+        provider = None
+        latency_ms = 0.0
         vosk_raw = None
-        selected_model = None
+        
+        # Try Faster Whisper first (1.5-2.5x faster than Vosk)
+        try:
+            logger.info("[TRANSCRIBE] Attempting Faster Whisper...")
+            
+            # Get cached model (loads once, then reused)
+            model = get_faster_whisper_model()
+            
+            if model is None:
+                raise Exception("Faster Whisper model not available")
+            
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(suffix=os.path.splitext(file.filename)[1] or '.webm', delete=False) as f:
+                f.write(content)
+                temp_path = f.name
+            
+            try:
+                # Transcribe (model already loaded, this is fast!)
+                segments, info = model.transcribe(
+                    temp_path,
+                    beam_size=5,
+                    language="en",
+                    vad_filter=True,  # Voice activity detection for better accuracy
+                )
+                
+                # Combine segments
+                transcript_text = " ".join([segment.text for segment in segments]).strip()
+                latency_ms = (time.time() - start_time) * 1000
+                provider = "faster-whisper"
+                
+                logger.info(f"[TRANSCRIBE] ✓ Faster Whisper success: {latency_ms:.0f}ms")
+                
+            finally:
+                # Cleanup temp file
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                    
+        except ImportError:
+            logger.debug("[TRANSCRIBE] Faster Whisper not installed")
+        except Exception as e:
+            logger.warning(f"[TRANSCRIBE] Faster Whisper failed: {e}")
+        
+        # Fallback to Vosk if Faster Whisper didn't work
+        if not transcript_text:
+            try:
+                from vosk import Model, KaldiRecognizer
+                import wave
+                import json as _json
+                
+                logger.info("[TRANSCRIBE] Falling back to Vosk...")
+                
+                model_root = os.path.join(os.path.dirname(__file__), "..", "models", "vosk")
+                preferred = os.path.join(model_root, "vosk-model-en-us-0.22")
+                selected_model = None
+                
+                if os.path.isdir(preferred):
+                    selected_model = preferred
+                elif os.path.isdir(model_root):
+                    entries = [os.path.join(model_root, d) for d in os.listdir(model_root)]
+                    dirs = [d for d in entries if os.path.isdir(d)]
+                    if dirs:
+                        selected_model = dirs[0]
+                
+                if selected_model and os.path.isdir(selected_model):
+                    logger.info(f"[TRANSCRIBE] Using Vosk model: {selected_model}")
+                    model = Model(selected_model)
+                    
+                    # Convert to 16k mono PCM
+                    wav_bytes = await _ensure_wav_16k_mono(content, file.filename or "audio.webm")
+                    wf = wave.open(io.BytesIO(wav_bytes), "rb")
+                    rec = KaldiRecognizer(model, wf.getframerate())
+                    
+                    while True:
+                        data = wf.readframes(4000)
+                        if len(data) == 0:
+                            break
+                        rec.AcceptWaveform(data)
+                    
+                    result = rec.FinalResult()
+                    vosk_raw = result
+                    transcript_text = _json.loads(result).get("text", "").strip()
+                    latency_ms = (time.time() - start_time) * 1000
+                    provider = "vosk"
+                    
+                    logger.info(f"[TRANSCRIBE] ✓ Vosk success: {latency_ms:.0f}ms")
+                else:
+                    logger.warning(f"[TRANSCRIBE] Vosk model not found at {model_root}")
+                    
+            except Exception as e:
+                logger.warning(f"[TRANSCRIBE] Vosk failed: {e}")
+        
+        # Return error if all providers failed
+        if not transcript_text:
+            return {
+                "success": False,
+                "error": "No transcript available (all providers failed).",
+                "provider": provider,
+                "latency_ms": latency_ms,
+            }
+        
+        # Run router model on the transcript (Anthropic)
         router_answer = None
         router_parsed = None
         router_error = None
         router_model = None
         router_prompt = None
-
-        try:
-            from vosk import Model, KaldiRecognizer
-            model_root = os.path.join(os.path.dirname(__file__), "..", "models", "vosk")
-            preferred = os.path.join(model_root, "vosk-model-en-us-0.22")
-            if os.path.isdir(preferred):
-                selected_model = preferred
-            elif os.path.isdir(model_root):
-                entries = [os.path.join(model_root, d) for d in os.listdir(model_root)]
-                dirs = [d for d in entries if os.path.isdir(d)]
-                if dirs:
-                    selected_model = dirs[0]
-            if selected_model and os.path.isdir(selected_model):
-                logger.info(f"Using Vosk model: {selected_model}")
-                model = Model(selected_model)
-                # Convert to 16k mono PCM using ffmpeg or soundfile
-                wav_bytes = await _ensure_wav_16k_mono(content, file.filename or "audio.webm")
-                import wave
-                wf = wave.open(io.BytesIO(wav_bytes), "rb")
-                rec = KaldiRecognizer(model, wf.getframerate())
-                while True:
-                    data = wf.readframes(4000)
-                    if len(data) == 0:
-                        break
-                    rec.AcceptWaveform(data)
-                result = rec.FinalResult()
-                vosk_raw = result
-                try:
-                    import json as _json
-                    transcript_text = _json.loads(result).get("text", "").strip()
-                except Exception:
-                    transcript_text = None
-                if transcript_text and transcript_text.strip() == "":
-                    transcript_text = None
-            else:
-                logger.warning("Vosk model not found at %s", model_root)
-        except Exception as e:
-            logger.warning(f"Vosk transcription failed or model missing: {e}")
-
-        # Last resort
-        if not transcript_text:
-            return {
-                "success": False,
-                "error": "No transcript available (Vosk returned no text).",
-                "model_used": selected_model,
-                "vosk_raw": vosk_raw,
-            }
-
-        # Run router model on the transcript (Anthropic)
+        
         try:
             cfg = await load_router_config() or {}
             anth_cfg = cfg.get("anthropic", {}) if isinstance(cfg, dict) else {}
             router_model = anth_cfg.get("anthropic_model", settings.ai_model)
             router_prompt = anth_cfg.get("prompt_context")
-            logger.info(
-                "Router call: model=%s, prompt_snippet=%s, input=%s",
-                router_model,
-                (router_prompt[:200] + "...") if router_prompt and len(router_prompt) > 200 else router_prompt,
-                transcript_text,
-            )
+            
             router_answer = await _run_router_inference(transcript_text)
             router_parsed = _parse_router_answer(router_answer)
-            logger.info(
-                "Router result: output=%s parsed=%s",
-                router_answer,
-                router_parsed,
-            )
+            
             if not router_answer:
-                router_error = router_error or "Router returned no content"
+                router_error = "Router returned no content"
         except Exception as e:
-            logger.warning(f"Router inference failed: {e}")
+            logger.warning(f"[TRANSCRIBE] Router inference failed: {e}")
             router_error = str(e)
-
+        
         return {
             "success": True,
             "transcript": transcript_text,
             "placeholder": False,
-            "model_used": selected_model,
+            "provider": provider,
+            "latency_ms": latency_ms,
             "vosk_raw": vosk_raw,
             "router_answer": router_answer,
             "router_parsed": router_parsed,
@@ -12696,8 +12791,9 @@ async def transcribe_audio(file: UploadFile = File(...)):
             "router_prompt": router_prompt,
             "router_input": transcript_text,
         }
+        
     except Exception as e:
-        logger.error(f"Error transcribing audio: {e}", exc_info=True)
+        logger.error(f"[TRANSCRIBE] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Transcription failed")
 
 
@@ -12808,7 +12904,7 @@ async def generate_screenplay(request: Request):
         payload = await request.json()
         question = payload.get("question", "")
         system_prompt = payload.get("system_prompt", "")
-        max_tokens = payload.get("max_tokens", 4096)
+        max_tokens = payload.get("max_tokens", 3072)  # Reduced from 4096 to 3072 for better performance
         
         if not question:
             return JSONResponse(
@@ -12854,6 +12950,59 @@ async def generate_screenplay(request: Request):
         logger.error(f"[GENERATE SCREENPLAY] Error: {e}", exc_info=True)
         return JSONResponse(
             status_code=200,
+            content={"success": False, "error": str(e)}
+        )
+
+@app.post("/api/ai/generate-screenplay-stream")
+async def generate_screenplay_stream(request: Request):
+    """Generate a screenplay using streaming - returns text chunks as they're generated."""
+    try:
+        payload = await request.json()
+        question = payload.get("question", "")
+        system_prompt = payload.get("system_prompt", "")
+        max_tokens = payload.get("max_tokens", 3072)  # Reduced from 4096 to 3072 for better performance
+        
+        if not question:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "No question provided"}
+            )
+        
+        logger.info(f"[GENERATE SCREENPLAY STREAM] Generating screenplay (question length: {len(question)}, max_tokens: {max_tokens})")
+        
+        from services.ai_service import AIService
+        ai_service = AIService()
+        
+        async def text_stream_generator():
+            try:
+                async for text_chunk in ai_service.stream_execute_with_system_prompt(
+                    question=question,
+                    system_prompt=system_prompt or "You are a professional screenwriter. Create screenplays based on provided plots and character descriptions.",
+                    max_tokens=max_tokens
+                ):
+                    # Yield each chunk as it arrives
+                    yield f"data: {json.dumps({'chunk': text_chunk})}\n\n"
+                
+                # Send completion marker
+                yield f"data: {json.dumps({'done': True})}\n\n"
+            except Exception as e:
+                logger.error(f"[GENERATE SCREENPLAY STREAM] Error during streaming: {e}", exc_info=True)
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        
+        return StreamingResponse(
+            text_stream_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"[GENERATE SCREENPLAY STREAM] Error: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
             content={"success": False, "error": str(e)}
         )
 
@@ -13856,6 +14005,452 @@ async def get_complete_stories():
             }
         )
 
+@app.delete("/api/stories/complete/{story_id}")
+async def delete_complete_story(story_id: int, request: Request):
+    """Delete a complete story, its data, and audio file. Admin only."""
+    try:
+        # Get user_id from request body
+        try:
+            data = await request.json()
+        except:
+            data = {}
+        user_id = data.get("user_id")
+        
+        # Check if user is admin
+        if user_id:
+            async with AsyncSessionLocal() as session:
+                user_result = await session.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                if not user or not user.is_admin:
+                    raise HTTPException(status_code=403, detail="Admin access required")
+        else:
+            # If no user_id provided, require admin check via other means
+            # For now, we'll allow deletion but log a warning
+            logger.warning(f"[DELETE STORY] No user_id provided for story deletion: {story_id}")
+        
+        project_root = Path(__file__).parent.parent
+        
+        async with AsyncSessionLocal() as session:
+            # Get the story
+            story_result = await session.execute(
+                select(StoryComplete).where(StoryComplete.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            # Get audio file path
+            audio_path = story.audio
+            if audio_path:
+                # Convert relative path to absolute
+                if audio_path.startswith("data/"):
+                    audio_file = project_root / audio_path
+                else:
+                    audio_file = project_root / "data" / audio_path.lstrip("/")
+                
+                # Delete audio file if it exists
+                if audio_file.exists():
+                    try:
+                        audio_file.unlink()
+                        logger.info(f"[DELETE STORY] Deleted audio file: {audio_file}")
+                    except Exception as e:
+                        logger.error(f"[DELETE STORY] Error deleting audio file {audio_file}: {e}", exc_info=True)
+                        # Continue with database deletion even if file deletion fails
+            
+            # Delete the database record
+            await session.delete(story)
+            await session.commit()
+            
+            logger.info(f"[DELETE STORY] Successfully deleted story {story_id}: {story.title}")
+            
+            return {
+                "success": True,
+                "message": f"Story '{story.title}' deleted successfully"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting complete story: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error deleting story: {str(e)}")
+
+@app.delete("/api/stories/{story_id}")
+async def delete_story(story_id: int, request: Request):
+    """Delete a story, its data, screenplay versions, cast, and audio files. Admin only."""
+    try:
+        import shutil
+        
+        # Get user_id from request body (DELETE requests can have a body)
+        user_id = None
+        try:
+            body = await request.body()
+            if body:
+                data = json.loads(body)
+                user_id = data.get("user_id")
+        except:
+            pass
+        
+        # Check if user is admin
+        if user_id:
+            async with AsyncSessionLocal() as session:
+                user_result = await session.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                if not user or not user.is_admin:
+                    raise HTTPException(status_code=403, detail="Admin access required")
+        else:
+            logger.warning(f"[DELETE STORY] No user_id provided for story deletion: {story_id}")
+        
+        project_root = Path(__file__).parent.parent
+        
+        async with AsyncSessionLocal() as session:
+            # Get the story
+            story_result = await session.execute(
+                select(Story).where(Story.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            story_title = story.title
+            plot_id_to_check = story.plot_id
+            
+            # Delete audio files directory if it exists
+            story_audio_dir = project_root / "data" / "story" / str(story_id)
+            if story_audio_dir.exists():
+                try:
+                    shutil.rmtree(story_audio_dir)
+                    logger.info(f"[DELETE STORY] Deleted audio directory: {story_audio_dir}")
+                except Exception as e:
+                    logger.error(f"[DELETE STORY] Error deleting audio directory {story_audio_dir}: {e}", exc_info=True)
+            
+            # Delete screenplay versions
+            await session.execute(
+                delete(StoryScreenplayVersion).where(StoryScreenplayVersion.story_id == story_id)
+            )
+            logger.info(f"[DELETE STORY] Deleted screenplay versions for story {story_id}")
+            
+            # Delete story cast
+            await session.execute(
+                delete(StoryCast).where(StoryCast.story_id == story_id)
+            )
+            logger.info(f"[DELETE STORY] Deleted cast for story {story_id}")
+            
+            # Delete the story record first
+            await session.delete(story)
+            await session.flush()  # Flush to ensure story is deleted before checking plot usage
+            
+            # Delete plot if it exists and is not used by other stories
+            if plot_id_to_check:
+                plot_count_result = await session.execute(
+                    select(func.count(Story.id)).where(Story.plot_id == plot_id_to_check)
+                )
+                plot_count = plot_count_result.scalar()
+                if plot_count == 0:  # No stories use this plot anymore
+                    await session.execute(
+                        delete(Plot).where(Plot.id == plot_id_to_check)
+                    )
+                    logger.info(f"[DELETE STORY] Deleted plot {plot_id_to_check}")
+            
+            await session.commit()
+            
+            logger.info(f"[DELETE STORY] Successfully deleted story {story_id}: {story_title}")
+            
+            return {
+                "success": True,
+                "message": f"Story '{story_title}' deleted successfully"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting story: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error deleting story: {str(e)}")
+
+@app.post("/api/stories/complete/{story_id}/image")
+async def upload_story_image(story_id: int, image: UploadFile = File(...)):
+    """Upload an image for a complete story."""
+    try:
+        # Validate file type
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        project_root = Path(__file__).parent.parent
+        images_dir = project_root / "data" / "images" / "stories"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename: story_{story_id}_{timestamp}.{ext}
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_ext = Path(image.filename).suffix if image.filename else '.jpg'
+        filename = f"story_{story_id}_{timestamp}{file_ext}"
+        file_path = images_dir / filename
+        
+        # Save the file
+        with open(file_path, "wb") as f:
+            content = await image.read()
+            f.write(content)
+        
+        # Relative path for database
+        relative_path = f"data/images/stories/{filename}"
+        
+        # Update story in database
+        async with AsyncSessionLocal() as session:
+            story_result = await session.execute(
+                select(StoryComplete).where(StoryComplete.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                # If story doesn't exist, delete the uploaded file
+                file_path.unlink()
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            # Delete old image if it exists
+            if story.image:
+                old_image_path = project_root / story.image.lstrip('/')
+                if old_image_path.exists() and old_image_path.is_file():
+                    try:
+                        old_image_path.unlink()
+                        logger.info(f"[UPLOAD STORY IMAGE] Deleted old image: {old_image_path}")
+                    except Exception as e:
+                        logger.warning(f"[UPLOAD STORY IMAGE] Error deleting old image: {e}")
+            
+            # Update story with new image path
+            story.image = relative_path
+            story.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+            
+            logger.info(f"[UPLOAD STORY IMAGE] Successfully uploaded image for story {story_id}: {relative_path}")
+            
+            return {
+                "success": True,
+                "image_path": relative_path,
+                "message": "Image uploaded successfully"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading story image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error uploading image: {str(e)}")
+
+@app.post("/api/stories/{story_id}/timeline-assets/{item_index}")
+async def upload_timeline_asset(story_id: int, item_index: int, asset_type: str = Form(...), file: UploadFile = File(...)):
+    """Upload a timeline asset (effect, background audio, or image) for a specific story item."""
+    try:
+        # Validate asset type
+        if asset_type not in ['effects', 'ambience', 'images']:
+            raise HTTPException(status_code=400, detail="Invalid asset type. Must be 'effects', 'ambience', or 'images'")
+        
+        # Validate file type based on asset type
+        if asset_type in ['effects', 'ambience']:
+            # Audio files for effects and background
+            if not file.content_type or not file.content_type.startswith('audio/'):
+                raise HTTPException(status_code=400, detail="File must be an audio file for effects/ambience")
+        elif asset_type == 'images':
+            # Image files
+            if not file.content_type or not file.content_type.startswith('image/'):
+                raise HTTPException(status_code=400, detail="File must be an image file")
+        
+        project_root = Path(__file__).parent.parent
+        
+        # Create assets directory structure: data/story/{story_id}/assets/{asset_type}/
+        assets_dir = project_root / "data" / "story" / str(story_id) / "assets" / asset_type
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename: item_{item_index}_{timestamp}_{original_name}
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        original_name = file.filename or f"asset.{file.content_type.split('/')[-1] if file.content_type else 'bin'}"
+        # Sanitize filename
+        safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', original_name)
+        file_ext = Path(safe_name).suffix
+        filename = f"item_{item_index:04d}_{timestamp}_{safe_name}"
+        file_path = assets_dir / filename
+        
+        # Save the file
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # Relative path for API
+        relative_path = f"data/story/{story_id}/assets/{asset_type}/{filename}"
+        
+        # Verify story exists
+        async with AsyncSessionLocal() as db_session:
+            story_result = await db_session.execute(
+                select(Story).where(Story.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                # If story doesn't exist, delete the uploaded file
+                file_path.unlink()
+                raise HTTPException(status_code=404, detail="Story not found")
+        
+        # Load existing timeline assets or create new structure
+        # Store in screenplay JSON as metadata, or add as new JSON field
+        # For now, we'll store in a JSON file alongside the story
+        timeline_assets_file = project_root / "data" / "story" / str(story_id) / "timeline_assets.json"
+        
+        if timeline_assets_file.exists():
+            with open(timeline_assets_file, 'r') as f:
+                timeline_assets = json.load(f)
+        else:
+            timeline_assets = {"effects": {}, "ambience": {}, "images": {}}
+        
+        # Add asset to the appropriate list for this item
+        asset_key = str(item_index)
+        if asset_key not in timeline_assets[asset_type]:
+            timeline_assets[asset_type][asset_key] = []
+        
+        asset_info = {
+            "filename": filename,
+            "path": relative_path,
+            "original_name": original_name,
+            "content_type": file.content_type,
+            "uploaded_at": datetime.now(timezone.utc).isoformat()
+        }
+        timeline_assets[asset_type][asset_key].append(asset_info)
+        
+        # Save updated timeline assets
+        with open(timeline_assets_file, 'w') as f:
+            json.dump(timeline_assets, f, indent=2)
+        
+        logger.info(f"[UPLOAD TIMELINE ASSET] Successfully uploaded {asset_type} for story {story_id}, item {item_index}: {relative_path}")
+        
+        return {
+            "success": True,
+            "asset": asset_info,
+            "message": f"{asset_type.capitalize()} uploaded successfully"
+        }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading timeline asset: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error uploading asset: {str(e)}")
+
+@app.get("/api/stories/{story_id}/timeline-assets")
+async def get_timeline_assets(story_id: int):
+    """Get all timeline assets for a story."""
+    try:
+        project_root = Path(__file__).parent.parent
+        timeline_assets_file = project_root / "data" / "story" / str(story_id) / "timeline_assets.json"
+        
+        if not timeline_assets_file.exists():
+            return {
+                "success": True,
+                "assets": {"effects": {}, "ambience": {}, "images": {}}
+            }
+        
+        with open(timeline_assets_file, 'r') as f:
+            timeline_assets = json.load(f)
+        
+        return {
+            "success": True,
+            "assets": timeline_assets
+        }
+    except Exception as e:
+        logger.error(f"Error getting timeline assets: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting assets: {str(e)}")
+
+@app.delete("/api/stories/{story_id}/timeline-assets/{item_index}/{asset_type}/{asset_filename}")
+async def delete_timeline_asset(story_id: int, item_index: int, asset_type: str, asset_filename: str):
+    """Delete a timeline asset."""
+    try:
+        if asset_type not in ['effects', 'ambience', 'images']:
+            raise HTTPException(status_code=400, detail="Invalid asset type")
+        
+        project_root = Path(__file__).parent.parent
+        
+        # Delete the file
+        asset_file = project_root / "data" / "story" / str(story_id) / "assets" / asset_type / asset_filename
+        if asset_file.exists():
+            asset_file.unlink()
+            logger.info(f"[DELETE TIMELINE ASSET] Deleted file: {asset_file}")
+        
+        # Remove from timeline assets JSON
+        timeline_assets_file = project_root / "data" / "story" / str(story_id) / "timeline_assets.json"
+        
+        if timeline_assets_file.exists():
+            with open(timeline_assets_file, 'r') as f:
+                timeline_assets = json.load(f)
+            
+            asset_key = str(item_index)
+            if asset_key in timeline_assets[asset_type]:
+                # Remove the asset with matching filename
+                timeline_assets[asset_type][asset_key] = [
+                    asset for asset in timeline_assets[asset_type][asset_key]
+                    if asset.get('filename') != asset_filename
+                ]
+                # Remove empty arrays
+                if not timeline_assets[asset_type][asset_key]:
+                    del timeline_assets[asset_type][asset_key]
+            
+            # Save updated timeline assets
+            with open(timeline_assets_file, 'w') as f:
+                json.dump(timeline_assets, f, indent=2)
+        
+        return {
+            "success": True,
+            "message": "Asset deleted successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting timeline asset: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error deleting asset: {str(e)}")
+
+@app.delete("/api/stories/complete/{story_id}/image")
+async def remove_story_image(story_id: int):
+    """Remove the image from a complete story."""
+    try:
+        project_root = Path(__file__).parent.parent
+        
+        async with AsyncSessionLocal() as session:
+            story_result = await session.execute(
+                select(StoryComplete).where(StoryComplete.id == story_id)
+            )
+            story = story_result.scalar_one_or_none()
+            
+            if not story:
+                raise HTTPException(status_code=404, detail="Story not found")
+            
+            # Delete image file if it exists
+            if story.image:
+                image_path = project_root / story.image.lstrip('/')
+                if image_path.exists() and image_path.is_file():
+                    try:
+                        image_path.unlink()
+                        logger.info(f"[REMOVE STORY IMAGE] Deleted image file: {image_path}")
+                    except Exception as e:
+                        logger.warning(f"[REMOVE STORY IMAGE] Error deleting image file: {e}")
+            
+            # Update story to remove image path
+            story.image = None
+            story.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+            
+            logger.info(f"[REMOVE STORY IMAGE] Successfully removed image for story {story_id}")
+            
+            return {
+                "success": True,
+                "message": "Image removed successfully"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing story image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error removing image: {str(e)}")
+
 @app.post("/api/stories/{story_id}/build")
 async def build_story_audio(story_id: int, request: Request):
     """Build complete audio file by concatenating timeline audio files with pauses."""
@@ -13898,9 +14493,15 @@ async def build_story_audio(story_id: int, request: Request):
             
             # Get audio files for timeline items only (using current timeline state)
             audio_files = []
+            logger.info(f"[BUILD] Processing {len(timeline_items)} timeline items")
             for timeline_item in timeline_items:
                 index = timeline_item.get("index")
+                speaker = timeline_item.get("speaker", "")
+                text = timeline_item.get("text", "")
+                logger.info(f"[BUILD] Timeline item: index={index}, speaker={speaker}, text_length={len(text) if text else 0}, text_preview={text[:50] if text else 'None'}")
+                
                 if index is None:
+                    logger.warning(f"[BUILD] Timeline item missing index: {timeline_item}")
                     continue
                 
                 # Look for audio file matching pattern: item_XXXX_speaker.mp3
@@ -13910,11 +14511,12 @@ async def build_story_audio(story_id: int, request: Request):
                     audio_files.append({
                         "index": index,
                         "filepath": matching_files[0],
-                        "speaker": timeline_item.get("speaker", ""),
-                        "text": timeline_item.get("text", "")
+                        "speaker": speaker,
+                        "text": text
                     })
+                    logger.info(f"[BUILD] Added audio file: {matching_files[0].name} for index {index}")
                 else:
-                    logger.warning(f"No audio file found for timeline item at index {index}")
+                    logger.warning(f"[BUILD] No audio file found for timeline item at index {index}")
             
             if not audio_files:
                 raise HTTPException(status_code=400, detail="No audio files found for timeline items")
@@ -13990,10 +14592,14 @@ async def build_story_audio(story_id: int, request: Request):
             for audio_file_info in audio_files:
                 speaker = audio_file_info.get("speaker", "")
                 text = audio_file_info.get("text", "")
+                logger.info(f"[BUILD] Processing timeline item: index={audio_file_info.get('index')}, speaker={speaker}, text_length={len(text) if text else 0}")
                 if speaker and text:
                     formatted_story_lines.append(f"<{speaker}>#{text}")
+                else:
+                    logger.warning(f"[BUILD] Skipping item with missing speaker or text: speaker={speaker}, text={text[:50] if text else 'None'}")
             
             formatted_story_text = "\n".join(formatted_story_lines)
+            logger.info(f"[BUILD] Formatted story text: {len(formatted_story_text)} characters, {len(formatted_story_lines)} lines")
             
             # Get cast and narrator information
             cast_result = await session.execute(
@@ -14091,6 +14697,1085 @@ async def build_story_audio(story_id: int, request: Request):
             )
         else:
             raise HTTPException(status_code=500, detail=f"Error building audio: {error_detail}")
+
+# Course Builder API Endpoints
+
+@app.get("/api/courses")
+async def get_courses(user_id: Optional[int] = None):
+    """Get list of courses, optionally filtered by user_id."""
+    try:
+        async with AsyncSessionLocal() as session:
+            query = select(Course)
+            if user_id:
+                query = query.where(Course.user_id == user_id)
+            query = query.order_by(desc(Course.created_at))
+            
+            result = await session.execute(query)
+            courses = result.scalars().all()
+            
+            courses_data = []
+            for course in courses:
+                # Get section count
+                sections_result = await session.execute(
+                    select(func.count(CourseSection.id)).where(CourseSection.course_id == course.id)
+                )
+                section_count = sections_result.scalar() or 0
+                
+                # Get lesson count (sections with lessons)
+                lessons_result = await session.execute(
+                    select(func.count(Lesson.id))
+                    .join(CourseSection, Lesson.section_id == CourseSection.id)
+                    .where(CourseSection.course_id == course.id)
+                )
+                lesson_count = lessons_result.scalar() or 0
+
+                # Get question count
+                questions_result = await session.execute(
+                    select(func.count(CourseQuestion.id)).where(CourseQuestion.course_id == course.id)
+                )
+                question_count = questions_result.scalar() or 0
+                
+                courses_data.append({
+                    "id": course.id,
+                    "title": course.title,
+                    "original_prompt": course.original_prompt,
+                    "section_count": section_count,
+                    "lesson_count": lesson_count,
+                    "question_count": question_count,
+                    "pinned": bool(course.pinned),
+                    "created_at": course.created_at.isoformat() if course.created_at else None,
+                    "updated_at": course.updated_at.isoformat() if course.updated_at else None
+                })
+            
+            return {
+                "success": True,
+                "courses": courses_data
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting courses: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting courses: {str(e)}")
+
+
+@app.put("/api/courses/{course_id}/pin")
+async def set_course_pin(course_id: int, request: Request):
+    """Toggle pin status for a course."""
+    try:
+        data = await request.json()
+        pinned = bool(data.get("pinned"))
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Course).where(Course.id == course_id)
+            )
+            course = result.scalar_one_or_none()
+            if not course:
+                raise HTTPException(status_code=404, detail="Course not found")
+
+            course.pinned = pinned
+            await session.commit()
+
+            return {
+                "success": True,
+                "course_id": course.id,
+                "pinned": bool(course.pinned)
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating course pin: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating course pin: {str(e)}")
+
+@app.post("/api/courses/generate-outline")
+async def generate_course_outline(request: Request):
+    """Generate a course outline from a user prompt using AI."""
+    try:
+        data = await request.json()
+        prompt = data.get("prompt", "").strip()
+        user_id = data.get("user_id")  # Optional user_id
+        
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Prompt is required")
+        
+        logger.info(f"[COURSE] Generating outline for prompt: {prompt[:100]}...")
+        
+        # Get course settings from SystemConfig
+        from database.models import SystemConfig
+        async with AsyncSessionLocal() as settings_session:
+            settings_result = await settings_session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "course_settings")
+            )
+            settings_config = settings_result.scalar_one_or_none()
+            
+            course_settings = {
+                "outline_prompt": "",
+                "lesson_prompt": "",
+                "outline_max_tokens": 2048,
+                "lesson_max_tokens": 4096
+            }
+            
+            if settings_config and settings_config.config_value:
+                if isinstance(settings_config.config_value, dict):
+                    course_settings.update(settings_config.config_value)
+                elif isinstance(settings_config.config_value, str):
+                    try:
+                        course_settings.update(json.loads(settings_config.config_value))
+                    except:
+                        pass
+        
+        # Use AI to break the prompt into 5-10 learning sections
+        from services.ai_service import AIService
+        ai = AIService()
+        
+        # Get prompt template from settings or use default
+        outline_template = course_settings.get("outline_prompt") or """You are an educational course designer. Your task is to generate a structured online course outline based on a learning request.
+
+TASK: Generate a complete course outline with a title and learning sections.
+
+USER LEARNING REQUEST:
+{prompt}
+
+YOUR RESPONSE MUST BE VALID JSON ONLY. No markdown, no code fences, no explanations, just pure JSON.
+
+CRITICAL REQUIREMENT: You MUST generate between 5-10 sections. Generating only 1 section is NOT acceptable. The course must be comprehensive.
+
+Generate:
+1. A clear, descriptive course title (maximum 60 characters)
+2. An ordered list of 5-10 learning sections (MANDATORY: minimum 5 sections, maximum 10 sections), each with:
+   - A section title (20-50 characters)
+   - A brief summary (1-3 sentences) describing what this section should teach and what students will learn
+   - A list of 3-8 subsections (MANDATORY: each section must have at least 3 subsections), each with:
+     - A subsection title (10-40 characters)
+     - A short summary (1-2 sentences) describing what that subsection will cover
+
+REQUIREMENTS:
+- MANDATORY: You MUST generate at least 5 sections and at most 10 sections. Single-section courses are not acceptable.
+- MANDATORY: Each section MUST have at least 3 subsections (3-8 per section).
+- Sections must be beginner-friendly and build progressively upon each other
+- Section titles should be clear and descriptive (20-50 characters each)
+- Section summaries should explain what concepts will be covered and what students will achieve
+- Subsections must be tightly scoped and represent the internal teaching flow of the section
+- Start with foundational concepts and progress to more advanced topics
+- Do NOT include full lesson content, only titles and summaries
+- Ensure sections are comprehensive enough to cover the learning request
+- Number of sections should be appropriate for the topic complexity (typically 5-10 sections)
+
+REQUIRED JSON FORMAT (you must return exactly this structure):
+{{
+  "title": "Course Title Here",
+  "sections": [
+    {{
+      "title": "Section 1 Title",
+      "summary": "What this section teaches and what students will learn (1-3 sentences).",
+      "subsections": [
+        {{
+          "title": "Subsection 1 Title",
+          "summary": "What this subsection covers (1-2 sentences)."
+        }},
+        {{
+          "title": "Subsection 2 Title",
+          "summary": "What this subsection covers (1-2 sentences)."
+        }}
+      ]
+    }},
+    {{
+      "title": "Section 2 Title",
+      "summary": "What this section teaches and what students will learn (1-3 sentences).",
+      "subsections": [
+        {{
+          "title": "Subsection 1 Title",
+          "summary": "What this subsection covers (1-2 sentences)."
+        }}
+      ]
+    }}
+  ]
+}}
+
+IMPORTANT: Return ONLY the JSON object above. Do not include any markdown code fences, explanations, or additional text. The response must start with {{ and end with }}."""
+        
+        # Replace {prompt} placeholder with actual user prompt
+        outline_prompt = outline_template.replace("{prompt}", prompt)
+        outline_max_tokens = course_settings.get("outline_max_tokens", 2048)
+        
+        # Use execute_with_system_prompt to bypass AI Focus Mode 80-word limit
+        # This ensures we get full course outlines (5-10 sections) without affecting AI Focus Mode elsewhere
+        system_prompt_text = "You are an educational course designer. Generate structured course outlines in JSON format only."
+        result = await ai.execute_with_system_prompt(
+            question=outline_prompt,
+            system_prompt=system_prompt_text,
+            max_tokens=outline_max_tokens
+        )
+        
+        if result.get("error"):
+            logger.error(f"[COURSE] AI error: {result.get('error')}")
+            raise HTTPException(status_code=500, detail=f"AI request failed: {result.get('error')}")
+        
+        answer = result.get("answer", "").strip()
+        if not answer:
+            raise HTTPException(status_code=500, detail="No response from AI")
+        
+        # Parse AI response (may be wrapped in code fences)
+        outline_data = None
+        parse_error = None
+        try:
+            # Try parsing directly
+            outline_data = json.loads(answer)
+        except json.JSONDecodeError as e:
+            parse_error = e
+            # Try stripping markdown code fences and other cleanup
+            cleaned = answer.strip()
+            
+            # Remove markdown code fences if present
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                json_start = None
+                json_end = None
+                for i, line in enumerate(lines):
+                    if line.strip().startswith("```"):
+                        if json_start is None:
+                            json_start = i + 1
+                        else:
+                            json_end = i
+                            break
+                if json_start is not None:
+                    json_lines = lines[json_start:json_end] if json_end else lines[json_start:]
+                    cleaned = "\n".join(json_lines)
+            
+            # Try to extract JSON if wrapped in text
+            # Look for first { and last }
+            first_brace = cleaned.find('{')
+            last_brace = cleaned.rfind('}')
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                cleaned = cleaned[first_brace:last_brace + 1]
+            
+            # Remove any trailing commas before closing braces/brackets
+            import re
+            cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+            
+            # Fix common JSON issues: unterminated strings, missing commas, etc.
+            lines = cleaned.split('\n')
+            fixed_lines = []
+            in_string = False
+            escape_next = False
+            last_line_was_string = False
+            
+            for line_idx, line in enumerate(lines):
+                i = 0
+                new_line = []
+                line_in_string_start = in_string
+                
+                while i < len(line):
+                    char = line[i]
+                    
+                    if escape_next:
+                        new_line.append(char)
+                        escape_next = False
+                        i += 1
+                        continue
+                    
+                    if char == '\\':
+                        new_line.append(char)
+                        escape_next = True
+                        i += 1
+                        continue
+                    
+                    if char == '"':
+                        new_line.append(char)
+                        in_string = not in_string
+                        i += 1
+                        continue
+                    
+                    new_line.append(char)
+                    i += 1
+                
+                line_str = ''.join(new_line)
+                
+                # Check if this line looks like an array element (starts with quote)
+                stripped = line_str.strip()
+                looks_like_array_item = stripped.startswith('"') and not line_in_string_start
+                
+                # If we were in a string at the end of previous line and this line doesn't continue it
+                if line_in_string_start and not in_string:
+                    # String was closed on this line, good
+                    pass
+                elif line_in_string_start and in_string:
+                    # Still in string - might be multiline (not standard JSON but we'll handle it)
+                    # Check if this might actually be a new array item starting
+                    if looks_like_array_item and line_idx > 0:
+                        # Previous string was likely unterminated, close it
+                        # Find where to insert the closing quote
+                        prev_line = fixed_lines[-1] if fixed_lines else ""
+                        # Add closing quote to previous line
+                        if fixed_lines:
+                            fixed_lines[-1] = fixed_lines[-1] + '"'
+                        in_string = False
+                        line_in_string_start = False
+                
+                # If line ends while in a string, check if next line continues or starts new item
+                if in_string and line_idx < len(lines) - 1:
+                    next_line = lines[line_idx + 1].strip() if line_idx + 1 < len(lines) else ""
+                    # If next line looks like it starts a new array item, close the current string
+                    if next_line and next_line.startswith('"') and not next_line.startswith('",'):
+                        # Add closing quote and comma
+                        line_str = line_str.rstrip() + '",'
+                        in_string = False
+                
+                # Add missing comma after array items (if line ends with quote and next is not closing bracket)
+                if looks_like_array_item and not line_str.strip().endswith(','):
+                    if line_idx < len(lines) - 1:
+                        next_line = lines[line_idx + 1].strip() if line_idx + 1 < len(lines) else ""
+                        # If next line is not closing bracket/brace, add comma
+                        if next_line and not (next_line.startswith(']') or next_line.startswith('}')):
+                            if in_string:
+                                # Close string first
+                                line_str = line_str + '"'
+                                in_string = False
+                            line_str = line_str.rstrip() + ','
+                
+                fixed_lines.append(line_str)
+                last_line_was_string = in_string
+            
+            # If still in string at the end, close it
+            if in_string and fixed_lines:
+                fixed_lines[-1] = fixed_lines[-1].rstrip() + '"'
+            
+            cleaned = '\n'.join(fixed_lines)
+            
+            # Fix missing commas between array items (more aggressive)
+            # Pattern: "string" followed by newline and "string" (missing comma)
+            cleaned = re.sub(r'"\s*\n\s*"', r'",\n    "', cleaned)
+            
+            # Remove any trailing commas again after fixes
+            cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+            
+            try:
+                outline_data = json.loads(cleaned)
+            except json.JSONDecodeError as e2:
+                # Log detailed error info for debugging
+                logger.error(f"[COURSE] Failed to parse AI response as JSON: {e2}")
+                logger.error(f"[COURSE] JSON error position: line {e2.lineno}, column {e2.colno}")
+                logger.error(f"[COURSE] Error message: {str(e2)}")
+                
+                # Try to extract just the problematic line for context
+                error_line = ""
+                if e2.lineno and e2.lineno <= len(lines):
+                    error_line = lines[e2.lineno - 1] if e2.lineno > 0 else ""
+                    logger.error(f"[COURSE] Problematic line ({e2.lineno}): {error_line}")
+                    if e2.colno and e2.colno <= len(error_line):
+                        logger.error(f"[COURSE] Error at column {e2.colno}: '{error_line[max(0, e2.colno-10):e2.colno+10]}'")
+                
+                logger.error(f"[COURSE] Full AI response (first 2000 chars): {answer[:2000]}")
+                logger.error(f"[COURSE] Cleaned response (first 2000 chars): {cleaned[:2000]}")
+                
+                # Fallback: Try to extract title and sections using regex as last resort
+                try:
+                    logger.warning("[COURSE] Attempting regex-based fallback extraction...")
+                    
+                    # Extract title
+                    title_match = re.search(r'"title"\s*:\s*"([^"]+)"', cleaned)
+                    if not title_match:
+                        # Try multi-line title
+                        title_match = re.search(r'"title"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', cleaned, re.DOTALL)
+                    
+                    # Extract sections array - look for array of objects or strings
+                    sections_matches = re.findall(r'"sections"\s*:\s*\[(.*?)\]', cleaned, re.DOTALL)
+                    section_items = []
+                    if sections_matches:
+                        sections_content = sections_matches[0]
+                        # Try to extract objects with title and summary first
+                        section_objects = re.findall(r'\{[^}]*"title"\s*:\s*"([^"]+)"[^}]*"summary"\s*:\s*"([^"]*)"[^}]*\}', sections_content, re.DOTALL)
+                        if section_objects:
+                            # New format: objects with title and summary
+                            section_items = [{"title": t.strip(), "summary": s.strip()} for t, s in section_objects]
+                        else:
+                            # Try with just title (objects without summary)
+                            section_objects_title_only = re.findall(r'\{[^}]*"title"\s*:\s*"([^"]+)"[^}]*\}', sections_content)
+                            if section_objects_title_only:
+                                section_items = [{"title": t.strip(), "summary": ""} for t in section_objects_title_only]
+                            else:
+                                # Old format: just quoted strings
+                                section_titles = re.findall(r'"([^"]+)"', sections_content)
+                                if not section_titles:
+                                    section_titles = re.findall(r'"((?:[^"\\]|\\.)*)"', sections_content)
+                                section_items = [{"title": t.strip(), "summary": ""} for t in section_titles]
+                    
+                    if title_match and section_items:
+                        outline_data = {
+                            "title": title_match.group(1),
+                            "sections": section_items
+                        }
+                        logger.info(f"[COURSE] Fallback extraction successful: title='{outline_data['title']}', {len(section_items)} sections")
+                    else:
+                        # Secondary fallback: parse plain-text outline
+                        logger.warning("[COURSE] Regex fallback incomplete, trying plain-text extraction...")
+                        raw_text = answer.strip()
+                        text_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+                        plain_title = None
+                        plain_sections = []
+
+                        for line in text_lines:
+                            lower_line = line.lower()
+                            if plain_title is None:
+                                if lower_line.startswith("title:") or lower_line.startswith("course:") or lower_line.startswith("course title:"):
+                                    plain_title = line.split(":", 1)[1].strip()
+                                    continue
+                            # Match numbered or bulleted section lines
+                            if re.match(r'^\d+[\).\s-]+', line):
+                                section_text = re.sub(r'^\d+[\).\s-]+', '', line).strip()
+                                if section_text:
+                                    plain_sections.append({"title": section_text, "summary": ""})
+                                continue
+                            if re.match(r'^[\-\*]\s+', line):
+                                section_text = re.sub(r'^[\-\*]\s+', '', line).strip()
+                                if section_text:
+                                    plain_sections.append({"title": section_text, "summary": ""})
+                                continue
+                            if lower_line.startswith("section:") or lower_line.startswith("section "):
+                                section_text = line.split(":", 1)[1].strip() if ":" in line else line
+                                section_text = re.sub(r'^section\s*\d*\s*[-:]\s*', '', section_text, flags=re.IGNORECASE).strip()
+                                if section_text:
+                                    plain_sections.append({"title": section_text, "summary": ""})
+
+                        if plain_title is None and text_lines:
+                            plain_title = text_lines[0]
+
+                        if plain_title and len(plain_sections) >= 3:
+                            outline_data = {
+                                "title": plain_title,
+                                "sections": plain_sections
+                            }
+                            logger.info(f"[COURSE] Plain-text extraction successful: title='{outline_data['title']}', {len(plain_sections)} sections")
+                        else:
+                            raise ValueError("Fallback extraction failed")
+                        
+                except Exception as fallback_error:
+                    logger.error(f"[COURSE] Fallback extraction also failed: {fallback_error}")
+                    # Provide a more helpful error message with context
+                    error_detail = f"Failed to parse AI response as JSON. Error at line {e2.lineno}, column {e2.colno}: {str(e2)}. The AI may have generated invalid JSON. Please try again."
+                    raise HTTPException(status_code=500, detail=error_detail)
+        
+        course_title = outline_data.get("title", "").strip()
+        sections_raw = outline_data.get("sections", [])
+        
+        if not course_title:
+            raise HTTPException(status_code=500, detail="AI response missing course title")
+        
+        if not sections_raw or not isinstance(sections_raw, list):
+            raise HTTPException(status_code=500, detail="AI response missing or invalid sections")
+        
+        if len(sections_raw) < 5 or len(sections_raw) > 15:
+            raise HTTPException(status_code=500, detail=f"Expected 5-10 sections, but AI generated only {len(sections_raw)} section(s). Please try regenerating the course outline.")
+        
+        # Normalize sections: handle both old format (strings) and new format (objects)
+        sections_data = []
+        for section_item in sections_raw:
+            if isinstance(section_item, dict):
+                subsections_raw = (
+                    section_item.get("subsections")
+                    or section_item.get("sub_sections")
+                    or section_item.get("subSections")
+                    or []
+                )
+                subsections_data = []
+                if isinstance(subsections_raw, list):
+                    for sub_item in subsections_raw:
+                        if isinstance(sub_item, dict):
+                            title = (sub_item.get("title") or "").strip()
+                            summary = (sub_item.get("summary") or "").strip()
+                            if title:
+                                subsections_data.append({
+                                    "title": title,
+                                    "summary": summary
+                                })
+                        elif isinstance(sub_item, str) and sub_item.strip():
+                            subsections_data.append({
+                                "title": sub_item.strip(),
+                                "summary": ""
+                            })
+                sections_data.append({
+                    "title": (section_item.get("title") or "").strip(),
+                    "summary": (section_item.get("summary") or "").strip(),
+                    "subsections": subsections_data
+                })
+            elif isinstance(section_item, str):
+                # Old format: just a string title
+                sections_data.append({
+                    "title": section_item.strip(),
+                    "summary": "",
+                    "subsections": []
+                })
+            else:
+                raise HTTPException(status_code=500, detail="Invalid section format in AI response")
+        
+        # Validate all sections have titles
+        for i, section in enumerate(sections_data):
+            if not section.get("title"):
+                raise HTTPException(status_code=500, detail=f"Section {i+1} is missing a title")
+        
+        # Save course to database
+        async with AsyncSessionLocal() as session:
+            # Create course
+            course = Course(
+                user_id=user_id,
+                title=course_title,
+                original_prompt=prompt
+            )
+            session.add(course)
+            await session.flush()  # Get the course ID
+            
+        # Create sections with order_index and summary
+            created_sections = []
+            for order_index, section_data in enumerate(sections_data):
+                section = CourseSection(
+                    course_id=course.id,
+                    title=section_data["title"],
+                    summary=section_data.get("summary") or None,
+                    order_index=order_index
+                )
+                session.add(section)
+                created_sections.append(section)
+            
+            await session.flush()  # Get section IDs
+
+        # Create subsections for each section
+        created_subsections = {}
+        for section, section_data in zip(created_sections, sections_data):
+            created_subsections[section.id] = []
+            for sub_index, sub_data in enumerate(section_data.get("subsections", [])):
+                subsection = CourseSubsection(
+                    section_id=section.id,
+                    title=sub_data.get("title", ""),
+                    summary=sub_data.get("summary") or None,
+                    order_index=sub_index
+                )
+                session.add(subsection)
+                created_subsections[section.id].append(subsection)
+
+        await session.flush()
+        
+        # Build response sections_data from created sections
+        response_sections_data = []
+        for section, section_data in zip(created_sections, sections_data):
+            response_sections_data.append({
+                "id": section.id,
+                "title": section.title,
+                "summary": section.summary or "",
+                "order_index": section.order_index,
+                "has_lesson": False,
+                "subsections": [
+                    {
+                        "id": subsection.id,
+                        "title": subsection.title,
+                        "summary": subsection.summary or "",
+                        "order_index": subsection.order_index
+                    }
+                    for subsection in created_subsections.get(section.id, [])
+                ]
+            })
+            
+            await session.commit()
+            
+            logger.info(f"[COURSE] Successfully created course {course.id} with {len(response_sections_data)} sections")
+            
+            return {
+                "success": True,
+                "course_id": course.id,
+                "course_title": course_title,
+                "sections": response_sections_data
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating course outline: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating outline: {str(e)}")
+
+@app.get("/api/courses/{course_id}")
+async def get_course(course_id: int):
+    """Get course metadata and all sections with lesson status."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Fetch course with sections and lessons
+            result = await session.execute(
+                select(Course)
+                .options(
+                    selectinload(Course.sections).selectinload(CourseSection.lesson),
+                    selectinload(Course.sections).selectinload(CourseSection.subsections)
+                )
+                .where(Course.id == course_id)
+            )
+            course = result.scalar_one_or_none()
+            
+            if not course:
+                raise HTTPException(status_code=404, detail="Course not found")
+            
+            # Build sections data with lesson status
+            sections_data = []
+            for section in sorted(course.sections, key=lambda s: s.order_index):
+                subsections_data = []
+                for subsection in sorted(section.subsections, key=lambda s: s.order_index):
+                    subsections_data.append({
+                        "id": subsection.id,
+                        "title": subsection.title,
+                        "summary": subsection.summary or "",
+                        "order_index": subsection.order_index
+                    })
+                sections_data.append({
+                    "id": section.id,
+                    "title": section.title,
+                    "summary": section.summary or "",
+                    "order_index": section.order_index,
+                    "has_lesson": section.lesson is not None,
+                    "lesson_id": section.lesson.id if section.lesson else None,
+                    "subsections": subsections_data
+                })
+            
+            return {
+                "success": True,
+                "course": {
+                    "id": course.id,
+                    "title": course.title,
+                    "original_prompt": course.original_prompt,
+                    "created_at": course.created_at.isoformat() if course.created_at else None,
+                    "sections": sections_data
+                }
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting course: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting course: {str(e)}")
+
+
+@app.delete("/api/courses/{course_id}")
+async def delete_course(course_id: int):
+    """Delete a course and all its related data (sections, lessons, questions)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Fetch course with all relationships
+            result = await session.execute(
+                select(Course)
+                .options(
+                    selectinload(Course.sections).selectinload(CourseSection.lesson),
+                    selectinload(Course.sections).selectinload(CourseSection.questions),
+                    selectinload(Course.sections).selectinload(CourseSection.subsections),
+                    selectinload(Course.questions)
+                )
+                .where(Course.id == course_id)
+            )
+            course = result.scalar_one_or_none()
+            
+            if not course:
+                raise HTTPException(status_code=404, detail="Course not found")
+            
+            course_title = course.title
+            
+            # Explicitly delete related data to ensure proper cleanup
+            # Delete course questions first
+            if course.questions:
+                for question in course.questions:
+                    await session.delete(question)
+            
+            # Delete section questions, lessons, then sections
+            for section in course.sections:
+                # Delete section questions
+                if section.questions:
+                    for question in section.questions:
+                        await session.delete(question)
+                    # Delete section subsections
+                    if section.subsections:
+                        for subsection in section.subsections:
+                            await session.delete(subsection)
+                    # Delete section lesson
+                if section.lesson:
+                    await session.delete(section.lesson)
+                # Delete section
+                await session.delete(section)
+            
+            # Finally delete the course
+            await session.delete(course)
+            await session.commit()
+            
+            logger.info(f"[COURSE] Deleted course {course_id}: {course_title}")
+            
+            return {
+                "success": True,
+                "message": f"Course '{course_title}' and all related data deleted successfully"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting course: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error deleting course: {str(e)}")
+
+@app.get("/api/courses/{course_id}/questions")
+async def get_course_questions(course_id: int):
+    """Get all Q&A entries for a course."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(CourseQuestion)
+                .where(CourseQuestion.course_id == course_id)
+                .order_by(CourseQuestion.created_at.asc())
+            )
+            questions = result.scalars().all()
+
+            return {
+                "success": True,
+                "questions": [
+                    {
+                        "id": q.id,
+                        "course_id": q.course_id,
+                        "section_id": q.section_id,
+                        "question": q.question,
+                        "answer": q.answer,
+                        "created_at": q.created_at.isoformat() if q.created_at else None
+                    }
+                    for q in questions
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting course questions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting course questions: {str(e)}")
+
+
+@app.post("/api/courses/{course_id}/questions")
+async def ask_course_question(course_id: int, request: Request):
+    """Ask a follow-up question about a course and store the Q&A."""
+    try:
+        data = await request.json()
+        question = (data.get("question") or "").strip()
+        section_id = data.get("section_id")
+        user_id = data.get("user_id")
+
+        if not question:
+            raise HTTPException(status_code=400, detail="Question is required")
+
+        async with AsyncSessionLocal() as session:
+            # Load course with sections and lessons for context
+            result = await session.execute(
+                select(Course)
+                .options(selectinload(Course.sections).selectinload(CourseSection.lesson))
+                .where(Course.id == course_id)
+            )
+            course = result.scalar_one_or_none()
+
+            if not course:
+                raise HTTPException(status_code=404, detail="Course not found")
+
+            # Build course context
+            sections_sorted = sorted(course.sections, key=lambda s: s.order_index)
+            sections_list = "\n".join([f"- {s.title}" for s in sections_sorted]) or "- None"
+
+            section_context = ""
+            if section_id:
+                selected_section = next((s for s in sections_sorted if s.id == section_id), None)
+                if selected_section:
+                    section_context = f"Selected Section: {selected_section.title}\n"
+                    if selected_section.lesson and selected_section.lesson.content:
+                        lesson_snippet = selected_section.lesson.content.strip()
+                        # Limit context to reduce token usage
+                        if len(lesson_snippet) > 4000:
+                            lesson_snippet = lesson_snippet[:4000] + "\n\n[Truncated]"
+                        section_context += f"Lesson Content (excerpt):\n{lesson_snippet}\n"
+
+            qa_prompt = f"""You are a helpful course tutor. Answer the student's question using only the course outline and lesson content provided. 
+If the answer is not covered by the course content, say you don't have enough information and suggest which section should be expanded.
+
+Course Title: {course.title}
+
+Course Sections:
+{sections_list}
+
+{section_context}
+
+Student Question:
+{question}
+
+Answer clearly and concisely. Use Markdown when helpful."""
+
+            from services.ai_service import AIService
+            ai = AIService()
+            ai_result = await ai.execute({
+                "question": qa_prompt,
+                "use_system_max_tokens": True,
+                "max_tokens": 2048,
+                "user_id": user_id
+            })
+
+            if ai_result.get("error"):
+                logger.error(f"[COURSE QA] AI error: {ai_result.get('error')}")
+                raise HTTPException(status_code=500, detail=f"AI request failed: {ai_result.get('error')}")
+
+            answer = (ai_result.get("answer") or "").strip()
+            if not answer:
+                raise HTTPException(status_code=500, detail="No answer generated")
+
+            # Store the Q&A
+            qa_entry = CourseQuestion(
+                course_id=course_id,
+                section_id=section_id,
+                user_id=user_id,
+                question=question,
+                answer=answer
+            )
+            session.add(qa_entry)
+            await session.flush()
+            await session.commit()
+
+            return {
+                "success": True,
+                "qa": {
+                    "id": qa_entry.id,
+                    "course_id": qa_entry.course_id,
+                    "section_id": qa_entry.section_id,
+                    "question": qa_entry.question,
+                    "answer": qa_entry.answer,
+                    "created_at": qa_entry.created_at.isoformat() if qa_entry.created_at else None
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error asking course question: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error asking question: {str(e)}")
+
+@app.post("/api/sections/{section_id}/generate-lesson")
+async def generate_lesson(section_id: int, request: Request):
+    """Generate lesson content for a specific section using AI."""
+    try:
+        # Get request data
+        data = await request.json()
+        regenerate = data.get("regenerate", False)
+        
+        async with AsyncSessionLocal() as session:
+            # Fetch section with course
+            result = await session.execute(
+                select(CourseSection)
+                .options(selectinload(CourseSection.course), selectinload(CourseSection.lesson))
+                .where(CourseSection.id == section_id)
+            )
+            section = result.scalar_one_or_none()
+            
+            if not section:
+                raise HTTPException(status_code=404, detail="Section not found")
+            
+            # Check if lesson already exists (unless regenerating)
+            if section.lesson and not regenerate:
+                raise HTTPException(status_code=400, detail="Lesson already exists for this section")
+            
+            # Delete existing lesson if regenerating
+            if regenerate and section.lesson:
+                logger.info(f"[LESSON] Regenerating lesson for section {section_id}, deleting existing lesson {section.lesson.id}")
+                await session.delete(section.lesson)
+                await session.flush()
+            
+            course_title = section.course.title
+            section_title = section.title
+            section_summary = section.summary or ""
+            
+            logger.info(f"[LESSON] Generating lesson for section '{section_title}' in course '{course_title}'")
+            
+            # Get course settings from SystemConfig
+            from database.models import SystemConfig
+            settings_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "course_settings")
+            )
+            settings_config = settings_result.scalar_one_or_none()
+            
+            course_settings = {
+                "outline_prompt": "",
+                "lesson_prompt": "",
+                "outline_max_tokens": 2048,
+                "lesson_max_tokens": 4096
+            }
+            
+            if settings_config and settings_config.config_value:
+                if isinstance(settings_config.config_value, dict):
+                    course_settings.update(settings_config.config_value)
+                elif isinstance(settings_config.config_value, str):
+                    try:
+                        course_settings.update(json.loads(settings_config.config_value))
+                    except:
+                        pass
+            
+            # Use AI to generate lesson content
+            from services.ai_service import AIService
+            ai = AIService()
+            
+            # Get prompt template from settings or use default
+            lesson_template = course_settings.get("lesson_prompt") or """You are an expert educator creating a comprehensive, beginner-friendly lesson that teaches concepts in depth. Your goal is to help students understand the material thoroughly, not just list facts.
+
+Course: {course_title}
+Section: {section_title}
+Section Summary (What this section should teach): {section_summary}
+
+CRITICAL TEACHING REQUIREMENTS (NON-NEGOTIABLE):
+
+1. EXPLAIN, DON'T JUST LIST:
+   - For every concept you introduce, provide a clear explanation of WHAT it is, WHY it matters, and HOW it works
+   - Use analogies and real-world examples to make abstract concepts concrete
+   - Explain the reasoning behind concepts, not just the facts
+   - Break down complex ideas into simpler parts that build on each other
+   - Show the connections between different concepts
+
+2. PROGRESSIVE KNOWLEDGE BUILDING:
+   - Start with foundational concepts and gradually build complexity
+   - Introduce concepts in logical order, where each new idea builds on previous ones
+   - Use "scaffolding": introduce simple examples first, then gradually increase complexity
+   - Explain prerequisites before introducing advanced concepts
+   - Connect new information to what students should already know from earlier sections
+
+3. DETAILED EXPLANATIONS:
+   - Each major concept should have at least 2-3 paragraphs of explanation
+   - Don't just say "Language models predict words" - explain HOW they predict, WHAT patterns they look for, WHY certain words are more likely than others
+   - Provide step-by-step breakdowns of processes or mechanisms
+   - Explain cause-and-effect relationships
+   - Describe the "why" behind every important concept
+
+4. PRACTICAL EXAMPLES AND CONTEXT:
+   - Include concrete examples for every abstract concept
+   - Use scenarios and use cases to show practical applications
+   - Provide before/after comparisons or "what if" scenarios
+   - Use examples that students can relate to
+   - Show how concepts apply in real-world situations
+
+5. ZERO-LIST RULE (STRICT):
+   - DO NOT use bullet points or numbered lists anywhere in the lesson
+   - Convert all lists into full sentences and paragraphs
+   - If you must enumerate, do it in prose (e.g., "First..., Second..., Third...") within paragraphs
+
+LESSON STRUCTURE (PROSE-ONLY):
+
+Format the lesson in Markdown with:
+- A main heading (H1) for the section title: # {section_title}
+- Multiple subsections (3-5) using H2 headings (##) for each major topic
+- Each subsection must be substantial (300-500 words minimum) with detailed explanations
+- Use H3 subheadings (###) to organize concepts within subsections
+- Each subsection must contain at least 3 paragraphs
+- Do not use bullets, numbered lists, or list-like formatting
+- Include code examples, diagrams descriptions, or practical demonstrations when applicable
+
+Example of GOOD structure:
+# {section_title}
+
+## Introduction: Understanding the Fundamentals
+[2-3 paragraphs explaining what this section will teach and why it matters, connecting to previous knowledge]
+
+## Core Concept 1: [Detailed Explanation]
+[3-4 paragraphs explaining what this concept is, why it exists, how it works, with examples and analogies]
+[Then maybe a bullet point summary of key takeaways]
+
+## Core Concept 2: [Building on Concept 1]
+[3-4 paragraphs that reference Concept 1, show how Concept 2 relates to it, explain Concept 2 in detail]
+[Practical examples and applications]
+
+## Progressive Development: [How concepts build]
+[2-3 paragraphs showing how all concepts work together, building complexity]
+
+## Practical Applications and Examples
+[Real-world scenarios, detailed examples showing concepts in action]
+
+BAD EXAMPLE (what to avoid):
+- Just listing items: "Key characteristics: predict, understand, generate..."
+- No explanations: Just naming things without saying what they are or why they matter
+- Shallow coverage: Mentioning many topics but explaining none
+
+GOOD EXAMPLE:
+"Language models fundamentally work by analyzing probability distributions of words. But what does that actually mean? Think of it like this: when you're reading a sentence and see the word 'The', your brain immediately expects certain words to follow - probably a noun like 'cat' or 'book', not a verb like 'jumped'. This is because your brain has learned from millions of sentences that 'The' is typically followed by nouns. Language models do something similar, but using mathematical probabilities..."
+
+Return ONLY the Markdown content, no additional text or JSON wrapper."""
+            
+            # Replace placeholders with actual values
+            lesson_prompt = lesson_template.replace("{course_title}", course_title)
+            lesson_prompt = lesson_prompt.replace("{section_title}", section_title)
+            lesson_prompt = lesson_prompt.replace("{section_summary}", section_summary if section_summary else "This section covers key concepts and skills.")
+            
+            lesson_max_tokens = course_settings.get("lesson_max_tokens", 4096)
+            
+            # Use execute_with_system_prompt to bypass AI Focus Mode 80-word limit
+            # This ensures we get full detailed lessons without affecting AI Focus Mode elsewhere
+            system_prompt_text = "You are an expert educator creating comprehensive, detailed lessons. Focus on teaching concepts in depth through clear explanations and examples."
+            result = await ai.execute_with_system_prompt(
+                question=lesson_prompt,
+                system_prompt=system_prompt_text,
+                max_tokens=lesson_max_tokens
+            )
+            
+            if result.get("error"):
+                logger.error(f"[LESSON] AI error: {result.get('error')}")
+                raise HTTPException(status_code=500, detail=f"AI request failed: {result.get('error')}")
+            
+            lesson_content = result.get("answer", "").strip()
+            if not lesson_content:
+                raise HTTPException(status_code=500, detail="No lesson content generated")
+            
+            # Create lesson
+            lesson = Lesson(
+                section_id=section_id,
+                content=lesson_content
+            )
+            session.add(lesson)
+            await session.flush()
+            await session.commit()
+            
+            logger.info(f"[LESSON] Successfully created lesson {lesson.id} for section {section_id}")
+            
+            return {
+                "success": True,
+                "lesson_id": lesson.id,
+                "content": lesson_content
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating lesson: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating lesson: {str(e)}")
+
+@app.get("/api/lessons/{lesson_id}")
+async def get_lesson(lesson_id: int):
+    """Get lesson content with section and course information for navigation."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Fetch lesson with section and course
+            result = await session.execute(
+                select(Lesson)
+                .options(selectinload(Lesson.section).selectinload(CourseSection.course))
+                .where(Lesson.id == lesson_id)
+            )
+            lesson = result.scalar_one_or_none()
+            
+            if not lesson:
+                raise HTTPException(status_code=404, detail="Lesson not found")
+            
+            section = lesson.section
+            course = section.course
+            
+            return {
+                "success": True,
+                "lesson": {
+                    "id": lesson.id,
+                    "content": lesson.content,
+                    "section": {
+                        "id": section.id,
+                        "title": section.title,
+                        "order_index": section.order_index
+                    },
+                    "course": {
+                        "id": course.id,
+                        "title": course.title
+                    }
+                }
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting lesson: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting lesson: {str(e)}")
 
 @app.get("/api/devices/health")
 async def get_devices_health():
