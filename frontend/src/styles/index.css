@@ -52,6 +52,19 @@ body {
   z-index: 1000;
 }
 
+/* Color Inversion */
+:root.color-inverted {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+:root.color-inverted img,
+:root.color-inverted video,
+:root.color-inverted iframe,
+:root.color-inverted canvas,
+:root.color-inverted svg {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 /* Top Bar - Removed */
 
 /* Top bar styles removed */
@@ -3282,24 +3295,35 @@ body {
   line-height: 1.6;
 }
 
-.ai-focus-persona-avatar-container {
+/* Persona avatar container in message list (answer) - reserve space for play button */
+.ai-focus-answer .ai-focus-persona-avatar-container {
   position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  width: 68px; /* 32px avatar + 8px gap + 28px button = reserve space to prevent jump */
+  min-width: 68px;
 }
 
-.ai-focus-persona-avatar,
-.ai-focus-persona-avatar-placeholder {
-  width: 160px;
-  height: 160px;
-  min-width: 160px;
-  min-height: 160px;
+/* Persona avatar in message list - 32px */
+.ai-focus-answer .ai-focus-persona-avatar,
+.ai-focus-answer .ai-focus-persona-avatar-placeholder {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
   border-radius: 50%;
   flex-shrink: 0;
   object-fit: cover;
   aspect-ratio: 1 / 1;
+}
+
+/* Persona avatar placeholder in message list */
+.ai-focus-answer .ai-focus-persona-avatar-placeholder {
+  font-size: 0.9rem;
 }
 
 .ai-focus-persona-avatar-placeholder {

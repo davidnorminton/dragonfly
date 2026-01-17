@@ -1,0 +1,178 @@
+/* Night Mode Button - Fixed bottom right */
+.night-mode-button {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+  box-shadow: none;
+  transition: all 0.3s ease;
+  padding: 0;
+}
+
+.night-mode-button:hover {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  transform: scale(1.1);
+  box-shadow: none;
+}
+
+.night-mode-button:active {
+  transform: scale(0.95);
+}
+
+.night-mode-button svg {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+/* Night Mode Overlay - Slides down from top */
+.night-mode-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  animation: slideDown 0.5s ease-out;
+}
+
+.night-mode-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+}
+
+/* Upcoming Alarms */
+.night-mode-alarms {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  margin-top: 20px;
+}
+
+.night-mode-alarm-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  backdrop-filter: blur(10px);
+  position: relative;
+  min-width: 120px;
+}
+
+/* Alarm clock bell icon on top */
+.night-mode-alarm-item::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 12px 12px 0 0;
+}
+
+.night-mode-alarm-icon {
+  width: 24px;
+  height: 24px;
+  color: #ffffff;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  margin-top: 4px;
+}
+
+.night-mode-alarm-time {
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: #ffffff;
+  font-family: sans-serif;
+  letter-spacing: 0.05em;
+}
+
+/* Day icon button in overlay - bottom right corner */
+.night-mode-overlay-button {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 12px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 10002;
+}
+
+.night-mode-overlay-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.1);
+}
+
+.night-mode-overlay-button:active {
+  transform: scale(0.95);
+}
+
+.night-mode-overlay-button svg {
+  width: 32px;
+  height: 32px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Time display in center */
+.night-mode-time {
+  font-size: 8rem;
+  font-weight: 300;
+  color: #ffffff;
+  font-family: sans-serif;
+  letter-spacing: 0.1em;
+  user-select: none;
+  text-align: center;
+}
+

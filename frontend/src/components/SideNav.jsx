@@ -7,6 +7,10 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
   const [mediaMenuOpen, setMediaMenuOpen] = useState(false);
   const [funMenuOpen, setFunMenuOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const [isInverted, setIsInverted] = useState(() => {
+    const stored = localStorage.getItem('colorInverted');
+    return stored === 'true';
+  });
   const { currentTitle } = usePersonas();
   
   // Check if selected user is an admin
@@ -31,6 +35,15 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
       document.removeEventListener('MSFullscreenChange', checkFullscreen);
     };
   }, []);
+
+  // Apply initial color inversion on mount
+  useEffect(() => {
+    if (isInverted) {
+      document.documentElement.classList.add('color-inverted');
+    } else {
+      document.documentElement.classList.remove('color-inverted');
+    }
+  }, [isInverted]);
 
   // Close all submenus
   const closeAllSubmenus = () => {
@@ -66,6 +79,19 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
       }
     } catch (error) {
       console.error('Error toggling fullscreen:', error);
+    }
+  };
+
+  // Toggle color inversion
+  const toggleColorInversion = () => {
+    const newState = !isInverted;
+    setIsInverted(newState);
+    localStorage.setItem('colorInverted', newState.toString());
+    
+    if (newState) {
+      document.documentElement.classList.add('color-inverted');
+    } else {
+      document.documentElement.classList.remove('color-inverted');
     }
   };
 
@@ -167,7 +193,13 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
         }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9h-4v4h-2v-4H9V9h4V5h2v4h4v2z"/>
+          {/* Film strip with perforations */}
+          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h16V6H4z"/>
+          <path d="M6 8h2v2H6V8zm0 4h2v2H6v-2zm14-4h-2v2h2V8zm0 4h-2v2h2v-2z"/>
+          {/* Photo/video frame overlay */}
+          <path d="M8 10h8v6H8v-6zm1 1v4h6v-4H9z"/>
+          {/* Music note */}
+          <path d="M15 3v6.5c-.3-.1-.6-.2-1-.2-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2V7h2V3h-3z"/>
         </svg>
       </button>
 
@@ -303,16 +335,27 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
               <span>Stories</span>
             </button>
             <button
-              className="side-nav-fun-submenu-item"
+              className={`side-nav-fun-submenu-item ${activePage === 'courses' || activePage === 'course-contents' ? 'active' : ''}`}
               onClick={() => {
                 closeAllSubmenus();
-                // Placeholder for games - no navigation yet
+                onNavigate?.('courses');
               }}
-              style={{ opacity: 0.5, cursor: 'not-allowed' }}
-              disabled
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+              </svg>
+              <span>Courses</span>
+            </button>
+            <button
+              className={`side-nav-fun-submenu-item ${activePage === 'games' ? 'active' : ''}`}
+              onClick={() => {
+                closeAllSubmenus();
+                onNavigate?.('games');
+              }}
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M15.5 12c0 .38-.21.71-.53.88l-3.17 1.83c-.16.09-.33.13-.5.13s-.34-.04-.5-.13l-3.17-1.83c-.32-.17-.53-.5-.53-.88V8.12c0-.38.21-.71.53-.88l3.17-1.83c.16-.09.33-.13.5-.13s.34.04.5.13l3.17 1.83c.32.17.53.5.53.88V12zm-4-2.5l2.5 1.44-2.5 1.44v-2.88z"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
               </svg>
               <span>Games</span>
             </button>
@@ -442,6 +485,19 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
                 </svg>
               )}
               <span>{isFullscreen ? "Exit Fullscreen" : "Fullscreen"}</span>
+            </button>
+            <button
+              className="side-nav-tools-submenu-item"
+              onClick={() => {
+                closeAllSubmenus();
+                toggleColorInversion();
+              }}
+              title={isInverted ? "Disable Color Inversion" : "Invert Colors"}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+              <span>{isInverted ? "Disable Invert" : "Invert Colors"}</span>
             </button>
             {isAdmin && (
               <button

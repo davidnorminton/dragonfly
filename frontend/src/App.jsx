@@ -16,14 +16,32 @@ import { NewsPage } from './pages/News';
 import { StoriesPage } from './pages/Stories';
 import { CreateStoryPage } from './pages/CreateStory';
 import { StoryViewPage } from './pages/StoryView';
+import { CoursesPage } from './pages/Courses';
+import { CourseContentsPage } from './pages/CourseContents';
+import { LessonViewPage } from './pages/LessonView';
 import { SettingsPage } from './pages/Settings';
 import { AlertsPage } from './pages/Alerts';
 import { UsersPage } from './pages/Users';
 import { AddUserPage } from './pages/AddUser';
 import { EditUserPage } from './pages/EditUser';
 import { AIFocusPage } from './pages/AIFocus';
+import { GamesPage } from './pages/Games';
+import { SpaceInvadersPage } from './pages/SpaceInvaders';
+import { PongPage } from './pages/Pong';
+import { BreakoutPage } from './pages/Breakout';
+import { SnakePage } from './pages/Snake';
+import { FlappyBirdPage } from './pages/FlappyBird';
+import { TetrisPage } from './pages/Tetris';
+import { AsteroidsPage } from './pages/Asteroids';
+import { GradiusPage } from './pages/Gradius';
+import { PacManPage } from './pages/PacMan';
+import { FroggerPage } from './pages/Frogger';
+import { CentipedePage } from './pages/Centipede';
+import { MissileCommandPage } from './pages/MissileCommand';
+import { GoldenAxePage } from './pages/GoldenAxe';
 import { SearchOverlay } from './components/SearchOverlay';
 import { WaveformMic } from './components/WaveformMic';
+import { NightModeButton } from './components/NightModeButton';
 import './styles/index.css';
 
 function App() {
@@ -38,7 +56,11 @@ function App() {
   const [activePage, setActivePage] = useState(() => {
     // Check URL hash first
     const hash = window.location.hash.slice(1);
-    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'stories', 'create-story', 'edit-story', 'story-view', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus'].includes(hash)) {
+    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'stories', 'create-story', 'edit-story', 'story-view', 'courses', 'course-contents', 'lesson-view', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
+    } else if (hash && hash.startsWith('games/')) {
+      return hash;
+    } else if (hash && hash.startsWith('games/')) {
+      // Handle nested game routes
       return hash;
     }
     // Fallback to localStorage
@@ -81,7 +103,12 @@ function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.slice(1);
-      if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus'].includes(hash)) {
+      // Check for exact matches first
+      if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
+        setActivePage(hash);
+        localStorage.setItem('activePage', hash);
+        setSearchOverlayOpen(false);
+      } else if (hash && hash.startsWith('games/')) {
         setActivePage(hash);
         localStorage.setItem('activePage', hash);
         setSearchOverlayOpen(false);
@@ -178,7 +205,19 @@ function App() {
       ) : activePage === 'news' ? (
         <NewsPage />
       ) : activePage === 'stories' ? (
-        <StoriesPage 
+        <StoriesPage
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            if (data) {
+              setPageData(data);
+            }
+          }}
+          selectedUser={selectedUser}
+        />
+      ) : activePage === 'courses' ? (
+        <CoursesPage
           onNavigate={(page, data) => {
             setActivePage(page);
             window.location.hash = page;
@@ -216,7 +255,7 @@ function App() {
           editMode={true}
         />
       ) : activePage === 'story-view' ? (
-        <StoryViewPage 
+        <StoryViewPage
           onNavigate={(page, data) => {
             setActivePage(page);
             window.location.hash = page;
@@ -227,6 +266,34 @@ function App() {
           }}
           pageData={pageData}
           selectedUser={selectedUser}
+        />
+      ) : activePage === 'course-contents' ? (
+        <CourseContentsPage
+          courseId={pageData?.courseId}
+          courseData={pageData?.courseData}
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            if (data) {
+              setPageData(data);
+            }
+          }}
+          selectedUser={selectedUser}
+        />
+      ) : activePage === 'lesson-view' ? (
+        <LessonViewPage
+          lessonId={pageData?.lessonId}
+          sectionId={pageData?.sectionId}
+          courseId={pageData?.courseId}
+          onNavigate={(page, data) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            if (data) {
+              setPageData(data);
+            }
+          }}
         />
       ) : activePage === 'settings' ? (
         <SettingsPage onNavigate={(page) => {
@@ -272,6 +339,146 @@ function App() {
         />
       ) : activePage === 'ai-focus' ? (
         <AIFocusPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games' ? (
+        <GamesPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/space-invaders' ? (
+        <SpaceInvadersPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/pong' ? (
+        <PongPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/breakout' ? (
+        <BreakoutPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/snake' ? (
+        <SnakePage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/flappy-bird' ? (
+        <FlappyBirdPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/tetris' ? (
+        <TetrisPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/asteroids' ? (
+        <AsteroidsPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/gradius' ? (
+        <GradiusPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/pac-man' ? (
+        <PacManPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/frogger' ? (
+        <FroggerPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/centipede' ? (
+        <CentipedePage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/missile-command' ? (
+        <MissileCommandPage 
+          selectedUser={selectedUser}
+          onNavigate={(page) => {
+            setActivePage(page);
+            window.location.hash = page;
+            localStorage.setItem('activePage', page);
+            setSearchOverlayOpen(false);
+          }}
+        />
+      ) : activePage === 'games/golden-axe' ? (
+        <GoldenAxePage 
           selectedUser={selectedUser}
           onNavigate={(page) => {
             setActivePage(page);
@@ -326,6 +533,8 @@ function App() {
           selectedUser={selectedUser}
         />
       )}
+      {/* Night mode button - fixed bottom right */}
+      <NightModeButton />
     </div>
   );
 }
