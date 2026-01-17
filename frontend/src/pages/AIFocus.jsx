@@ -228,7 +228,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
 
           if (rms < threshold) {
             if (silenceStart === 0) silenceStart = now;
-            if (now - silenceStart > 2000) {
+            if (now - silenceStart > 1200) { // Reduced from 2000ms for faster response
               stopRecording();
               return;
             }
@@ -271,17 +271,33 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
           
           // Handle based on AI focus mode
           if (aiFocusMode === 'question') {
-            // Direct AI question mode - stream text first, then audio
+            // Direct AI question mode - stream text AND generate audio in parallel
             try {
-              console.log('[QUESTION MODE] Starting streaming pipeline...');
+              console.log('[QUESTION MODE] Starting parallel streaming pipeline...');
               const startTime = Date.now();
               
               let responseText = '';
               let firstTextChunk = null;
               let firstAudioChunk = null;
               
+              // Parallel TTS generation state
+              let accumulatedTextForSentences = '';
+              let audioStreamStarted = false;
+              let mediaSource = null;
+              let sourceBuffer = null;
+              let audioQueue = [];
+              let isAppending = false;
+              let audioStarted = false;
+              let audioElement = null;
+              let totalAudioBytes = 0;
+              const sentenceMinLength = 20; // Min chars before considering a sentence (reduced from 30 for faster response)
+              
+              // Sentence processing queue to prevent overlapping audio
+              const sentenceQueue = [];
+              let isProcessingSentence = false;
+              
               // Step 1: Stream text from AI and display it
-              console.log('[STREAM] Streaming text response...');
+              console.log('[STREAM] Streaming text response with parallel TTS...');
               
               // Add question to conversation
               const currentQuestion = transcript;
@@ -342,6 +358,133 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
               setAiFocusConversations(prev => [...prev, { question: currentQuestion, answer: '', isStreaming: true, messageId: null, persona: personaAtQuestionTime }]);
               setMicStatus('thinking');
               
+              // Function to generate audio for a sentence (called sequentially)
+              const generateAudioForSentence = async (sentence) => {
+                try {
+                  console.log(`[PARALLEL TTS] Generating audio for sentence: "${sentence.substring(0, 50)}..."`);
+                  const response = await fetch('/api/ai/text-to-audio-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: sentence })
+                  });
+                  
+                  if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                  }
+                  
+                  const reader = response.body.getReader();
+                  
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                      console.log(`[PARALLEL TTS] Finished sentence audio generation`);
+                      break;
+                    }
+                    
+                    if (firstAudioChunk === null) {
+                      firstAudioChunk = Date.now() - startTime;
+                      console.log(`[PARALLEL TTS] First audio chunk in ${firstAudioChunk}ms`);
+                      stopFillerAudio();
+                    }
+                    
+                    totalAudioBytes += value.length;
+                    
+                    // Add audio chunk to queue for sequential playback
+                    if (isAppending || audioQueue.length > 0) {
+                      audioQueue.push(value);
+                    } else if (sourceBuffer && !sourceBuffer.updating) {
+                      isAppending = true;
+                      sourceBuffer.appendBuffer(value);
+                    } else {
+                      audioQueue.push(value);
+                    }
+                    
+                    // Start playback once we have enough data
+                    if (!audioStarted && totalAudioBytes > 4096 && audioElement) {
+                      audioStarted = true;
+                      try {
+                        await audioElement.play();
+                        console.log(`[PARALLEL TTS] Audio playback started in ${Date.now() - startTime}ms`);
+                        setMicStatus('thinking');
+                      } catch (playErr) {
+                        console.error('[PARALLEL TTS] Audio play failed:', playErr);
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.error('[PARALLEL TTS] Error generating audio for sentence:', err);
+                }
+              };
+              
+              // Process sentences from queue sequentially
+              const processSentenceQueue = async () => {
+                if (isProcessingSentence || sentenceQueue.length === 0) {
+                  return;
+                }
+                
+                isProcessingSentence = true;
+                
+                while (sentenceQueue.length > 0) {
+                  const sentence = sentenceQueue.shift();
+                  console.log(`[PARALLEL TTS] Processing queued sentence (${sentenceQueue.length} remaining)`);
+                  await generateAudioForSentence(sentence);
+                }
+                
+                isProcessingSentence = false;
+                console.log(`[PARALLEL TTS] Sentence queue empty`);
+              };
+              
+              // Initialize audio stream on first sentence
+              const initializeAudioStream = () => {
+                return new Promise((resolve) => {
+                  if (audioStreamStarted) {
+                    resolve();
+                    return;
+                  }
+                  audioStreamStarted = true;
+                  
+                  console.log('[PARALLEL TTS] Initializing audio stream');
+                  mediaSource = new MediaSource();
+                  audioElement = new Audio();
+                  audioElement.src = URL.createObjectURL(mediaSource);
+                  setAudioObj(audioElement);
+                  
+                  mediaSource.addEventListener('sourceopen', () => {
+                    console.log('[PARALLEL TTS] MediaSource opened and ready');
+                    sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+                    
+                    sourceBuffer.addEventListener('updateend', () => {
+                      isAppending = false;
+                      // Process next chunk in queue
+                      if (audioQueue.length > 0 && !isAppending) {
+                        isAppending = true;
+                        const nextChunk = audioQueue.shift();
+                        sourceBuffer.appendBuffer(nextChunk);
+                      }
+                    });
+                    
+                    resolve(); // MediaSource is now ready
+                  });
+                  
+                  audioElement.onended = () => {
+                    console.log('[PARALLEL TTS] Audio ended');
+                    setMicStatus('idle');
+                    setAiResponseText('');
+                    URL.revokeObjectURL(audioElement.src);
+                  };
+                  
+                  audioElement.onplay = () => {
+                    setMicStatus('thinking');
+                  };
+                  
+                  audioElement.onerror = (err) => {
+                    console.error('[PARALLEL TTS] Audio error:', err, audioElement.error);
+                    setMicStatus('idle');
+                    setAiResponseText('');
+                  };
+                });
+              };
+              
               // Pass session_id and persona to include conversation context
               // Use the established session ID - it will never change for this chat
               await aiAPI.askQuestionStream({ 
@@ -356,7 +499,35 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                     console.log(`[STREAM] First text chunk in ${firstTextChunk}ms`);
                   }
                   responseText += data.chunk;
+                  accumulatedTextForSentences += data.chunk;
                   setAiResponseText(responseText);
+                  
+                  // Check for complete sentences and generate audio immediately
+                  // Look for sentence endings: . ! ? followed by space or end of text
+                  const sentenceMatch = accumulatedTextForSentences.match(/^(.*?[.!?])(\s+|$)/);
+                  if (sentenceMatch && sentenceMatch[1].length >= sentenceMinLength) {
+                    const completeSentence = sentenceMatch[1].trim();
+                    accumulatedTextForSentences = accumulatedTextForSentences.slice(sentenceMatch[0].length);
+                    
+                    console.log(`[PARALLEL TTS] Detected complete sentence (${completeSentence.length} chars): "${completeSentence.substring(0, 50)}..."`);
+                    
+                    // Add sentence to queue
+                    sentenceQueue.push(completeSentence);
+                    console.log(`[PARALLEL TTS] Added to queue (queue size: ${sentenceQueue.length})`);
+                    
+                    // Initialize audio stream on first sentence and wait for it to be ready
+                    if (!audioStreamStarted) {
+                      initializeAudioStream().then(() => {
+                        console.log('[PARALLEL TTS] Audio stream ready, starting sequential processing');
+                        // Start processing sentence queue
+                        processSentenceQueue();
+                      });
+                    } else {
+                      // Audio stream already initialized, process queue
+                      processSentenceQueue();
+                    }
+                  }
+                  
                   // Update the last conversation entry with streaming answer
                   setAiFocusConversations(prev => {
                     const updated = [...prev];
@@ -370,6 +541,58 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                   console.log(`[STREAM] Text complete in ${textTime}ms, length: ${responseText.length}`);
                   responseText = data.full_text || responseText;
                   setAiResponseText(responseText);
+                  
+                  // Generate audio for any remaining text that hasn't been processed
+                  if (accumulatedTextForSentences.trim().length > 0) {
+                    console.log(`[PARALLEL TTS] Adding final fragment to queue: "${accumulatedTextForSentences.trim().substring(0, 50)}..."`);
+                    
+                    sentenceQueue.push(accumulatedTextForSentences.trim());
+                    
+                    if (!audioStreamStarted) {
+                      initializeAudioStream().then(() => {
+                        processSentenceQueue().then(() => {
+                          console.log('[PARALLEL TTS] All audio generation complete');
+                          // Close the media source after all audio is generated
+                          setTimeout(() => {
+                            if (mediaSource && mediaSource.readyState === 'open') {
+                              if (audioQueue.length === 0 && !isAppending) {
+                                mediaSource.endOfStream();
+                              }
+                            }
+                          }, 1000);
+                        });
+                      });
+                    } else {
+                      processSentenceQueue().then(() => {
+                        console.log('[PARALLEL TTS] All audio generation complete');
+                        // Close the media source after all audio is generated
+                        setTimeout(() => {
+                          if (mediaSource && mediaSource.readyState === 'open') {
+                            if (audioQueue.length === 0 && !isAppending) {
+                              mediaSource.endOfStream();
+                            }
+                          }
+                        }, 1000);
+                      });
+                    }
+                  } else if (audioStreamStarted) {
+                    // If we've already started audio and there's no remaining text, wait for queue to finish then close
+                    console.log('[PARALLEL TTS] No remaining text, waiting for queue to finish');
+                    // Wait for current processing to complete
+                    const waitForQueueComplete = setInterval(() => {
+                      if (!isProcessingSentence && sentenceQueue.length === 0) {
+                        clearInterval(waitForQueueComplete);
+                        console.log('[PARALLEL TTS] Queue complete, finalizing audio stream');
+                        setTimeout(() => {
+                          if (mediaSource && mediaSource.readyState === 'open') {
+                            if (audioQueue.length === 0 && !isAppending) {
+                              mediaSource.endOfStream();
+                            }
+                          }
+                        }, 1000);
+                      }
+                    }, 100);
+                  }
                   
                   // Update the last conversation entry with final answer and persona
                   setAiFocusConversations(prev => {
@@ -452,15 +675,23 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                 console.log('[STREAM] Starting audio generation from completed text...');
                 const audioStartTime = Date.now();
                 
-                // Save audio file after a delay to ensure message is saved first
-                // Use closure variable savedMessageId which will be set in the done callback
-                setTimeout(async () => {
+                // Save audio file asynchronously (no artificial delay)
+                // Use promise-based approach instead of setTimeout for better reliability
+                (async () => {
                   try {
-                    // Use savedMessageId from closure, or try to get from state as fallback
+                    // Wait briefly for savedMessageId to be set (should happen quickly)
+                    let attempts = 0;
+                    const maxAttempts = 5;
                     let messageIdToUse = savedMessageId;
+                    
+                    while (!messageIdToUse && attempts < maxAttempts) {
+                      await new Promise(resolve => setTimeout(resolve, 200));
+                      messageIdToUse = savedMessageId;
+                      attempts++;
+                    }
+                    
                     if (!messageIdToUse) {
-                      // Fallback: try to get from state (may not be updated yet)
-                      // This is a workaround - ideally savedMessageId should be set by now
+                      // Final fallback: try to get from state
                       const currentConvs = aiFocusConversations;
                       if (currentConvs.length > 0) {
                         messageIdToUse = currentConvs[currentConvs.length - 1]?.messageId;
@@ -485,40 +716,12 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                         });
                       }
                     } else {
-                      console.warn('[AI FOCUS] No message ID available yet, will retry...');
-                      // Retry once more after another delay
-                      setTimeout(async () => {
-                        const retryConvs = aiFocusConversations;
-                        if (retryConvs.length > 0) {
-                          const retryMessageId = retryConvs[retryConvs.length - 1]?.messageId;
-                          if (retryMessageId) {
-                            try {
-                              const audioResult = await aiFocusAPI.saveAudio(responseText, retryMessageId);
-                              if (audioResult.success && audioResult.audio_file_path) {
-                                console.log('[AI FOCUS] Audio file saved on retry:', audioResult.audio_file_path);
-                                // Update conversation with audio file path
-                                setAiFocusConversations(prev => {
-                                  const updated = [...prev];
-                                  if (updated.length > 0) {
-                                    updated[updated.length - 1] = { 
-                                      ...updated[updated.length - 1], 
-                                      audioFile: audioResult.audio_file_path
-                                    };
-                                  }
-                                  return updated;
-                                });
-                              }
-                            } catch (retryErr) {
-                              console.error('[AI FOCUS] Error saving audio file on retry:', retryErr);
-                            }
-                          }
-                        }
-                      }, 1000);
+                      console.warn('[AI FOCUS] No message ID available after retries');
                     }
                   } catch (audioSaveErr) {
                     console.error('[AI FOCUS] Error saving audio file:', audioSaveErr);
                   }
-                }, 1500); // Delay to ensure message is saved first
+                })()
                 
                 // Now stream the audio for playback
                 const response = await fetch('/api/ai/text-to-audio-stream', {
@@ -598,7 +801,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                     }
                     
                     // Start playback as soon as we have some data
-                    if (!audioStarted && totalBytes > 8192) { // Wait for ~8KB
+                    if (!audioStarted && totalBytes > 4096) { // Reduced from 8KB to 4KB for faster start
                       audioStarted = true;
                       try {
                         await audio.play();
@@ -743,12 +946,8 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
       {/* Left Sidebar */}
       <div className="ai-focus-sidebar">
         <div className="ai-focus-sidebar-content">
-          {/* Mode indicator and buttons row */}
-          <div className="ai-focus-mode-header">
-            <div className="ai-focus-mode-indicator">
-              {aiFocusMode === 'question' ? 'Ask' : 'Command'}
-            </div>
-            
+          {/* Top bar with New Chat, Mode Indicator, and Persona Selector */}
+          <div className="ai-focus-top-bar">
             {/* New Chat icon button */}
             <button
               className="ai-focus-new-chat-icon"
@@ -810,6 +1009,11 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                 <path d="M12 5v14M5 12h14"/>
               </svg>
             </button>
+            
+            {/* Mode indicator - in the middle */}
+            <div className="ai-focus-mode-indicator">
+              {aiFocusMode === 'question' ? 'Ask' : 'Command'}
+            </div>
             
             {/* Persona selector icon button */}
             <button
