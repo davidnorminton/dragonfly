@@ -61,6 +61,18 @@ dragonfly/
 
 ## Installation
 
+### Linux Installation (Recommended)
+
+For Linux systems (Debian/Ubuntu, Fedora/RHEL, Arch), see the comprehensive guide:
+
+**[📖 Linux Installation Guide](LINUX_INSTALLATION.md)**
+
+Quick start:
+```bash
+chmod +x install_linux.sh
+./install_linux.sh
+```
+
 ### Raspberry Pi (ARM) Quick Start with PostgreSQL
 
 #### 1) System prep (Pi OS / Debian)
@@ -83,16 +95,9 @@ sudo apt install -y postgresql postgresql-contrib
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
 ```
-- Install ffmpeg (for audio conversion to Vosk):
+- Install ffmpeg (for audio conversion):
 ```bash
 sudo apt install -y ffmpeg
-```
-- Download Vosk model (for offline transcription):
-```bash
-mkdir -p models/vosk
-cd models/vosk
-wget https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
-unzip vosk-model-en-us-0.22.zip
 ```
 
 #### 2) Database setup (Postgres)
@@ -154,17 +159,11 @@ Access:
 - Web GUI: `http://<pi-ip>:1337`
 - WebSocket: `ws://<pi-ip>:8765`
 
-#### 7) Offline transcription (Vosk) on Pi
-- A Vosk model is required. The install script downloads `vosk-model-en-us-0.22` to `models/vosk/`.
-- If you need to download manually:
-```bash
-mkdir -p models/vosk
-cd models/vosk
-wget https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
-unzip vosk-model-en-us-0.22.zip
-```
-- Ensure ffmpeg is installed (`sudo apt install -y ffmpeg`).
-- The backend uses the model at `models/vosk/vosk-model-en-us-0.22` for local transcription.
+#### 7) Transcription service
+- Dragonfly uses **Faster Whisper** as the primary transcription service (2x faster, 95% accuracy).
+- Faster Whisper models are automatically downloaded on first use (~140MB for base.en model).
+- No manual model setup required - Faster Whisper handles model downloads automatically.
+- **Optional**: Vosk can be used as a fallback if Faster Whisper fails (requires manual model download).
 
 #### 7) Optional: system service
 Create `/etc/systemd/system/dragonfly.service` (edit paths as needed):

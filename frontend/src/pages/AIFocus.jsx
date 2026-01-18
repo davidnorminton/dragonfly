@@ -296,6 +296,17 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
               const sentenceQueue = [];
               let isProcessingSentence = false;
               
+              // Stop any existing audio before starting a new response
+              if (audioObj) {
+                try {
+                  audioObj.pause();
+                  audioObj.currentTime = 0;
+                } catch (e) {
+                  console.warn('[AI FOCUS] Error stopping previous audio:', e);
+                }
+              }
+              stopFillerAudio();
+
               // Step 1: Stream text from AI and display it
               console.log('[STREAM] Streaming text response with parallel TTS...');
               
@@ -670,9 +681,9 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                 }
               });
               
-              // Step 2: Generate and save audio file, then stream it
+              // Step 2: Save audio file for playback later (do not auto-play again)
               if (responseText) {
-                console.log('[STREAM] Starting audio generation from completed text...');
+                console.log('[STREAM] Saving audio file from completed text...');
                 const audioStartTime = Date.now();
                 
                 // Save audio file asynchronously (no artificial delay)
@@ -722,114 +733,6 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                     console.error('[AI FOCUS] Error saving audio file:', audioSaveErr);
                   }
                 })()
-                
-                // Now stream the audio for playback
-                const response = await fetch('/api/ai/text-to-audio-stream', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ text: responseText })
-                });
-                
-                if (!response.ok) {
-                  throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                console.log('[STREAM] Audio stream started');
-                
-                // Create audio element with MediaSource for streaming playback
-                const mediaSource = new MediaSource();
-                const audio = new Audio();
-                audio.src = URL.createObjectURL(mediaSource);
-                setAudioObj(audio);
-                
-                let sourceBuffer = null;
-                let audioStarted = false;
-                const audioQueue = [];
-                let isAppending = false;
-                
-                mediaSource.addEventListener('sourceopen', async () => {
-                  console.log('[STREAM] MediaSource opened');
-                  sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-                  
-                  sourceBuffer.addEventListener('updateend', () => {
-                    isAppending = false;
-                    // Process next chunk in queue
-                    if (audioQueue.length > 0 && !isAppending) {
-                      isAppending = true;
-                      const nextChunk = audioQueue.shift();
-                      sourceBuffer.appendBuffer(nextChunk);
-                    } else if (audioQueue.length === 0 && mediaSource.readyState === 'open') {
-                      // Check if stream is complete
-                      if (response.body.locked) {
-                        // Still reading, wait for more
-                      } else {
-                        mediaSource.endOfStream();
-                      }
-                    }
-                  });
-                  
-                  // Read stream chunks
-                  const reader = response.body.getReader();
-                  let totalBytes = 0;
-                  
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                      console.log(`[STREAM] Audio stream complete, total: ${totalBytes} bytes`);
-                      // Wait for queue to empty before ending stream
-                      if (audioQueue.length === 0 && !isAppending && mediaSource.readyState === 'open') {
-                        mediaSource.endOfStream();
-                      }
-                      break;
-                    }
-                    
-                    if (firstAudioChunk === null) {
-                      firstAudioChunk = Date.now() - startTime;
-                      console.log(`[STREAM] First audio chunk in ${firstAudioChunk}ms`);
-                      stopFillerAudio();
-                      setMicStatus('thinking');
-                    }
-                    
-                    totalBytes += value.length;
-                    
-                    // Add to queue or append directly
-                    if (isAppending || audioQueue.length > 0) {
-                      audioQueue.push(value);
-                    } else {
-                      isAppending = true;
-                      sourceBuffer.appendBuffer(value);
-                    }
-                    
-                    // Start playback as soon as we have some data
-                    if (!audioStarted && totalBytes > 4096) { // Reduced from 8KB to 4KB for faster start
-                      audioStarted = true;
-                      try {
-                        await audio.play();
-                        console.log(`[STREAM] Audio playback started in ${Date.now() - startTime}ms`);
-                      } catch (playErr) {
-                        console.error('[STREAM] Audio play failed:', playErr);
-                      }
-                    }
-                  }
-                });
-                
-                audio.onended = () => {
-                  console.log('[STREAM] Audio ended');
-                  setMicStatus('idle');
-                  setAiResponseText('');
-                  URL.revokeObjectURL(audio.src);
-                };
-                
-                // Keep status as thinking while audio is playing
-                audio.onplay = () => {
-                  setMicStatus('thinking');
-                };
-                
-                audio.onerror = (err) => {
-                  console.error('[STREAM] Audio error:', err, audio.error);
-                  setMicStatus('idle');
-                  setAiResponseText('');
-                };
                 
               } else {
                 console.log('[STREAM] No text to generate audio from');

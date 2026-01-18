@@ -507,11 +507,11 @@ async def startup_event():
     asyncio.create_task(_check_alarms_task())
     logger.info("Started alarm checking background task")
 
-# Vosk model path (warn if missing)
+# Vosk model path (optional fallback - not required if Faster Whisper is working)
 VOSK_MODEL_PREFERRED = Path(__file__).parent / ".." / "models" / "vosk" / "vosk-model-en-us-0.22"
 if not VOSK_MODEL_PREFERRED.exists():
-    logger.warning(
-        "Vosk model missing at %s. Download from https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip and unzip into models/vosk/",
+    logger.debug(
+        "Vosk model not found at %s (optional fallback - Faster Whisper is primary transcription service)",
         VOSK_MODEL_PREFERRED,
     )
 

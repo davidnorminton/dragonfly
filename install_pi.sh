@@ -84,15 +84,20 @@ echo "==> Building frontend"
 npm run build
 popd >/dev/null
 
-echo "==> Downloading Vosk model (offline transcription)"
-mkdir -p "$PROJECT_DIR/models/vosk"
-if [[ ! -d "$PROJECT_DIR/models/vosk/$VOSK_MODEL_DIR" ]]; then
-  tmpzip="$(mktemp /tmp/vosk.XXXX.zip)"
-  echo "Fetching $VOSK_MODEL_URL ..."
-  curl -L "$VOSK_MODEL_URL" -o "$tmpzip"
-  unzip -o "$tmpzip" -d "$PROJECT_DIR/models/vosk"
-  rm -f "$tmpzip"
-fi
+echo "==> Note: Faster Whisper is the primary transcription service"
+echo "==> Faster Whisper models download automatically on first use (~140MB)"
+echo "==> Vosk model is optional and only used as fallback if Faster Whisper fails"
+echo "==> Skipping Vosk model download (not required)"
+# Uncomment below if you want Vosk as a fallback:
+# echo "==> Downloading Vosk model (optional fallback)"
+# mkdir -p "$PROJECT_DIR/models/vosk"
+# if [[ ! -d "$PROJECT_DIR/models/vosk/$VOSK_MODEL_DIR" ]]; then
+#   tmpzip="$(mktemp /tmp/vosk.XXXX.zip)"
+#   echo "Fetching $VOSK_MODEL_URL ..."
+#   curl -L "$VOSK_MODEL_URL" -o "$tmpzip"
+#   unzip -o "$tmpzip" -d "$PROJECT_DIR/models/vosk"
+#   rm -f "$tmpzip"
+# fi
 
 echo "==> Setup complete."
 echo "To run:"
