@@ -88,10 +88,15 @@ class VideoScanner:
         """Scan Movies directory for movie files."""
         logger.info("\n" + "🎥 SCANNING MOVIES" + "="*66)
         
-        movie_files = [f for f in self.movies_dir.iterdir() 
-                      if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS]
+        movie_files = [
+            f for f in self.movies_dir.iterdir() 
+            if f.is_file() 
+            and f.suffix.lower() in VIDEO_EXTENSIONS
+            and not f.name.startswith('._')  # Skip macOS metadata files
+            and not f.name.startswith('.DS_Store')  # Skip macOS Finder files
+        ]
         
-        logger.info(f"Found {len(movie_files)} movie files")
+        logger.info(f"Found {len(movie_files)} movie files (excluding hidden/metadata files)")
         
         movie_count = 0
         
@@ -293,8 +298,13 @@ class VideoScanner:
                         # Look for episode files to extract metadata
                         season_dirs = [d for d in show_dir.iterdir() if d.is_dir() and d.name.isdigit()]
                         for season_dir in season_dirs[:1]:  # Check first season only
-                            episode_files = [f for f in season_dir.iterdir()
-                                           if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS]
+                            episode_files = [
+                                f for f in season_dir.iterdir()
+                                if f.is_file() 
+                                and f.suffix.lower() in VIDEO_EXTENSIONS
+                                and not f.name.startswith('._')  # Skip macOS metadata files
+                                and not f.name.startswith('.DS_Store')  # Skip macOS Finder files
+                            ]
                             for ep_file in episode_files[:3]:  # Check first 3 episodes
                                 show_name_from_metadata = self._extract_show_name_from_metadata(ep_file)
                                 if show_name_from_metadata:
@@ -405,8 +415,13 @@ class VideoScanner:
                         season_count += 1
                         
                         # Scan episodes
-                        episode_files = [f for f in season_dir.iterdir()
-                                        if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS]
+                        episode_files = [
+                            f for f in season_dir.iterdir()
+                            if f.is_file() 
+                            and f.suffix.lower() in VIDEO_EXTENSIONS
+                            and not f.name.startswith('._')  # Skip macOS metadata files
+                            and not f.name.startswith('.DS_Store')  # Skip macOS Finder files
+                        ]
                         logger.info(f"    📹 Found {len(episode_files)} episode files")
                         
                         # Track metadata titles to detect duplicates (which would indicate incorrect metadata)
