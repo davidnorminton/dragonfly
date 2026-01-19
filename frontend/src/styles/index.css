@@ -2639,6 +2639,39 @@ body {
   min-height: 200px; /* Room for animation */
 }
 
+.ai-focus-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-focus-avatar-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ai-focus-avatar-toggle:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.ai-focus-pixel-canvas {
+  width: 160px;
+  height: 160px;
+  display: block;
+  image-rendering: pixelated;
+  object-fit: cover;
+  border-radius: 0;
+}
+
 /* Mode indicator - in top bar between buttons */
 .ai-focus-mode-indicator {
   flex: 1;
@@ -2850,7 +2883,11 @@ body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 50%;
+}
+
+/* Remove border radius when showing pixel canvas */
+.ai-focus-persona-avatar:has(.ai-focus-pixel-canvas) {
+  border-radius: 0 !important;
 }
 
 .persona-avatar-img {

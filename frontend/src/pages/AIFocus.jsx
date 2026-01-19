@@ -29,6 +29,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   const [generatingAiFocusTitle, setGeneratingAiFocusTitle] = useState(null); // Session generating title
   const [deleteConfirmAiFocusSession, setDeleteConfirmAiFocusSession] = useState(null); // Session to delete
   const [showPersonaSelector, setShowPersonaSelector] = useState(false); // Show persona selector popup
+  const [showPixelAvatar, setShowPixelAvatar] = useState(false);
   
   const { selectPersona, currentTitle, personas, currentPersona, reload: reloadPersonas } = usePersonas(selectedUser?.id);
 
@@ -935,22 +936,44 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
           <div className="ai-focus-avatar-container">
             {/* Avatar near top with room for animation */}
             <div className="ai-focus-sidebar-avatar">
-              <div
-                className={`ai-focus-mic ${
-                  ['listening', 'thinking'].includes(micStatus) ? 'active' : 'off'
-                }`}
-                role="button"
-                tabIndex={0}
-                onClick={beginListening}
-                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
-                title="Start microphone"
-              >
-                <AIFocusMic 
-                  personas={personas}
-                  currentPersona={currentPersona}
-                  currentTitle={currentTitle}
-                  micStatus={micStatus}
-                />
+              <div className="ai-focus-avatar-row">
+                <div
+                  className={`ai-focus-mic ${
+                    ['listening', 'thinking'].includes(micStatus) ? 'active' : 'off'
+                  }`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={beginListening}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && beginListening()}
+                  title="Start microphone"
+                >
+                  <AIFocusMic 
+                    personas={personas}
+                    currentPersona={currentPersona}
+                    currentTitle={currentTitle}
+                    micStatus={micStatus}
+                    showPixelAvatar={showPixelAvatar}
+                  />
+                </div>
+                <button
+                  className="ai-focus-avatar-toggle"
+                  onClick={() => setShowPixelAvatar(prev => !prev)}
+                  title={showPixelAvatar ? 'Show image' : 'Show pixel canvas'}
+                  aria-label={showPixelAvatar ? 'Show image' : 'Show pixel canvas'}
+                  type="button"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="3" y="3" width="6" height="6"/>
+                    <rect x="10.5" y="3" width="4.5" height="4.5"/>
+                    <rect x="16.5" y="3" width="4.5" height="4.5"/>
+                    <rect x="3" y="10.5" width="4.5" height="4.5"/>
+                    <rect x="9" y="9" width="6" height="6"/>
+                    <rect x="16.5" y="10.5" width="4.5" height="4.5"/>
+                    <rect x="3" y="16.5" width="4.5" height="4.5"/>
+                    <rect x="10.5" y="16.5" width="4.5" height="4.5"/>
+                    <rect x="16.5" y="16.5" width="4.5" height="4.5"/>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>

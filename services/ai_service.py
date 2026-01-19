@@ -192,9 +192,14 @@ class AIService(BaseService):
         
         # Add AI focus mode specific instruction
         if is_ai_focus_mode:
-            ai_focus_instruction = "Keep your answers concise and to the point, limiting responses to 80 words or less."
+            ai_focus_instruction = """Keep your answers concise and to the point, limiting responses to 80 words or less.
+
+IMPORTANT: All text will be converted to speech.
+- Do not use contractions or shortened forms.
+- Always expand words fully (e.g., "I'm" → "I am", "you're" → "you are", "won't" → "will not").
+- Use clear, natural full sentences."""
             system_prompt_parts.append(ai_focus_instruction)
-            self.logger.info("✅ Added AI focus mode instruction: keep answers to 80 words or less")
+            self.logger.info("✅ Added AI focus mode instruction: keep answers to 80 words or less, expand contractions for TTS")
         
         result = "\n\n".join(system_prompt_parts) if system_prompt_parts else None
         if result:
@@ -306,6 +311,44 @@ class AIService(BaseService):
                 "error": str(e)
             }
     
+    async def stream_execute_with_system_prompt(self, question: str, system_prompt: str, max_tokens: int = 1024):
+        """
+        Execute AI query with a custom system prompt, streaming the response.
+        Useful for API-style tasks that need specific formatting (like JSON responses).
+        
+        Args:
+            question: The user's question/prompt
+            system_prompt: Custom system prompt to use
+            max_tokens: Maximum tokens for response (default 1024)
+        
+        Yields:
+            str - Chunks of the AI's response
+        """
+        await self._load_api_key()
+        
+        if not self.async_client:
+            yield "AI service is not configured. Please add your Anthropic API key in Settings."
+            return
+        
+        try:
+            self.logger.info(f"Processing AI question with custom system prompt (streaming): {question[:100]}...")
+            
+            async with self.async_client.messages.stream(
+                model=settings.ai_model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[{
+                    "role": "user",
+                    "content": question
+                }]
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+            
+        except Exception as e:
+            self.logger.error(f"Error calling Anthropic API (streaming): {e}", exc_info=True)
+            yield f"Error: {str(e)}"
+    
     async def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute AI service.
@@ -377,10 +420,20 @@ class AIService(BaseService):
                 except Exception as e:
                     self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
             
+            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
+            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
+            
+            # For AI Focus Mode: filter conversation history to only include assistant responses
+            if is_ai_focus_mode and conversation_history:
+                conversation_history = [msg for msg in conversation_history if msg.get("role") == "assistant"]
+                self.logger.info(f"🔍 AI Focus Mode: Filtered conversation history to {len(conversation_history)} assistant messages only")
+            
             # Get max_tokens from input_data first, then check system config only if explicitly requested (for AI focus mode/test persona)
             max_tokens_override = input_data.get("max_tokens")
             if max_tokens_override is None and input_data.get("use_system_max_tokens"):
-                max_tokens_override = await self._get_system_max_tokens()
+                # AI Focus Mode: use 220 tokens instead of system config
+                max_tokens_override = 220
+                self.logger.info(f"🔍 AI Focus Mode: Using max_tokens=220")
             
             # Get persona settings or use defaults
             persona_settings = {}
@@ -402,8 +455,6 @@ class AIService(BaseService):
                 }
             
             # Build system prompt with pre-context
-            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
-            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
             system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
             if system_prompt:
                 self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
@@ -514,13 +565,28 @@ class AIService(BaseService):
                 except Exception as e:
                     self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
             
+            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
+            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
+            
+            # For AI Focus Mode: filter conversation history to only include assistant responses
+            if is_ai_focus_mode and conversation_history:
+                conversation_history = [msg for msg in conversation_history if msg.get("role") == "assistant"]
+                self.logger.info(f"🔍 AI Focus Mode: Filtered conversation history to {len(conversation_history)} assistant messages only")
+            
+            # Get max_tokens from input_data first, then check system config only if explicitly requested (for AI focus mode/test persona)
+            max_tokens_override = input_data.get("max_tokens")
+            if max_tokens_override is None and input_data.get("use_system_max_tokens"):
+                # AI Focus Mode: use 220 tokens instead of system config
+                max_tokens_override = 220
+                self.logger.info(f"🔍 AI Focus Mode: Using max_tokens=220")
+            
             # Get persona settings or use defaults
             persona_settings = {}
             if self.persona_config and "anthropic" in self.persona_config:
                 anthropic_cfg = self.persona_config["anthropic"]
                 persona_settings = {
                     "model": anthropic_cfg.get("anthropic_model", settings.ai_model),
-                    "max_tokens": anthropic_cfg.get("max_tokens", 1024),
+                    "max_tokens": max_tokens_override if max_tokens_override is not None else anthropic_cfg.get("max_tokens", 1024),
                     "temperature": anthropic_cfg.get("temperature"),
                     "top_p": anthropic_cfg.get("top_p"),
                 }
@@ -530,12 +596,10 @@ class AIService(BaseService):
                 # Default behavior without persona
                 persona_settings = {
                     "model": settings.ai_model,
-                    "max_tokens": 1024
+                    "max_tokens": max_tokens_override if max_tokens_override is not None else 1024
                 }
             
             # Build system prompt with pre-context
-            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
-            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
             system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
             if system_prompt:
                 self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
@@ -631,10 +695,20 @@ class AIService(BaseService):
                 except Exception as e:
                     self.logger.warning(f"❌ Could not get user_id from session: {e}", exc_info=True)
 
+            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
+            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
+            
+            # For AI Focus Mode: filter conversation history to only include assistant responses
+            if is_ai_focus_mode and conversation_history:
+                conversation_history = [msg for msg in conversation_history if msg.get("role") == "assistant"]
+                self.logger.info(f"🔍 AI Focus Mode: Filtered conversation history to {len(conversation_history)} assistant messages only")
+
             # Get max_tokens from input_data first, then check system config only if explicitly requested (for AI focus mode/test persona)
             max_tokens_override = input_data.get("max_tokens")
             if max_tokens_override is None and input_data.get("use_system_max_tokens"):
-                max_tokens_override = await self._get_system_max_tokens()
+                # AI Focus Mode: use 220 tokens instead of system config
+                max_tokens_override = 220
+                self.logger.info(f"🔍 AI Focus Mode: Using max_tokens=220")
 
             # Get persona settings or use defaults
             persona_settings = {}
@@ -655,8 +729,6 @@ class AIService(BaseService):
                 }
             
             # Build system prompt with pre-context
-            # Check if this is AI focus mode (indicated by use_system_max_tokens flag)
-            is_ai_focus_mode = input_data.get("use_system_max_tokens", False)
             system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
             if system_prompt:
                 self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")

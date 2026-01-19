@@ -188,6 +188,79 @@ export const storyAPI = {
   getCompleteStories: () => {
     return api.get('/stories/complete').then(res => res.data);
   },
+  deleteCompleteStory: (storyId, userId) => {
+    return api.delete(`/stories/complete/${storyId}`, {
+      data: { user_id: userId }
+    }).then(res => res.data);
+  },
+  deleteStory: (storyId, userId) => {
+    return api.delete(`/stories/${storyId}`, {
+      data: { user_id: userId }
+    }).then(res => res.data);
+  },
+  uploadStoryImage: (storyId, file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post(`/stories/complete/${storyId}/image`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    }).then(res => res.data);
+  },
+  removeStoryImage: (storyId) => {
+    return api.delete(`/stories/complete/${storyId}/image`).then(res => res.data);
+  },
+  uploadTimelineAsset: (storyId, itemIndex, assetType, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('asset_type', assetType);
+    return api.post(`/stories/${storyId}/timeline-assets/${itemIndex}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    }).then(res => res.data);
+  },
+  getTimelineAssets: (storyId) => {
+    return api.get(`/stories/${storyId}/timeline-assets`).then(res => res.data);
+  },
+  deleteTimelineAsset: (storyId, itemIndex, assetType, assetFilename) => {
+    return api.delete(`/stories/${storyId}/timeline-assets/${itemIndex}/${assetType}/${assetFilename}`).then(res => res.data);
+  },
+};
+
+export const courseAPI = {
+  getCourses: (userId) => {
+    const params = userId ? { user_id: userId } : {};
+    return api.get('/courses', { params }).then(res => res.data);
+  },
+  generateOutline: (prompt, userId) => {
+    return api.post('/courses/generate-outline', { prompt, user_id: userId }).then(res => res.data);
+  },
+  getCourse: (courseId) => {
+    return api.get(`/courses/${courseId}`).then(res => res.data);
+  },
+  generateLesson: (sectionId, regenerate = false) => {
+    return api.post(`/sections/${sectionId}/generate-lesson`, { regenerate }).then(res => res.data);
+  },
+  getLesson: (lessonId) => {
+    return api.get(`/lessons/${lessonId}`).then(res => res.data);
+  },
+  setCoursePinned: (courseId, pinned) => {
+    return api.put(`/courses/${courseId}/pin`, { pinned }).then(res => res.data);
+  },
+  deleteCourse: (courseId) => {
+    return api.delete(`/courses/${courseId}`).then(res => res.data);
+  },
+  getCourseQuestions: (courseId) => {
+    return api.get(`/courses/${courseId}/questions`).then(res => res.data);
+  },
+  askCourseQuestion: (courseId, question, sectionId, userId) => {
+    return api.post(`/courses/${courseId}/questions`, {
+      question,
+      section_id: sectionId,
+      user_id: userId
+    }).then(res => res.data);
+  },
 };
 
 export const personaAPI = {
@@ -254,6 +327,82 @@ export const aiAPI = {
         console.error('[API] Error response:', error.response?.data);
         throw error;
       });
+  },
+  generateScreenplayStream: (payload, onChunk, onError) => {
+    // Use fetch for streaming with EventSource-like behavior
+    return new Promise((resolve, reject) => {
+      fetch(`${api.defaults.baseURL}/ai/generate-screenplay-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(response => {
+        if (!response.ok) {
+          const error = new Error(`HTTP ${response.status}`);
+          if (onError) onError(error);
+          reject(error);
+          return;
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        const processText = ({ done, value }) => {
+          if (done) {
+            // Stream complete - resolve successfully
+            resolve();
+            return;
+          }
+
+          try {
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.chunk) {
+                    onChunk(data.chunk);
+                  }
+                  if (data.done) {
+                    // Stream explicitly marked as done
+                    resolve();
+                    return;
+                  }
+                  if (data.error) {
+                    const error = new Error(data.error);
+                    if (onError) onError(error);
+                    reject(error);
+                    return;
+                  }
+                } catch (e) {
+                  console.warn('[API] Failed to parse SSE data:', line, e);
+                  // Continue processing other lines even if one fails
+                }
+              }
+            }
+
+            // Continue reading
+            reader.read().then(processText).catch(err => {
+              if (onError) onError(err);
+              reject(err);
+            });
+          } catch (err) {
+            if (onError) onError(err);
+            reject(err);
+          }
+        };
+
+        reader.read().then(processText).catch(err => {
+          if (onError) onError(err);
+          reject(err);
+        });
+      }).catch(err => {
+        if (onError) onError(err);
+        reject(err);
+      });
+    });
   },
   askQuestionStream: (payload, onChunk) => {
     // Use EventSource for Server-Sent Events

@@ -8,6 +8,8 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
   const [plot, setPlot] = useState('');
   const [selectedPersonas, setSelectedPersonas] = useState([]);
   const [selectedNarrator, setSelectedNarrator] = useState(null); // Single narrator persona name
+  const [storyLength, setStoryLength] = useState('medium'); // 'short', 'medium', 'long'
+  const [ageRange, setAgeRange] = useState(''); // Age range like '5-8', '9-12', '13-17', '18+', etc.
   const [editingPersona, setEditingPersona] = useState(null);
   const [personaContexts, setPersonaContexts] = useState({}); // {personaName: customContext}
   const [loadingContext, setLoadingContext] = useState(false);
@@ -38,6 +40,14 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
   const [timelineEditText, setTimelineEditText] = useState(''); // Text being edited in timeline item
   const [isPausing, setIsPausing] = useState(false); // Whether currently in a pause
   const [buildCompleteModal, setBuildCompleteModal] = useState(null); // {title, audioUrl} when build is complete
+  const [deleting, setDeleting] = useState(false); // Whether currently deleting
+  const [timelineDurationsVersion, setTimelineDurationsVersion] = useState(0); // Force re-render when durations load
+  const [advancedTimeline, setAdvancedTimeline] = useState(false);
+  const [timelineAssets, setTimelineAssets] = useState({
+    effects: {}, // {index: [{filename, path, original_name, ...}]}
+    ambience: {}, // {index: [{filename, path, original_name, ...}]}
+    images: {} // {index: [{filename, path, original_name, ...}]}
+  });
   const buildAudioRef = useRef(null); // Ref for the complete audio player
   const pauseTimeoutRef = useRef(null); // Ref to track pause timeout
   const pauseIntervalRef = useRef(null); // Ref to track pause progress interval
@@ -50,6 +60,35 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
   const durationsRef = useRef({}); // {index: duration}
   const indicesWithAudioRef = useRef([]); // Array of indices with audio
   const currentPlayingIndexRef = useRef(null); // Ref to track current playing index
+
+  const formatDuration = (seconds) => {
+    if (!seconds || !isFinite(seconds)) return '0:00';
+    const total = Math.max(0, Math.round(seconds));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getItemDuration = (index) => {
+    const cached = durationsRef.current[index];
+    if (cached && isFinite(cached)) return cached;
+    const audioEl = audioRefs.current[index];
+    if (audioEl && audioEl.duration && isFinite(audioEl.duration)) return audioEl.duration;
+    return 0;
+  };
+
+  const getTimelineTotalDuration = () => {
+    let totalSeconds = 0;
+    Object.keys(audioFiles).forEach(key => {
+      const index = Number(key);
+      totalSeconds += getItemDuration(index);
+      const pauseMs = pauses[index] || 0;
+      if (pauseMs > 0) {
+        totalSeconds += pauseMs / 1000;
+      }
+    });
+    return totalSeconds;
+  };
 
   // Load story data when in edit mode
   useEffect(() => {
@@ -225,6 +264,23 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
           setAudioFiles({});
           setSelectedItems(new Set());
         }
+        
+        // Load timeline assets
+        try {
+          const assetsResult = await storyAPI.getTimelineAssets(storyId);
+          console.log('[CreateStory] Timeline assets result:', assetsResult);
+          if (assetsResult && assetsResult.success && assetsResult.assets) {
+            setTimelineAssets(assetsResult.assets);
+            console.log('[CreateStory] Loaded timeline assets');
+          } else {
+            console.log('[CreateStory] No timeline assets found');
+            setTimelineAssets({ effects: {}, ambience: {}, images: {} });
+          }
+        } catch (error) {
+          console.error('[CreateStory] Error loading timeline assets:', error);
+          // Don't fail the whole load if timeline assets can't be loaded
+          setTimelineAssets({ effects: {}, ambience: {}, images: {} });
+        }
       }
     } catch (error) {
       console.error('[CreateStory] Error loading story:', error);
@@ -236,31 +292,64 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
 
   const loadScreenplayVersion = (screenplayText) => {
     try {
-      const screenplayJson = typeof screenplayText === 'string' 
-        ? JSON.parse(screenplayText) 
-        : screenplayText;
+      console.log('[CreateStory] loadScreenplayVersion called with:', {
+        type: typeof screenplayText,
+        length: screenplayText?.length || 0,
+        preview: typeof screenplayText === 'string' ? screenplayText.substring(0, 200) : 'not a string'
+      });
+      
+      // Parse JSON if it's a string
+      let screenplayJson;
+      if (typeof screenplayText === 'string') {
+        // Try to extract JSON if wrapped in markdown or extra text
+        let jsonText = screenplayText.trim();
+        if (jsonText.startsWith('```')) {
+          jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+        }
+        // Try to find JSON object
+        const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          jsonText = jsonMatch[0];
+        }
+        screenplayJson = JSON.parse(jsonText);
+      } else {
+        screenplayJson = screenplayText;
+      }
       
       console.log('[CreateStory] Parsed screenplay JSON:', {
         hasScript: !!screenplayJson.script,
-        scriptLength: screenplayJson.script?.length || 0
+        scriptLength: screenplayJson.script?.length || 0,
+        scriptIsArray: Array.isArray(screenplayJson.script),
+        firstItem: screenplayJson.script?.[0] || null
       });
       
+      // Ensure script is an array
+      if (!screenplayJson.script || !Array.isArray(screenplayJson.script)) {
+        console.error('[CreateStory] Invalid screenplay structure - script is not an array:', screenplayJson);
+        setScreenplay(screenplayText);
+        setScreenplayData(null);
+        return;
+      }
+      
+      // Set the parsed data
       setScreenplayData(screenplayJson);
       
       // Format for display - create formatted text from script array
       let formattedText = '';
-      if (screenplayJson.script && Array.isArray(screenplayJson.script)) {
-        screenplayJson.script.forEach((item, index) => {
-          const speaker = item.speaker || 'unknown';
-          const text = item.text || '';
-          formattedText += `[${index + 1}] ${speaker.toUpperCase()}\n`;
-          formattedText += `${text}\n\n`;
-        });
-      }
+      screenplayJson.script.forEach((item, index) => {
+        const speaker = item.speaker || 'unknown';
+        const text = item.text || '';
+        formattedText += `[${index + 1}] ${speaker.toUpperCase()}\n`;
+        formattedText += `${text}\n\n`;
+      });
       setScreenplay(formattedText.trim());
-      console.log('[CreateStory] Screenplay loaded and formatted:', formattedText.length, 'chars');
+      console.log('[CreateStory] Screenplay loaded and formatted:', {
+        itemCount: screenplayJson.script.length,
+        formattedLength: formattedText.length
+      });
     } catch (e) {
       console.error('[CreateStory] Error parsing screenplay:', e);
+      console.error('[CreateStory] Error stack:', e.stack);
       console.error('[CreateStory] Raw screenplay:', screenplayText);
       // If it's not JSON, treat as plain text
       setScreenplay(screenplayText);
@@ -321,6 +410,24 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
       newSelected.add(index);
     }
     setSelectedItems(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    if (!screenplayData || !screenplayData.script || !Array.isArray(screenplayData.script)) {
+      return;
+    }
+    
+    // If all items are selected, deselect all; otherwise, select all
+    const allIndices = screenplayData.script.map((_, index) => index);
+    const allSelected = allIndices.every(index => selectedItems.has(index));
+    
+    if (allSelected) {
+      // Deselect all
+      setSelectedItems(new Set());
+    } else {
+      // Select all
+      setSelectedItems(new Set(allIndices));
+    }
   };
 
   const handleRemoveTimelineItem = (index) => {
@@ -402,6 +509,122 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
     setTimelineEditText('');
   };
 
+  const handleResetPauses = () => {
+    setPauses({});
+  };
+
+  const handleSetPauseForAll = (pauseMs) => {
+    const newPauses = {};
+    Object.keys(audioFiles).forEach(key => {
+      newPauses[Number(key)] = pauseMs;
+    });
+    setPauses(newPauses);
+  };
+
+  const handleAddTimelineAsset = async (index, type) => {
+    if (!storyId || !editMode) {
+      alert("Please save the story first before adding assets");
+      return;
+    }
+
+    // Create a file input element
+    const input = document.createElement('input');
+    input.type = 'file';
+    
+    if (type === 'effects' || type === 'ambience') {
+      input.accept = 'audio/*';
+    } else if (type === 'images') {
+      input.accept = 'image/*';
+    }
+    
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      try {
+        const result = await storyAPI.uploadTimelineAsset(storyId, index, type, file);
+        if (result.success) {
+          // Update local state
+          setTimelineAssets(prev => {
+            const updated = { ...prev };
+            const list = updated[type][index] ? [...updated[type][index]] : [];
+            list.push(result.asset);
+            updated[type] = { ...updated[type], [index]: list };
+            return updated;
+          });
+        } else {
+          alert(`Failed to upload ${type}: ${result.error || 'Unknown error'}`);
+        }
+      } catch (error) {
+        console.error(`Error uploading ${type}:`, error);
+        alert(`Error uploading ${type}: ${error.message || 'Unknown error'}`);
+      }
+    };
+    
+    input.click();
+  };
+
+  const handleRemoveTimelineAsset = async (index, type, assetIndex) => {
+    if (!storyId || !editMode) {
+      alert("Please save the story first before removing assets");
+      return;
+    }
+
+    const asset = timelineAssets[type][index]?.[assetIndex];
+    if (!asset) return;
+
+    if (!confirm(`Are you sure you want to remove this ${type === 'effects' ? 'effect' : type === 'ambience' ? 'background' : 'image'}?`)) {
+      return;
+    }
+
+    try {
+      const result = await storyAPI.deleteTimelineAsset(storyId, index, type, asset.filename);
+      if (result.success) {
+        // Update local state
+        setTimelineAssets(prev => {
+          const updated = { ...prev };
+          const list = updated[type][index] ? [...updated[type][index]] : [];
+          list.splice(assetIndex, 1);
+          if (list.length === 0) {
+            delete updated[type][index];
+          } else {
+            updated[type] = { ...updated[type], [index]: list };
+          }
+          return updated;
+        });
+      } else {
+        alert(`Failed to delete ${type}: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error(`Error deleting ${type}:`, error);
+      alert(`Error deleting ${type}: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleDeleteStory = async () => {
+    if (!storyId || !editMode || !selectedUser?.is_admin) return;
+    
+    if (!confirm(`Are you sure you want to delete "${storyTitle || 'this story'}"? This will permanently delete the story, all its data, screenplay versions, and audio files.`)) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const result = await storyAPI.deleteStory(storyId, selectedUser?.id);
+      if (result && result.success) {
+        // Navigate back to stories page
+        onNavigate?.('stories');
+      } else {
+        throw new Error(result?.error || 'Failed to delete story');
+      }
+    } catch (error) {
+      console.error('[CreateStory] Error deleting story:', error);
+      alert(`Error deleting story: ${error.message || 'Unknown error'}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleBuild = async () => {
     if (!storyId || !editMode || !screenplayData || !screenplayData.script) {
       alert('Please save the story first');
@@ -426,14 +649,18 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
       // Get current screenplay text for each timeline item (may have been edited)
       const timelineItems = timelineIndices.map(index => {
         const screenplayItem = screenplayData.script[index];
-        return {
+        const item = {
           index: index,
           speaker: screenplayItem?.speaker || '',
           text: screenplayItem?.text || ''
         };
+        console.log(`[CreateStory] Timeline item ${index}: speaker="${item.speaker}", text_length=${item.text.length}, text_preview="${item.text.substring(0, 50)}"`);
+        return item;
       });
       
       console.log('[CreateStory] Timeline items to build:', timelineItems);
+      console.log('[CreateStory] Total timeline items:', timelineItems.length);
+      console.log('[CreateStory] Items with text:', timelineItems.filter(item => item.text && item.text.trim().length > 0).length);
       
       // Convert pauses object keys to strings if needed (for JSON serialization)
       const pausesForAPI = {};
@@ -1097,34 +1324,88 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
     setScreenplay('');
 
     try {
-      // Collect all selected personas and their contexts
+      // Collect all selected personas and their contexts - PARALLEL FETCHING
       const personaContextsList = [];
-      for (const personaName of selectedPersonas) {
-        // Get custom context if edited, otherwise fetch original
-        let context = personaContexts[personaName];
-        if (!context) {
-          // Fetch original context
-          const result = await personaAPI.getPersonaContext(personaName);
-          if (result && result.success !== false && result.context) {
-            context = result.context;
-            // Store it for future reference
-            setPersonaContexts(prev => ({
-              ...prev,
-              [personaName]: context
-            }));
-          } else {
-            context = '';
+      
+      // First, identify which personas need to be fetched
+      const personasToFetch = selectedPersonas.filter(name => !personaContexts[name]);
+      
+      // Fetch all missing persona contexts in parallel
+      if (personasToFetch.length > 0) {
+        console.log(`[CreateStory] Fetching ${personasToFetch.length} persona contexts in parallel...`);
+        const fetchPromises = personasToFetch.map(async (personaName) => {
+          try {
+            const result = await personaAPI.getPersonaContext(personaName);
+            if (result && result.success !== false && result.context) {
+              return { name: personaName, context: result.context };
+            }
+            return { name: personaName, context: '' };
+          } catch (error) {
+            console.error(`[CreateStory] Error fetching context for ${personaName}:`, error);
+            return { name: personaName, context: '' };
           }
-        }
-        personaContextsList.push({
-          name: personaName,
-          context: context || ''
+        });
+        
+        const fetchedContexts = await Promise.all(fetchPromises);
+        
+        // Update state with all fetched contexts
+        const newContexts = {};
+        fetchedContexts.forEach(({ name, context }) => {
+          newContexts[name] = context;
+        });
+        setPersonaContexts(prev => ({ ...prev, ...newContexts }));
+        
+        // Add to list
+        fetchedContexts.forEach(({ name, context }) => {
+          personaContextsList.push({
+            name: name,
+            context: context || ''
+          });
         });
       }
+      
+      // Add personas that already have contexts cached
+      selectedPersonas.forEach(personaName => {
+        if (personaContexts[personaName]) {
+          personaContextsList.push({
+            name: personaName,
+            context: personaContexts[personaName]
+          });
+        }
+      });
 
+      // Calculate max_tokens and word count guidance based on story length
+      let maxTokens;
+      let approxWords;
+      switch (storyLength) {
+        case 'very-short':
+          maxTokens = 1000; // ~750 words
+          approxWords = Math.floor(maxTokens * 0.75);
+          break;
+        case 'short':
+          maxTokens = 1536; // ~1150 words
+          approxWords = Math.floor(maxTokens * 0.75);
+          break;
+        case 'long':
+          maxTokens = 6144; // ~4600 words
+          approxWords = Math.floor(maxTokens * 0.75);
+          break;
+        case 'medium':
+        default:
+          maxTokens = 3072; // ~2300 words
+          approxWords = Math.floor(maxTokens * 0.75);
+          break;
+      }
+      
       // Build the prompt for screenplay generation
       let prompt = `Create a screenplay based on the following plot and using only the provided personas:\n\n`;
       prompt += `PLOT:\n${plot}\n\n`;
+      
+      // Add age range information if provided
+      if (ageRange) {
+        prompt += `TARGET AUDIENCE: This story is intended for ${ageRange} years old.\n\n`;
+      }
+      
       prompt += `PERSONAS:\n`;
       personaContextsList.forEach((p, idx) => {
         prompt += `${idx + 1}. ${p.name}:\n${p.context || 'No context provided'}\n\n`;
@@ -1135,12 +1416,26 @@ export function CreateStoryPage({ onNavigate, selectedUser, storyId, editMode = 
         prompt += `NARRATOR: ${selectedNarrator}\n\n`;
       }
       
-      prompt += `\nPlease create a complete screenplay using only these personas. Output MUST be valid JSON following this exact schema:\n\n`;
+      // Add story length context
+      let lengthDescription;
+      if (storyLength === 'very-short') {
+        lengthDescription = 'a very short';
+      } else if (storyLength === 'short') {
+        lengthDescription = 'a short';
+      } else if (storyLength === 'long') {
+        lengthDescription = 'a long';
+      } else {
+        lengthDescription = 'a medium-length';
+      }
+      prompt += `STORY LENGTH: Create ${lengthDescription} screenplay.\n\n`;
+      
+      prompt += `Please create a complete screenplay using only these personas. Output MUST be valid JSON following this exact schema:\n\n`;
       prompt += `{\n  "script": [\n    { "speaker": "narrator", "text": "..." },\n    { "speaker": "character_name", "text": "..." },\n    ...\n  ]\n}\n\n`;
-      prompt += `Each line must have a "speaker" (either "narrator" or a character name) and "text" (the spoken content).`;
+      prompt += `Each line must have a "speaker" (either "narrator" or a character name) and "text" (the spoken content).\n\n`;
+      prompt += `IMPORTANT: Keep the total screenplay length to approximately ${approxWords} words or less to ensure it fits within the token limit. Focus on essential dialogue and key narrative moments.`;
 
       // Build system prompt for screenplay generation
-      const systemPrompt = `You are an AI screenplay generator designed for audio-only playback.
+      let systemPrompt = `You are an AI screenplay generator designed for audio-only playback.
 
 OUTPUT RULES (STRICT):
 - Output MUST be valid JSON.
@@ -1161,52 +1456,156 @@ STYLE RULES:
 - Characters never describe their own actions.
 - Characters speak according to their defined personalities.
 - Avoid inner monologue unless spoken aloud.
+- Keep dialogue and narration concise to fit within the token limit (approximately ${approxWords} words total).`;
 
-FAILURE CONDITIONS:
+      // Add age-appropriate content guidance
+      if (ageRange) {
+        systemPrompt += `\n\nAGE-APPROPRIATE CONTENT:\n`;
+        systemPrompt += `- This story is intended for ${ageRange} years old.\n`;
+        systemPrompt += `- Adjust vocabulary, themes, and complexity to be age-appropriate.\n`;
+        systemPrompt += `- Ensure content is suitable and engaging for this age group.\n`;
+      }
+
+      // Add story length guidance
+      systemPrompt += `\n\nSTORY LENGTH:\n`;
+      if (storyLength === 'very-short') {
+        systemPrompt += `- Create a very brief, focused story (approximately ${approxWords} words or less).\n`;
+        systemPrompt += `- Be extremely concise and get straight to the core of the story.\n`;
+        systemPrompt += `- Focus only on the most essential plot points and minimal dialogue.\n`;
+        systemPrompt += `- Keep scenes short and action-driven.\n`;
+      } else if (storyLength === 'short') {
+        systemPrompt += `- Create a concise, focused story (approximately ${approxWords} words or less).\n`;
+        systemPrompt += `- Get to the point quickly and maintain a fast pace.\n`;
+        systemPrompt += `- Focus on essential plot points and character interactions.\n`;
+      } else if (storyLength === 'long') {
+        systemPrompt += `- Create a more detailed, expansive story (approximately ${approxWords} words).\n`;
+        systemPrompt += `- Include richer character development and world-building.\n`;
+        systemPrompt += `- Allow for more elaborate scenes and dialogue.\n`;
+      } else {
+        systemPrompt += `- Create a balanced, medium-length story (approximately ${approxWords} words).\n`;
+        systemPrompt += `- Include good character development without excessive detail.\n`;
+      }
+
+      systemPrompt += `\n\nFAILURE CONDITIONS:
 - Any non-JSON output is invalid.
 - Any missing speaker field is invalid.
 - Any unspoken description outside narrator text is invalid.`;
 
-      // Call AI with custom system prompt (using execute_with_system_prompt)
-      console.log('[CreateStory] Calling generateScreenplay API...');
+      // Call AI with streaming (better UX) and reduced tokens
+      console.log('[CreateStory] Calling generateScreenplayStream API...');
       console.log('[CreateStory] Payload:', { 
         questionLength: prompt.length, 
         systemPromptLength: systemPrompt.length,
-        max_tokens: 4096 
+        max_tokens: maxTokens,
+        approxWords: approxWords
       });
       
-      const result = await aiAPI.generateScreenplay({
-        question: prompt,
-        system_prompt: systemPrompt,
-        max_tokens: 4096
-      });
+      // Use streaming API - collect all chunks then parse JSON
+      let fullResponse = '';
+      let parsedScreenplayData = null;
+      let streamingSucceeded = false;
+      let streamingError = null;
+      
+      try {
+        // Stream and collect ALL chunks before parsing
+        await aiAPI.generateScreenplayStream({
+          question: prompt,
+          system_prompt: systemPrompt,
+          max_tokens: maxTokens
+        }, (chunk) => {
+          // Accumulate chunks as they arrive - don't parse until stream is complete
+          if (chunk) {
+            fullResponse += chunk;
+            // Just accumulate - don't try to parse incomplete JSON
+          }
+        }, (error) => {
+          // Handle streaming errors
+          console.error('[CreateStory] Streaming error callback:', error);
+          streamingError = error;
+        });
+        
+        // After streaming completes, check if we got data
+        if (fullResponse && !streamingError) {
+          streamingSucceeded = true;
+          console.log('[CreateStory] Streaming complete, total length:', fullResponse.length);
+          console.log('[CreateStory] Response preview (first 200 chars):', fullResponse.substring(0, 200));
+          console.log('[CreateStory] Response preview (last 200 chars):', fullResponse.substring(Math.max(0, fullResponse.length - 200)));
+        } else if (streamingError) {
+          console.error('[CreateStory] Streaming failed with error:', streamingError);
+          streamingSucceeded = false;
+          fullResponse = ''; // Clear any partial data
+        } else {
+          console.warn('[CreateStory] Streaming completed but no data received');
+          streamingSucceeded = false;
+        }
+      } catch (streamError) {
+        console.error('[CreateStory] Error during streaming, falling back to non-streaming:', streamError);
+        streamingSucceeded = false;
+        streamingError = streamError;
+        fullResponse = ''; // Clear any partial data
+      }
 
-      console.log('[CreateStory] Screenplay generation result:', result);
-      console.log('[CreateStory] Result type:', typeof result);
-      console.log('[CreateStory] Result keys:', result ? Object.keys(result) : 'null');
+      // Fallback to non-streaming if streaming failed or no response
+      if (!streamingSucceeded || !fullResponse) {
+        console.log('[CreateStory] Using non-streaming fallback...');
+        try {
+          const result = await aiAPI.generateScreenplay({
+            question: prompt,
+            system_prompt: systemPrompt,
+            max_tokens: maxTokens
+          });
+          
+          if (result && result.success !== false && result.answer) {
+            fullResponse = result.answer;
+          } else {
+            const errorMsg = result?.error || 'Failed to generate screenplay';
+            console.error('[CreateStory] Screenplay generation failed:', errorMsg);
+            setScreenplayError(errorMsg);
+            setScreenplay('');
+            setGeneratingScreenplay(false);
+            return;
+          }
+        } catch (fallbackError) {
+          console.error('[CreateStory] Both streaming and fallback failed:', fallbackError);
+          setScreenplayError(fallbackError.message || 'Failed to generate screenplay');
+          setScreenplay('');
+          setGeneratingScreenplay(false);
+          return;
+        }
+      }
 
-      if (result && result.success !== false && result.answer) {
+      if (fullResponse) {
         // Parse JSON response
-        let rawResponse = result.answer;
-        let parsedScreenplayData = null; // Store parsed data for saving
+        let rawResponse = fullResponse;
+        let jsonText = ''; // Define outside try block so catch can access it
         
         try {
           // Try to extract JSON from the response (in case it's wrapped in markdown or has extra text)
-          let jsonText = rawResponse.trim();
+          jsonText = rawResponse.trim();
           
-          // Remove markdown code blocks if present
-          if (jsonText.startsWith('```')) {
-            jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-          }
+          // Remove markdown code blocks if present (handles ```json or just ```)
+          // Match opening ```json or ``` and remove it, then match closing ``` and remove it
+          jsonText = jsonText.replace(/^```(?:json)?\s*/i, '');
+          jsonText = jsonText.replace(/\s*```\s*$/i, '');
+          jsonText = jsonText.trim();
           
-          // Try to find JSON object in the text
+          // Try to find JSON object in the text (match from first { to last })
+          // Use non-greedy matching to find the complete JSON object
           const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             jsonText = jsonMatch[0];
           }
           
+          // Log what we're about to parse
+          console.log('[CreateStory] Extracted JSON text (first 500 chars):', jsonText.substring(0, 500));
+          
           // Parse the JSON
           const parsed = JSON.parse(jsonText);
+          
+          console.log('[CreateStory] Successfully parsed JSON:', {
+            hasScript: !!parsed.script,
+            scriptLength: parsed.script?.length || 0
+          });
           
           // Validate structure
           if (parsed && parsed.script && Array.isArray(parsed.script)) {
@@ -1227,35 +1626,195 @@ FAILURE CONDITIONS:
               formattedText += `${text}\n\n`;
             });
             
-            setScreenplay(formattedText.trim());
-            console.log('[CreateStory] Successfully parsed JSON screenplay:', parsed);
-            console.log('[CreateStory] Formatted screenplay:', formattedText);
+            // Clear screenplay text immediately to prevent JSON display
+            setScreenplay('');
+            
+            // Ensure screenplayData is set before clearing screenplay
+            // This ensures the component will render from screenplayData, not raw text
+            console.log('[CreateStory] Successfully parsed JSON screenplay:', {
+              scriptItems: parsed.script.length,
+              firstItem: parsed.script[0],
+              hasScreenplayData: !!screenplayData
+            });
+            
+            // Double-check that screenplayData was set
+            if (!screenplayData || !screenplayData.script) {
+              console.warn('[CreateStory] WARNING: screenplayData not properly set, forcing update');
+              // Force a re-render by ensuring state is updated
+              setTimeout(() => {
+                if (screenplayData === parsed) {
+                  console.log('[CreateStory] screenplayData confirmed set');
+                }
+              }, 100);
+            }
           } else {
             console.warn('[CreateStory] Invalid JSON structure, using raw response');
             setScreenplayData(null);
-            setScreenplay(rawResponse);
+            setScreenplayError('Invalid JSON structure received from AI');
+            setScreenplay(rawResponse); // Only show raw if structure is invalid
           }
         } catch (parseError) {
           console.error('[CreateStory] Error parsing JSON response:', parseError);
-          console.error('[CreateStory] Raw response:', rawResponse);
-          // If JSON parsing fails, show the raw response with an error message
-          setScreenplayError('Warning: Response is not valid JSON. Showing raw response.');
-          setScreenplayData(null);
-          setScreenplay(rawResponse);
+          const errorPosition = parseError.message?.match(/position (\d+)/)?.[1];
+          console.error('[CreateStory] Parse error details:', {
+            message: parseError.message,
+            position: errorPosition,
+            rawResponseLength: rawResponse.length,
+            rawResponsePreview: rawResponse.substring(0, 500),
+            rawResponseEnd: rawResponse.substring(Math.max(0, rawResponse.length - 500))
+          });
+          
+          // Try to fix incomplete JSON by attempting to close it properly
+          let fixedJsonText = jsonText;
+          let jsonFixed = false;
+          
+          // Check if JSON appears to be cut off (incomplete string, unclosed brackets, etc.)
+          const openBraces = (jsonText.match(/\{/g) || []).length;
+          const closeBraces = (jsonText.match(/\}/g) || []).length;
+          const openBrackets = (jsonText.match(/\[/g) || []).length;
+          const closeBrackets = (jsonText.match(/\]/g) || []).length;
+          
+          // If we have unclosed structures, try to close them
+          if (openBraces > closeBraces || openBrackets > closeBrackets || jsonText.trim().endsWith('"') || jsonText.includes('"success')) {
+            console.warn('[CreateStory] JSON appears incomplete, attempting to fix...');
+            
+            // Find the last complete script item
+            const lastCompleteItem = jsonText.lastIndexOf('},');
+            if (lastCompleteItem > 0) {
+              // Extract up to the last complete item
+              let truncatedJson = jsonText.substring(0, lastCompleteItem + 1);
+              
+              // Try to close the JSON structure
+              // Count what we need to close
+              const truncatedOpenBraces = (truncatedJson.match(/\{/g) || []).length;
+              const truncatedCloseBraces = (truncatedJson.match(/\}/g) || []).length;
+              const truncatedOpenBrackets = (truncatedJson.match(/\[/g) || []).length;
+              const truncatedCloseBrackets = (truncatedJson.match(/\]/g) || []).length;
+              
+              // Close brackets first, then braces
+              for (let i = truncatedCloseBrackets; i < truncatedOpenBrackets; i++) {
+                truncatedJson += '\n    ]';
+              }
+              for (let i = truncatedCloseBraces; i < truncatedOpenBraces; i++) {
+                truncatedJson += '\n}';
+              }
+              
+              fixedJsonText = truncatedJson;
+              jsonFixed = true;
+              console.log('[CreateStory] Attempted to fix incomplete JSON by truncating to last complete item');
+            }
+          }
+          
+          // Try parsing the fixed JSON
+          if (jsonFixed) {
+            try {
+              const parsed = JSON.parse(fixedJsonText);
+              if (parsed && parsed.script && Array.isArray(parsed.script) && parsed.script.length > 0) {
+                parsedScreenplayData = parsed;
+                setScreenplayData(parsed);
+                setScreenplay('');
+                setScreenplayError('Note: Response was truncated at token limit. Using partial screenplay.');
+                console.log('[CreateStory] Successfully parsed fixed/truncated JSON with', parsed.script.length, 'items');
+                // Continue with save logic below - don't return
+              } else {
+                throw new Error('Fixed JSON still invalid');
+              }
+            } catch (fixError) {
+              console.error('[CreateStory] Failed to parse fixed JSON:', fixError);
+              jsonFixed = false; // Fall through to normal error handling
+            }
+          }
+          
+          // If fixing didn't work, try fallback to non-streaming
+          if (!jsonFixed && streamingSucceeded) {
+            console.warn('[CreateStory] JSON parsing failed after streaming - trying non-streaming fallback...');
+            setScreenplayError('Streaming response was incomplete. Retrying with non-streaming...');
+            
+            try {
+              const fallbackResult = await aiAPI.generateScreenplay({
+                question: prompt,
+                system_prompt: systemPrompt,
+                max_tokens: maxTokens
+              });
+              
+              if (fallbackResult && fallbackResult.success !== false && fallbackResult.answer) {
+                // Retry parsing with complete response
+                rawResponse = fallbackResult.answer;
+                const fallbackJsonText = rawResponse.trim()
+                  .replace(/^```(?:json)?\s*/i, '')
+                  .replace(/\s*```\s*$/i, '')
+                  .trim();
+                
+                const jsonMatch = fallbackJsonText.match(/\{[\s\S]*\}/);
+                const finalJsonText = jsonMatch ? jsonMatch[0] : fallbackJsonText;
+                
+                const parsed = JSON.parse(finalJsonText);
+                if (parsed && parsed.script && Array.isArray(parsed.script)) {
+                  parsedScreenplayData = parsed;
+                  setScreenplayData(parsed);
+                  setScreenplay('');
+                  setScreenplayError(null);
+                  console.log('[CreateStory] Successfully parsed after fallback retry');
+                  // Continue with save logic below
+                } else {
+                  throw new Error('Invalid JSON structure after fallback');
+                }
+              } else {
+                throw new Error('Fallback failed');
+              }
+            } catch (fallbackParseError) {
+              console.error('[CreateStory] Fallback parsing also failed:', fallbackParseError);
+              setScreenplayError('Error: The AI response was incomplete or malformed. The response may have exceeded the token limit. Try reducing the story length or simplifying the plot.');
+              setScreenplayData(null);
+              setScreenplay('');
+            }
+          } else if (!jsonFixed) {
+            // Not from streaming and couldn't fix, show error
+            setScreenplayError('Error: Response is not valid JSON. The response may have been truncated. Try reducing the story length.');
+            setScreenplayData(null);
+            setScreenplay('');
+          }
+          
+          // If we still have an error after all attempts, stop here
+          if (screenplayError && !parsedScreenplayData) {
+            setGeneratingScreenplay(false);
+            return;
+          }
         }
         
         setScreenplayError(null);
+        // Clear any raw screenplay text to prevent JSON display - use screenplayData instead
+        setScreenplay(''); 
+        setGeneratingScreenplay(false); // Stop loading state
         
         // Automatically save the story after successful screenplay generation
         // Pass the parsed screenplay data directly since state updates are async
-        setIsAutoSaving(true);
-        try {
-          await handleSaveStory(true, parsedScreenplayData); // Pass true for auto-save and the parsed screenplay data
-        } catch (saveError) {
-          console.error('[CreateStory] Error auto-saving story:', saveError);
-          // Don't fail the whole operation if save fails, just log it
-        } finally {
-          setIsAutoSaving(false);
+        if (parsedScreenplayData) {
+          setIsAutoSaving(true);
+          try {
+            // Save the story - this will create a new story if storyId doesn't exist, or update if it does
+            const saveResult = await handleSaveStory(true, parsedScreenplayData); 
+            
+            // After saving, reload the story data to refresh versions and ensure state is correct
+            if (saveResult && saveResult.success) {
+              if (editMode && storyId) {
+                // For existing stories, reload to get the new version
+                console.log('[CreateStory] Reloading story after regeneration...');
+                await loadStoryData();
+              } else if (saveResult.storyId && !storyId) {
+                // For new stories, reload using the returned storyId
+                // Note: We can't directly change the storyId prop, but we can reload if we navigate
+                // For now, the story is saved and screenplayData is set, so it should display correctly
+                console.log('[CreateStory] New story saved with ID:', saveResult.storyId);
+                // The formatted screenplay should already be visible via screenplayData
+              }
+            }
+          } catch (saveError) {
+            console.error('[CreateStory] Error auto-saving story:', saveError);
+            // Don't fail the whole operation if save fails, just log it
+          } finally {
+            setIsAutoSaving(false);
+          }
         }
       } else {
         const errorMsg = result?.error || result?.message || 'Failed to generate screenplay';
@@ -1296,6 +1855,7 @@ FAILURE CONDITIONS:
   };
 
   const handleSaveStory = async (isAutoSave = false, screenplayDataToSave = null) => {
+    // This function returns the result with storyId for new stories
     if (!storyTitle.trim()) {
       if (!isAutoSave) {
         alert('Please enter a story title');
@@ -1410,7 +1970,11 @@ FAILURE CONDITIONS:
       if (result && result.success !== false) {
         setStorySaved(true);
         setSaveError(null);
-        console.log('[CreateStory] Story saved successfully with ID:', result.story_id);
+        const savedStoryId = result.story_id || result.story?.id;
+        console.log('[CreateStory] Story saved successfully with ID:', savedStoryId);
+        
+        // Return the storyId so caller can use it (e.g., for reloading)
+        const saveResult = { storyId: savedStoryId, success: true };
         
         // Reload screenplay versions if we created a new version
         if (editMode && storyId && versionToSave) {
@@ -1440,10 +2004,13 @@ FAILURE CONDITIONS:
           // For auto-save, just show success message, don't navigate
           console.log('[CreateStory] Story auto-saved, staying on page');
         }
+        
+        return saveResult; // Return result with storyId
       } else {
         const errorMsg = result?.error || 'Failed to save story';
         setSaveError(errorMsg);
         setStorySaved(false);
+        return { success: false, error: errorMsg };
       }
     } catch (error) {
       console.error('Error saving story:', error);
@@ -1453,6 +2020,7 @@ FAILURE CONDITIONS:
                        'Failed to save story';
       setSaveError(errorMsg);
       setStorySaved(false);
+      return { success: false, error: errorMsg };
     } finally {
       setSavingStory(false);
     }
@@ -1485,7 +2053,19 @@ FAILURE CONDITIONS:
 
               {/* Plot Field */}
               <div className="create-story-field">
-                <label htmlFor="plot" className="create-story-label">Plot</label>
+                <div className="create-story-plot-header">
+                  <label htmlFor="plot" className="create-story-label">Plot</label>
+                  {editMode && selectedUser?.is_admin && (
+                    <button
+                      className="create-story-delete-btn"
+                      onClick={handleDeleteStory}
+                      disabled={deleting}
+                      title="Delete Story (Admin Only)"
+                    >
+                      {deleting ? 'Deleting...' : '🗑️ Delete'}
+                    </button>
+                  )}
+                </div>
                 <textarea
                   id="plot"
                   className="create-story-textarea"
@@ -1494,6 +2074,39 @@ FAILURE CONDITIONS:
                   placeholder="Enter the plot of your story..."
                   rows={6}
                 />
+              </div>
+
+              {/* Story Length and Age Range */}
+              <div className="create-story-field" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="story-length" className="create-story-label">Story Length</label>
+                  <select
+                    id="story-length"
+                    className="create-story-input"
+                    value={storyLength}
+                    onChange={(e) => setStoryLength(e.target.value)}
+                  >
+                    <option value="very-short">Very Short (~750 words)</option>
+                    <option value="short">Short (~1150 words)</option>
+                    <option value="medium">Medium (~2300 words)</option>
+                    <option value="long">Long (~4600 words)</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="age-range" className="create-story-label">Age Range (optional)</label>
+                  <input
+                    id="age-range"
+                    type="text"
+                    className="create-story-input"
+                    value={ageRange}
+                    onChange={(e) => setAgeRange(e.target.value)}
+                    placeholder="e.g., 5-8, 9-12, 13-17, 18+"
+                  />
+                </div>
+              </div>
+
+              {/* Generate Button */}
+              <div className="create-story-field">
                 <button
                   className="create-story-generate-btn"
                   onClick={handleGenerateScreenplay}
@@ -1645,11 +2258,19 @@ FAILURE CONDITIONS:
                 <div className="create-story-loading-spinner"></div>
                 <p>Generating screenplay...</p>
               </div>
-            ) : (screenplay || screenplayData) ? (
+            ) : screenplayData && screenplayData.script && Array.isArray(screenplayData.script) ? (
               <div className="create-story-screenplay-panel">
                 <div className="create-story-screenplay-header">
                   <div className="create-story-screenplay-header-left">
                     <h2>Generated Screenplay</h2>
+                    <button
+                      className="create-story-select-all-btn"
+                      onClick={handleSelectAll}
+                      disabled={!screenplayData || !screenplayData.script || screenplayData.script.length === 0}
+                      title={screenplayData && screenplayData.script && screenplayData.script.every((_, index) => selectedItems.has(index)) ? "Deselect All" : "Select All"}
+                    >
+                      {screenplayData && screenplayData.script && screenplayData.script.every((_, index) => selectedItems.has(index)) ? '☑ Select All' : '☐ Select All'}
+                    </button>
                     <button
                       className="create-story-audio-btn"
                       disabled={!screenplayData || !screenplayData.script || screenplayData.script.length === 0 || selectedItems.size === 0 || !storyId || !editMode || generatingAudio}
@@ -1771,10 +2392,13 @@ FAILURE CONDITIONS:
                         );
                       })}
                     </div>
-                  ) : (
-                    <pre className="create-story-screenplay-text">{screenplay || 'No screenplay content'}</pre>
-                  )}
+                  ) : null}
                 </div>
+              </div>
+            ) : generatingScreenplay ? (
+              <div className="create-story-loading-panel">
+                <div className="create-story-loading-spinner"></div>
+                <p>Generating screenplay...</p>
               </div>
             ) : (
               <div className="create-story-empty-panel">
@@ -1785,16 +2409,48 @@ FAILURE CONDITIONS:
         </div>
 
         {/* Timeline Footer */}
-        <div className="create-story-timeline-footer">
+        <div className={`create-story-timeline-footer ${advancedTimeline ? 'advanced' : ''}`}>
           <div className="create-story-timeline-header">
             <h2>Timeline</h2>
             <div className="create-story-timeline-header-buttons">
+              <div className="create-story-timeline-stats" data-duration-version={timelineDurationsVersion}>
+                <span>Items: {Object.keys(audioFiles).length}</span>
+                <span>Total: {formatDuration(getTimelineTotalDuration())}</span>
+                <span>Progress: {formatDuration(currentTimeRef.current)}</span>
+              </div>
+              <button
+                className={`create-story-timeline-advanced-btn ${advancedTimeline ? 'active' : ''}`}
+                onClick={() => setAdvancedTimeline(prev => !prev)}
+              >
+                {advancedTimeline ? 'Advanced: On' : 'Advanced: Off'}
+              </button>
               <button
                 className="create-story-timeline-play-btn"
                 onClick={handlePlayTimeline}
                 disabled={!screenplayData || !screenplayData.script || Object.keys(audioFiles).length === 0}
               >
                 {isPlayingTimeline ? '⏸️ Pause' : '▶️ Play All'}
+              </button>
+              <button
+                className="create-story-timeline-pause-btn"
+                onClick={() => handleSetPauseForAll(500)}
+                disabled={Object.keys(audioFiles).length === 0}
+              >
+                ⏱️ 0.5s Pauses
+              </button>
+              <button
+                className="create-story-timeline-pause-btn"
+                onClick={() => handleSetPauseForAll(1000)}
+                disabled={Object.keys(audioFiles).length === 0}
+              >
+                ⏱️ 1s Pauses
+              </button>
+              <button
+                className="create-story-timeline-pause-btn"
+                onClick={handleResetPauses}
+                disabled={Object.keys(audioFiles).length === 0}
+              >
+                ⏱️ Reset Pauses
               </button>
               <button
                 className="create-story-timeline-build-btn"
@@ -1834,6 +2490,7 @@ FAILURE CONDITIONS:
                       const pauseDuration = pauses[index] || 0; // Pause after this item
                       const pauseDurationSeconds = Math.floor(pauseDuration / 1000);
                       const pauseDurationMs = pauseDuration % 1000;
+                      const itemDuration = getItemDuration(index);
                       
                       return (
                         <React.Fragment key={index}>
@@ -1841,6 +2498,9 @@ FAILURE CONDITIONS:
                             <div className="create-story-timeline-item-header">
                               <span className="create-story-timeline-item-index">{index + 1}</span>
                               <span className="create-story-timeline-item-speaker">{speaker.toUpperCase()}</span>
+                              <span className="create-story-timeline-item-duration">
+                                {formatDuration(itemDuration)}
+                              </span>
                               {isCurrentlyPlaying && (
                                 <span className="create-story-timeline-item-playing-indicator">🔊</span>
                               )}
@@ -1882,6 +2542,73 @@ FAILURE CONDITIONS:
                               </div>
                             </div>
                             <div className="create-story-timeline-item-text">{text}</div>
+                            {advancedTimeline && (
+                              <div className="create-story-timeline-item-assets">
+                                <div className="create-story-timeline-asset-row">
+                                  <span className="create-story-timeline-asset-label">Effects</span>
+                                  <div className="create-story-timeline-asset-chips">
+                                    {(timelineAssets.effects[index] || []).map((label, assetIndex) => (
+                                      <button
+                                        key={`fx-${assetIndex}`}
+                                        className="create-story-timeline-asset-chip"
+                                        onClick={() => handleRemoveTimelineAsset(index, 'effects', assetIndex)}
+                                        title="Remove effect"
+                                      >
+                                        ⚡ {label} ✕
+                                      </button>
+                                    ))}
+                                    <button
+                                      className="create-story-timeline-asset-add"
+                                      onClick={() => handleAddTimelineAsset(index, 'effects')}
+                                    >
+                                      + Effect
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="create-story-timeline-asset-row">
+                                  <span className="create-story-timeline-asset-label">Background</span>
+                                  <div className="create-story-timeline-asset-chips">
+                                    {(timelineAssets.ambience[index] || []).map((label, assetIndex) => (
+                                      <button
+                                        key={`bg-${assetIndex}`}
+                                        className="create-story-timeline-asset-chip"
+                                        onClick={() => handleRemoveTimelineAsset(index, 'ambience', assetIndex)}
+                                        title="Remove background"
+                                      >
+                                        🌧️ {label} ✕
+                                      </button>
+                                    ))}
+                                    <button
+                                      className="create-story-timeline-asset-add"
+                                      onClick={() => handleAddTimelineAsset(index, 'ambience')}
+                                    >
+                                      + Background
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="create-story-timeline-asset-row">
+                                  <span className="create-story-timeline-asset-label">Images</span>
+                                  <div className="create-story-timeline-asset-chips">
+                                    {(timelineAssets.images[index] || []).map((label, assetIndex) => (
+                                      <button
+                                        key={`img-${assetIndex}`}
+                                        className="create-story-timeline-asset-chip"
+                                        onClick={() => handleRemoveTimelineAsset(index, 'images', assetIndex)}
+                                        title="Remove image"
+                                      >
+                                        🖼️ {label} ✕
+                                      </button>
+                                    ))}
+                                    <button
+                                      className="create-story-timeline-asset-add"
+                                      onClick={() => handleAddTimelineAsset(index, 'images')}
+                                    >
+                                      + Image
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                             <div className="create-story-timeline-item-audio">
                               <audio 
                                 ref={(el) => {
@@ -1913,7 +2640,8 @@ FAILURE CONDITIONS:
                                   // Audio metadata loaded, duration is now available
                                   const audioElement = e.target;
                                   if (audioElement && audioElement.duration) {
-                                    // Duration is available for progress calculation
+                                    durationsRef.current[index] = audioElement.duration;
+                                    setTimelineDurationsVersion(prev => prev + 1);
                                   }
                                 }}
                               >

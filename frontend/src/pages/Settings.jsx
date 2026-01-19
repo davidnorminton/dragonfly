@@ -322,6 +322,12 @@ export function SettingsPage({ onNavigate }) {
   const [systemConfig, setSystemConfig] = useState('');
   const [systemFields, setSystemFields] = useState({});
   const [expandedSections, setExpandedSections] = useState({});
+  const [courseSettings, setCourseSettings] = useState({
+    outline_prompt: '',
+    lesson_prompt: '',
+    outline_max_tokens: 2048,
+    lesson_max_tokens: 4096
+  });
   const [locationFields, setLocationFields] = useState({});
   const [fillerWords, setFillerWords] = useState([]);
   const [newFillerText, setNewFillerText] = useState('');
@@ -678,6 +684,167 @@ export function SettingsPage({ onNavigate }) {
       setSystemConfig(JSON.stringify(data, null, 2));
       setSystemFields(data);
       
+      // Load course settings if they exist, otherwise use defaults
+      if (data.course_settings) {
+        setCourseSettings({
+          outline_prompt: data.course_settings.outline_prompt || '',
+          lesson_prompt: data.course_settings.lesson_prompt || '',
+          outline_max_tokens: data.course_settings.outline_max_tokens || 2048,
+          lesson_max_tokens: data.course_settings.lesson_max_tokens || 4096
+        });
+      } else {
+        // Set defaults if no settings exist yet
+        const defaultOutlinePrompt = `You are an educational course designer. Your task is to generate a structured online course outline based on a learning request.
+
+TASK: Generate a complete course outline with a title and learning sections.
+
+USER LEARNING REQUEST:
+{prompt}
+
+YOUR RESPONSE MUST BE VALID JSON ONLY. No markdown, no code fences, no explanations, just pure JSON.
+
+Generate:
+1. A clear, descriptive course title (maximum 60 characters)
+2. An ordered list of 5-10 learning sections, each with:
+   - A section title (20-50 characters)
+   - A brief summary (1-3 sentences) describing what this section should teach and what students will learn
+   - A list of 3-8 subsections, each with:
+     - A subsection title (10-40 characters)
+     - A short summary (1-2 sentences) describing what that subsection will cover
+
+REQUIREMENTS:
+- Sections must be beginner-friendly and build progressively upon each other
+- Section titles should be clear and descriptive (20-50 characters each)
+- Section summaries should explain what concepts will be covered and what students will achieve
+- Subsections must be tightly scoped and represent the internal teaching flow of the section
+- Start with foundational concepts and progress to more advanced topics
+- Do NOT include full lesson content, only titles and summaries
+- Ensure sections are comprehensive enough to cover the learning request
+- Number of sections should be appropriate for the topic complexity (typically 5-10 sections)
+
+REQUIRED JSON FORMAT (you must return exactly this structure):
+{
+  "title": "Course Title Here",
+  "sections": [
+    {
+      "title": "Section 1 Title",
+      "summary": "What this section teaches and what students will learn (1-3 sentences).",
+      "subsections": [
+        {
+          "title": "Subsection 1 Title",
+          "summary": "What this subsection covers (1-2 sentences)."
+        },
+        {
+          "title": "Subsection 2 Title",
+          "summary": "What this subsection covers (1-2 sentences)."
+        }
+      ]
+    },
+    {
+      "title": "Section 2 Title",
+      "summary": "What this section teaches and what students will learn (1-3 sentences).",
+      "subsections": [
+        {
+          "title": "Subsection 1 Title",
+          "summary": "What this subsection covers (1-2 sentences)."
+        }
+      ]
+    }
+  ]
+}
+
+IMPORTANT: Return ONLY the JSON object above. Do not include any markdown code fences, explanations, or additional text. The response must start with { and end with }.`;
+
+        const defaultLessonPrompt = `You are an expert educator creating a comprehensive, beginner-friendly lesson that teaches concepts in depth. Your goal is to help students understand the material thoroughly, not just list facts.
+
+Course: {course_title}
+Section: {section_title}
+Section Summary (What this section should teach): {section_summary}
+
+CRITICAL TEACHING REQUIREMENTS (NON-NEGOTIABLE):
+
+1. EXPLAIN, DON'T JUST LIST:
+   - For every concept you introduce, provide a clear explanation of WHAT it is, WHY it matters, and HOW it works
+   - Use analogies and real-world examples to make abstract concepts concrete
+   - Explain the reasoning behind concepts, not just the facts
+   - Break down complex ideas into simpler parts that build on each other
+   - Show the connections between different concepts
+
+2. PROGRESSIVE KNOWLEDGE BUILDING:
+   - Start with foundational concepts and gradually build complexity
+   - Introduce concepts in logical order, where each new idea builds on previous ones
+   - Use "scaffolding": introduce simple examples first, then gradually increase complexity
+   - Explain prerequisites before introducing advanced concepts
+   - Connect new information to what students should already know from earlier sections
+
+3. DETAILED EXPLANATIONS:
+   - Each major concept should have at least 2-3 paragraphs of explanation
+   - Don't just say "Language models predict words" - explain HOW they predict, WHAT patterns they look for, WHY certain words are more likely than others
+   - Provide step-by-step breakdowns of processes or mechanisms
+   - Explain cause-and-effect relationships
+   - Describe the "why" behind every important concept
+
+4. PRACTICAL EXAMPLES AND CONTEXT:
+   - Include concrete examples for every abstract concept
+   - Use scenarios and use cases to show practical applications
+   - Provide before/after comparisons or "what if" scenarios
+   - Use examples that students can relate to
+   - Show how concepts apply in real-world situations
+
+5. ZERO-LIST RULE (STRICT):
+   - DO NOT use bullet points or numbered lists anywhere in the lesson
+   - Convert all lists into full sentences and paragraphs
+   - If you must enumerate, do it in prose (e.g., "First..., Second..., Third...") within paragraphs
+
+LESSON STRUCTURE (PROSE-ONLY):
+
+Format the lesson in Markdown with:
+- A main heading (H1) for the section title: # {section_title}
+- Multiple subsections (3-5) using H2 headings (##) for each major topic
+- Each subsection must be substantial (300-500 words minimum) with detailed explanations
+- Use H3 subheadings (###) to organize concepts within subsections
+- Each subsection must contain at least 3 paragraphs
+- Do not use bullets, numbered lists, or list-like formatting
+- Include code examples, diagrams descriptions, or practical demonstrations when applicable
+
+Example of GOOD structure:
+# {section_title}
+
+## Introduction: Understanding the Fundamentals
+[2-3 paragraphs explaining what this section will teach and why it matters, connecting to previous knowledge]
+
+## Core Concept 1: [Detailed Explanation]
+[3-4 paragraphs explaining what this concept is, why it exists, how it works, with examples and analogies]
+[Then maybe a bullet point summary of key takeaways]
+
+## Core Concept 2: [Building on Concept 1]
+[3-4 paragraphs that reference Concept 1, show how Concept 2 relates to it, explain Concept 2 in detail]
+[Practical examples and applications]
+
+## Progressive Development: [How concepts build]
+[2-3 paragraphs showing how all concepts work together, building complexity]
+
+## Practical Applications and Examples
+[Real-world scenarios, detailed examples showing concepts in action]
+
+BAD EXAMPLE (what to avoid):
+- Just listing items: "Key characteristics: predict, understand, generate..."
+- No explanations: Just naming things without saying what they are or why they matter
+- Shallow coverage: Mentioning many topics but explaining none
+
+GOOD EXAMPLE:
+"Language models fundamentally work by analyzing probability distributions of words. But what does that actually mean? Think of it like this: when you're reading a sentence and see the word 'The', your brain immediately expects certain words to follow - probably a noun like 'cat' or 'book', not a verb like 'jumped'. This is because your brain has learned from millions of sentences that 'The' is typically followed by nouns. Language models do something similar, but using mathematical probabilities..."
+
+Return ONLY the Markdown content, no additional text or JSON wrapper.`;
+
+        setCourseSettings({
+          outline_prompt: defaultOutlinePrompt,
+          lesson_prompt: defaultLessonPrompt,
+          outline_max_tokens: 2048,
+          lesson_max_tokens: 4096
+        });
+      }
+      
       // Expand pre-context section by default
       setExpandedSections(prev => ({
         ...prev,
@@ -832,11 +999,37 @@ export function SettingsPage({ onNavigate }) {
     setSuccess(null);
     
     try {
-      await configAPI.saveSystemConfig(systemFields);
+      // Include course settings in system config
+      const configToSave = {
+        ...systemFields,
+        course_settings: courseSettings
+      };
+      await configAPI.saveSystemConfig(configToSave);
       setSuccess('System config saved successfully');
     } catch (err) {
       console.error('Error saving system config:', err);
       setError(err.message || 'Failed to save config.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveCourseSettings = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      const configToSave = {
+        ...systemFields,
+        course_settings: courseSettings
+      };
+      await configAPI.saveSystemConfig(configToSave);
+      setSuccess('Course settings saved successfully');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      console.error('Error saving course settings:', err);
+      setError(err.message || 'Failed to save course settings.');
     } finally {
       setSaving(false);
     }
@@ -1060,6 +1253,12 @@ export function SettingsPage({ onNavigate }) {
             onClick={() => setActiveTab('users')}
           >
             Users
+          </button>
+          <button
+            className={activeTab === 'courses' ? 'active' : ''}
+            onClick={() => setActiveTab('courses')}
+          >
+            Courses
           </button>
         </div>
 
@@ -2990,6 +3189,107 @@ export function SettingsPage({ onNavigate }) {
 
           {activeTab === 'users' && (
             <UserManagementPanel onNavigate={onNavigate} />
+          )}
+
+          {activeTab === 'courses' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>Course Generation Settings</h3>
+                <button
+                  onClick={saveCourseSettings}
+                  disabled={saving}
+                  className="save-button"
+                >
+                  {saving ? 'Saving...' : 'Save Settings'}
+                </button>
+              </div>
+
+              <div className="config-form-container">
+                <div className="form-group">
+                  <label>
+                    Course Outline Generation Prompt
+                    <span className="field-hint">
+                      The prompt template used to generate course outlines. Use {"{prompt}"} for the user's learning request.
+                    </span>
+                  </label>
+                  <textarea
+                    value={courseSettings.outline_prompt || ''}
+                    onChange={(e) => setCourseSettings({ ...courseSettings, outline_prompt: e.target.value })}
+                    className="config-textarea"
+                    rows={20}
+                    placeholder="You are an educational course designer..."
+                  />
+                  <span className="form-help">
+                    This prompt is sent to the AI to generate course outlines. The {"{prompt}"} placeholder will be replaced with the user's learning request.
+                  </span>
+                </div>
+
+                <div className="form-group">
+                  <label>
+                    Lesson Generation Prompt
+                    <span className="field-hint">
+                      The prompt template used to generate lessons. Use {"{course_title}"}, {"{section_title}"}, and {"{section_summary}"} as placeholders.
+                    </span>
+                  </label>
+                  <textarea
+                    value={courseSettings.lesson_prompt || ''}
+                    onChange={(e) => setCourseSettings({ ...courseSettings, lesson_prompt: e.target.value })}
+                    className="config-textarea"
+                    rows={20}
+                    placeholder="Create a detailed, beginner-friendly lesson..."
+                  />
+                  <span className="form-help">
+                    This prompt is sent to the AI to generate lessons. Available variables: {"{course_title}"}, {"{section_title}"}, {"{section_summary}"}.
+                  </span>
+                  <div style={{ marginTop: '8px', padding: '12px', background: 'rgba(102, 126, 234, 0.1)', borderRadius: '8px', fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.8)' }}>
+                    <strong>Example usage:</strong><br/>
+                    Course: {"{course_title}"}<br/>
+                    Section: {"{section_title}"}<br/>
+                    Summary: {"{section_summary}"}<br/>
+                    <br/>
+                    Generate a lesson based on the summary above...
+                  </div>
+                </div>
+
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>
+                      Outline Max Tokens
+                      <span className="field-hint">
+                        Maximum tokens for course outline generation (default: 2048)
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      value={courseSettings.outline_max_tokens || 2048}
+                      onChange={(e) => setCourseSettings({ ...courseSettings, outline_max_tokens: parseInt(e.target.value) || 2048 })}
+                      className="config-input"
+                      min="256"
+                      max="8192"
+                      placeholder="2048"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>
+                      Lesson Max Tokens
+                      <span className="field-hint">
+                        Maximum tokens for lesson generation (default: 4096)
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      value={courseSettings.lesson_max_tokens || 4096}
+                      onChange={(e) => setCourseSettings({ ...courseSettings, lesson_max_tokens: parseInt(e.target.value) || 4096 })}
+                      className="config-input"
+                      min="512"
+                      max="16384"
+                      placeholder="4096"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

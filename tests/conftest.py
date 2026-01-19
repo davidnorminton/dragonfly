@@ -1,5 +1,6 @@
 """Pytest configuration and fixtures."""
 import pytest
+import os
 import asyncio
 import os
 import tempfile
@@ -141,3 +142,26 @@ async def test_client() -> AsyncGenerator[httpx.AsyncClient, None]:
         yield client
 
 
+@pytest.fixture(scope="function")
+async def client(test_client):
+    """Alias for test_client for compatibility."""
+    return test_client
+@pytest.fixture(scope="function")
+async def test_user(db_session) -> dict:
+    """Create a test user."""
+    from database.models import User
+    
+    user = User(
+        id=1,
+        name="Test User",
+        email="test@example.com"
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email
+    }

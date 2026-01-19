@@ -55,6 +55,8 @@
   justify-content: center;
   cursor: pointer;
   animation: slideDown 0.5s ease-out;
+  /* Counter the brightness filter to keep overlay content at full brightness */
+  filter: brightness(5); /* 5x to counter 0.2x on body (5 * 0.2 = 1.0) */
 }
 
 .night-mode-content {

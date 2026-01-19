@@ -47,6 +47,27 @@ export function StoriesPage({ onNavigate, selectedUser }) {
         if (result.stories && Array.isArray(result.stories)) {
           setCompleteStories(result.stories);
           console.log('[Stories] Set complete stories:', result.stories.length);
+          
+          // Log full database data for each complete story
+          console.log('[Stories] Complete stories database data:');
+          result.stories.forEach((story, index) => {
+            console.log(`[Stories] Complete Story ${index + 1}:`, {
+              id: story.id,
+              title: story.title,
+              image: story.image,
+              story: story.story ? `${story.story.substring(0, 100)}... (${story.story.length} chars)` : null,
+              story_length: story.story ? story.story.length : 0,
+              audio: story.audio,
+              narrator: story.narrator,
+              cast: story.cast,
+              screenplay: story.screenplay ? `${story.screenplay.substring(0, 100)}... (${story.screenplay.length} chars)` : null,
+              screenplay_length: story.screenplay ? story.screenplay.length : 0,
+              created_at: story.created_at,
+              updated_at: story.updated_at,
+              full_story: story.story, // Full story text
+              full_screenplay: story.screenplay // Full screenplay JSON
+            });
+          });
         } else {
           console.warn('[Stories] No stories array in response');
           setCompleteStories([]);
@@ -77,19 +98,10 @@ export function StoriesPage({ onNavigate, selectedUser }) {
   return (
     <div className="stories-page">
       <div className="stories-container">
-        <div className="stories-header">
-          <h1>Stories</h1>
-          <button
-            className="create-story-button"
-            onClick={() => onNavigate?.('create-story')}
-          >
-            Create
-          </button>
-        </div>
         <div className="stories-content">
           {/* Projects Section */}
           <div className="stories-section">
-            <h2 className="stories-section-title">Projects</h2>
+            <h2 className="stories-section-title">Story Projects</h2>
             {loading ? (
               <div className="stories-loading">Loading stories...</div>
             ) : error ? (
@@ -125,13 +137,22 @@ export function StoriesPage({ onNavigate, selectedUser }) {
                     </button>
                   </div>
                 ))}
+                {/* Create button at the end of the list */}
+                <div className="story-item story-item-create">
+                  <button
+                    className="create-story-button"
+                    onClick={() => onNavigate?.('create-story')}
+                  >
+                    + Create
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
           {/* Complete Stories Section */}
           <div className="stories-section">
-            <h2 className="stories-section-title">Stories</h2>
+            <h2 className="stories-section-title">Completed Stories</h2>
             {loadingComplete ? (
               <div className="stories-loading">Loading complete stories...</div>
             ) : completeStories.length === 0 ? (
@@ -147,26 +168,34 @@ export function StoriesPage({ onNavigate, selectedUser }) {
                   const audioUrl = story.audio?.startsWith('/') ? story.audio : `/${story.audio}`;
                   console.log('[Stories] Rendering complete story:', story.id, story.title, audioUrl);
                   return (
-                    <div key={story.id} className="story-item">
-                      <h3 className="story-title">{story.title}</h3>
-                      <div className="story-meta">
-                        <span className="story-date">
-                          {story.created_at 
-                            ? new Date(story.created_at).toLocaleDateString()
-                            : 'Unknown date'}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
-                        <audio
-                          ref={(el) => {
-                            if (el) audioRefs.current[story.id] = el;
-                          }}
-                          src={audioUrl}
-                          controls
-                          style={{ maxWidth: '300px', height: '32px' }}
-                        />
-                      </div>
+                  <div 
+                    key={story.id} 
+                    className="story-item"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      onNavigate?.('story-view', { storyId: story.id });
+                    }}
+                  >
+                    <h3 className="story-title">{story.title}</h3>
+                    <div className="story-meta">
+                      <span className="story-date">
+                        {story.created_at 
+                          ? new Date(story.created_at).toLocaleDateString()
+                          : 'Unknown date'}
+                      </span>
                     </div>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
+                      <audio
+                        ref={(el) => {
+                          if (el) audioRefs.current[story.id] = el;
+                        }}
+                        src={audioUrl}
+                        controls
+                        style={{ maxWidth: '300px', height: '32px' }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
                   );
                 })}
               </div>

@@ -28,6 +28,25 @@ export function NightModeButton() {
     }
   }, [showOverlay]);
 
+  // Apply brightness reduction to entire page when overlay is shown
+  useEffect(() => {
+    if (showOverlay) {
+      // Apply 20% brightness filter to body/html
+      document.body.style.filter = 'brightness(0.2)';
+      document.documentElement.style.filter = 'brightness(0.2)';
+    } else {
+      // Remove brightness filter when overlay is hidden
+      document.body.style.filter = '';
+      document.documentElement.style.filter = '';
+    }
+
+    // Cleanup on unmount
+    return () => {
+      document.body.style.filter = '';
+      document.documentElement.style.filter = '';
+    };
+  }, [showOverlay]);
+
   // Fetch upcoming alarms when overlay is shown
   useEffect(() => {
     const fetchUpcomingAlarms = async () => {

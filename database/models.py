@@ -755,3 +755,102 @@ class StoryComplete(Base):
     def __repr__(self):
         return f"<StoryComplete {self.id}: {self.title}>"
 
+
+class Course(Base):
+    """Model for storing courses."""
+    __tablename__ = "courses"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Link to user who created it
+    title = Column(String, nullable=False, index=True)
+    original_prompt = Column(Text, nullable=False)  # Original user prompt for generating the course
+    pinned = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    sections = relationship("CourseSection", back_populates="course", cascade="all, delete-orphan", order_by="CourseSection.order_index")
+    questions = relationship("CourseQuestion", back_populates="course", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Course {self.id}: {self.title}>"
+
+
+class CourseSection(Base):
+    """Model for storing course sections."""
+    __tablename__ = "course_sections"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=True)  # Summary/description of what this section should teach
+    order_index = Column(Integer, nullable=False, index=True)  # Order within the course (0, 1, 2, ...)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    course = relationship("Course", back_populates="sections")
+    lesson = relationship("Lesson", back_populates="section", uselist=False, cascade="all, delete-orphan")
+    questions = relationship("CourseQuestion", back_populates="section", cascade="all, delete-orphan")
+    subsections = relationship("CourseSubsection", back_populates="section", cascade="all, delete-orphan", order_by="CourseSubsection.order_index")
+    
+    def __repr__(self):
+        return f"<CourseSection {self.id}: {self.title} (order: {self.order_index})>"
+
+
+class CourseSubsection(Base):
+    """Model for storing course subsections."""
+    __tablename__ = "course_subsections"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    section_id = Column(Integer, ForeignKey("course_sections.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=True)
+    order_index = Column(Integer, nullable=False, index=True)  # Order within the section (0, 1, 2, ...)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    section = relationship("CourseSection", back_populates="subsections")
+    
+    def __repr__(self):
+        return f"<CourseSubsection {self.id}: {self.title} (order: {self.order_index})>"
+
+
+class Lesson(Base):
+    """Model for storing lesson content."""
+    __tablename__ = "lessons"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    section_id = Column(Integer, ForeignKey("course_sections.id"), nullable=False, index=True, unique=True)  # One lesson per section
+    content = Column(Text, nullable=False)  # Markdown/rich text lesson content
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    section = relationship("CourseSection", back_populates="lesson")
+    
+    def __repr__(self):
+        return f"<Lesson {self.id} for section {self.section_id}>"
+
+
+class CourseQuestion(Base):
+    """Model for storing course Q&A."""
+    __tablename__ = "course_questions"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    section_id = Column(Integer, ForeignKey("course_sections.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    course = relationship("Course", back_populates="questions")
+    section = relationship("CourseSection", back_populates="questions")
+    
+    def __repr__(self):
+        return f"<CourseQuestion {self.id} for course {self.course_id}>"
+

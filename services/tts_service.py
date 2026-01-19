@@ -62,7 +62,12 @@ class TTSService:
             from utils.text_cleaner import clean_text_for_tts
             
             cleaned_text = clean_text_for_tts(text)
-            logger.info(f"Generating audio via HTTP (voice_id: {voice_id}, backend: {voice_engine})")
+            logger.info(f"[TTS] Generating audio via HTTP (voice_id: {voice_id}, backend: {voice_engine})")
+            logger.info(f"[TTS] Text cleaned for TTS - Original length: {len(text)}, Cleaned length: {len(cleaned_text)}")
+            if "'" in text or "'" in text:
+                logger.info(f"[TTS] Apostrophes found in original text and will be removed")
+            if "'" not in cleaned_text and "'" not in cleaned_text:
+                logger.info(f"[TTS] ✓ Confirmed: No apostrophes in cleaned text sent to Fish Audio")
             
             url = "https://api.fish.audio/v1/tts"
             headers = {
@@ -136,19 +141,34 @@ class TTSService:
                     accumulated_text = accumulated_text[last_sentence_end + 1:].strip()
                     
                     if text_to_generate:
-                        logger.info(f"[TTS STREAM] Generating audio for {len(text_to_generate)} chars")
+                        # Clean text before sending to Fish Audio
+                        cleaned_chunk = clean_text_for_tts(text_to_generate)
+                        logger.info(f"[TTS STREAM] Generating audio for {len(text_to_generate)} chars (cleaned: {len(cleaned_chunk)} chars)")
+                        if "'" in text_to_generate or "'" in text_to_generate:
+                            logger.info(f"[TTS STREAM] Apostrophes found in chunk and will be removed")
+                        if "'" not in cleaned_chunk and "'" not in cleaned_chunk:
+                            logger.info(f"[TTS STREAM] ✓ No apostrophes in cleaned chunk sent to Fish Audio")
+                        
                         # Generate audio using simple HTTP method (more reliable)
+                        # Note: generate_audio_simple also calls clean_text_for_tts internally, but we log here first
                         audio_bytes = await self.generate_audio_simple(text_to_generate, voice_id, voice_engine)
                         if audio_bytes:
-                            logger.info(f"[TTS STREAM] Generated {len(audio_bytes)} bytes")
+                            logger.info(f"[TTS STREAM] Generated {len(audio_bytes)} bytes of audio")
                             yield audio_bytes
             
             # Generate audio for any remaining text
             if accumulated_text.strip():
-                logger.info(f"[TTS STREAM] Generating audio for final {len(accumulated_text)} chars")
-                audio_bytes = await self.generate_audio_simple(accumulated_text.strip(), voice_id, voice_engine)
+                final_text = accumulated_text.strip()
+                cleaned_final = clean_text_for_tts(final_text)
+                logger.info(f"[TTS STREAM] Generating audio for final {len(final_text)} chars (cleaned: {len(cleaned_final)} chars)")
+                if "'" in final_text or "'" in final_text:
+                    logger.info(f"[TTS STREAM] Apostrophes found in final chunk and will be removed")
+                if "'" not in cleaned_final and "'" not in cleaned_final:
+                    logger.info(f"[TTS STREAM] ✓ No apostrophes in final cleaned chunk sent to Fish Audio")
+                
+                audio_bytes = await self.generate_audio_simple(final_text, voice_id, voice_engine)
                 if audio_bytes:
-                    logger.info(f"[TTS STREAM] Generated final {len(audio_bytes)} bytes")
+                    logger.info(f"[TTS STREAM] Generated final {len(audio_bytes)} bytes of audio")
                     yield audio_bytes
                     
         except Exception as e:

@@ -531,6 +531,24 @@ server_start_time: float = time.time()
 
 
 
+async def _get_music_directory() -> Path:
+    """Get music directory path from system config, with fallback to default."""
+    default_path = Path("/Users/davidnorminton/Music")
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.key == "paths")
+            )
+            config = result.scalar_one_or_none()
+            if config and config.value:
+                paths_config = config.value
+                if paths_config.get("music_directory"):
+                    return Path(paths_config["music_directory"])
+    except Exception as e:
+        logger.debug(f"Could not load music directory from config: {e}")
+    return default_path
+
+
 async def _get_anthropic_api_key() -> Optional[str]:
     """Fetch Anthropic API key from settings, api_keys.json, or env."""
     api_key = settings.ai_api_key or os.getenv("ANTHROPIC_API_KEY")
@@ -2172,7 +2190,7 @@ async def _download_album_cover(artist: str, album: str, save_dir: Path) -> Opti
             logger.info(f"Downloaded cover art for {artist} - {album} to {cover_path}")
             
             # Return relative path from music base
-            base_path = Path("/Users/davidnorminton/Music")
+            base_path = await _get_music_directory()
             rel_path = str(cover_path.relative_to(base_path))
             return rel_path
             
@@ -2181,7 +2199,7 @@ async def _download_album_cover(artist: str, album: str, save_dir: Path) -> Opti
         return None
 
 
-def _extract_album_art_from_mp3(mp3_path: Path, save_dir: Path) -> Optional[str]:
+def _extract_album_art_from_mp3(mp3_path: Path, save_dir: Path, base_path: Path) -> Optional[str]:
     """
     Extract embedded album art from MP3 file and save as cover.jpg.
     Returns the relative path to the saved cover, or None if not found.
@@ -2204,7 +2222,6 @@ def _extract_album_art_from_mp3(mp3_path: Path, save_dir: Path) -> Optional[str]
                 logger.info(f"Extracted album art from {mp3_path.name} to {cover_path}")
                 
                 # Return relative path
-                base_path = Path("/Users/davidnorminton/Music")
                 rel_path = str(cover_path.relative_to(base_path))
                 return rel_path
         
@@ -3956,6 +3973,7 @@ async def clear_music_library():
             # Delete all music data in correct order (child tables first)
             await session.execute(delete(MusicPlaylistSong))
             await session.execute(delete(MusicPlaylist))
+            await session.execute(delete(MusicPlay))  # Delete plays before songs (foreign key)
             await session.execute(delete(MusicSong))
             await session.execute(delete(MusicAlbum))
             await session.execute(delete(MusicArtist))
@@ -3997,6 +4015,18 @@ async def delete_artist(artist_name: str):
             album_ids = [a[0] for a in albums_result.all()]
             
             if album_ids:
+                # Get song IDs to delete plays first (foreign key constraint)
+                songs_result = await session.execute(
+                    select(MusicSong.id).where(MusicSong.album_id.in_(album_ids))
+                )
+                song_ids = [s[0] for s in songs_result.all()]
+                
+                if song_ids:
+                    # Delete plays before songs
+                    await session.execute(
+                        delete(MusicPlay).where(MusicPlay.song_id.in_(song_ids))
+                    )
+                
                 await session.execute(
                     delete(MusicSong).where(MusicSong.album_id.in_(album_ids))
                 )
@@ -4044,6 +4074,18 @@ async def cleanup_invalid_artists():
                     album_ids = [a[0] for a in albums_result.all()]
                     
                     if album_ids:
+                        # Get song IDs to delete plays first (foreign key constraint)
+                        songs_result = await session.execute(
+                            select(MusicSong.id).where(MusicSong.album_id.in_(album_ids))
+                        )
+                        song_ids = [s[0] for s in songs_result.all()]
+                        
+                        if song_ids:
+                            # Delete plays before songs
+                            await session.execute(
+                                delete(MusicPlay).where(MusicPlay.song_id.in_(song_ids))
+                            )
+                        
                         await session.execute(
                             delete(MusicSong).where(MusicSong.album_id.in_(album_ids))
                         )
@@ -4082,7 +4124,7 @@ async def scan_music_library():
     Returns a nested tree: { artists: [ { name, albums: [ { name, image, songs: [ { name, path } ] } ] } ] }
     Paths are returned relative to the base music directory and can be streamed via /api/music/stream?path=<relpath>.
     """
-    base_path = Path("/Users/davidnorminton/Music")
+    base_path = await _get_music_directory()
     if not base_path.exists():
         return {"success": False, "error": f"{base_path} does not exist"}
 
@@ -4278,7 +4320,7 @@ async def scan_music_library():
                 for song in album_data["songs"]:
                     song_path = base_path / song["path"]
                     if song_path.exists():
-                        extracted_cover = _extract_album_art_from_mp3(song_path, album_dir_path)
+                        extracted_cover = _extract_album_art_from_mp3(song_path, album_dir_path, base_path)
                         if extracted_cover:
                             logger.info(f"Successfully extracted cover art from {song_path.name}")
                             break
@@ -4344,7 +4386,7 @@ async def stream_music_file(path: str):
     """
     Stream a music (or image) file from the user's Music directory.
     """
-    base_path = Path("/Users/davidnorminton/Music").resolve()
+    base_path = (await _get_music_directory()).resolve()
     # Accept relative paths (preferred) and absolute paths under base for safety
     raw_path = Path(path)
     if raw_path.is_absolute():
@@ -4365,7 +4407,7 @@ async def music_metadata(path: str):
     """
     Return simple metadata (duration seconds) for an mp3 under Music.
     """
-    base_path = Path("/Users/davidnorminton/Music").resolve()
+    base_path = (await _get_music_directory()).resolve()
     raw_path = Path(path)
     if raw_path.is_absolute():
         target = raw_path.resolve()
@@ -7105,7 +7147,7 @@ async def get_system_stats():
         
         # Get directory sizes for Music, Audio, and Video directories
         # Load paths from system config
-        music_dir_path = Path("/Users/davidnorminton/Music")  # Default
+        music_dir_path = await _get_music_directory()
         audio_dir_path = Path("data/audio")  # Default
         video_dir_path = Path("/Users/davidnorminton/Movies")  # Default
         
@@ -7117,8 +7159,6 @@ async def get_system_stats():
                 config = result.scalar_one_or_none()
                 if config and config.value:
                     paths_config = config.value
-                    if paths_config.get("music_directory"):
-                        music_dir_path = Path(paths_config["music_directory"])
                     if paths_config.get("audio_directory"):
                         audio_dir_path = Path(paths_config["audio_directory"])
                     if paths_config.get("video_directory"):
