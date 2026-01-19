@@ -123,18 +123,37 @@ class VideoScanner:
                             logger.warning(f"  ❌ Not found on TMDB")
                     
                     # Step 4: Save to database
+                    # Normalize path to absolute to ensure consistent matching
+                    normalized_path = str(movie_file.resolve())
                     result = await session.execute(
-                        select(VideoMovie).where(VideoMovie.file_path == str(movie_file))
+                        select(VideoMovie).where(VideoMovie.file_path == normalized_path)
                     )
                     existing = result.scalar_one_or_none()
+                    
+                    # Also check for any existing entries with the same file (case-insensitive, normalized)
+                    if not existing:
+                        # Try to find duplicates with different path formats
+                        all_movies = await session.execute(select(VideoMovie))
+                        for existing_movie in all_movies.scalars().all():
+                            try:
+                                if existing_movie.file_path and Path(existing_movie.file_path).resolve() == movie_file.resolve():
+                                    existing = existing_movie
+                                    logger.info(f"  🔍 Found duplicate by path normalization (ID: {existing.id}, old path: {existing.file_path})")
+                                    break
+                            except Exception:
+                                pass  # Skip if path can't be resolved
                     
                     if existing:
                         logger.info(f"  💾 Updating existing movie (ID: {existing.id})")
                         movie = existing
+                        # Update file_path to normalized version if different
+                        if movie.file_path != normalized_path:
+                            logger.info(f"     Normalizing path: '{movie.file_path}' → '{normalized_path}'")
+                            movie.file_path = normalized_path
                     else:
                         logger.info(f"  💾 Creating new movie")
                         movie = VideoMovie(
-                            file_path=str(movie_file),
+                            file_path=normalized_path,
                             file_size=movie_file.stat().st_size
                         )
                         session.add(movie)
