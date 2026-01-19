@@ -125,32 +125,49 @@ class VideoScanner:
                     # Step 4: Save to database
                     # Normalize path to absolute to ensure consistent matching
                     normalized_path = str(movie_file.resolve())
+                    
+                    # Check for exact match first
                     result = await session.execute(
                         select(VideoMovie).where(VideoMovie.file_path == normalized_path)
                     )
                     existing = result.scalar_one_or_none()
                     
-                    # Also check for any existing entries with the same file (case-insensitive, normalized)
+                    # Also check for any existing entries with the same file (by comparing resolved paths)
                     if not existing:
-                        # Try to find duplicates with different path formats
-                        all_movies = await session.execute(select(VideoMovie))
-                        for existing_movie in all_movies.scalars().all():
+                        # Get all movies and check if any resolve to the same path
+                        all_movies_result = await session.execute(select(VideoMovie))
+                        all_movies = all_movies_result.scalars().all()
+                        
+                        for existing_movie in all_movies:
                             try:
-                                if existing_movie.file_path and Path(existing_movie.file_path).resolve() == movie_file.resolve():
-                                    existing = existing_movie
-                                    logger.info(f"  🔍 Found duplicate by path normalization (ID: {existing.id}, old path: {existing.file_path})")
-                                    break
-                            except Exception:
-                                pass  # Skip if path can't be resolved
+                                if existing_movie.file_path:
+                                    existing_resolved = Path(existing_movie.file_path).resolve()
+                                    if existing_resolved == movie_file.resolve():
+                                        existing = existing_movie
+                                        logger.info(f"  🔍 Found duplicate by path normalization (ID: {existing.id}, old path: '{existing.file_path}', new path: '{normalized_path}')")
+                                        break
+                            except (OSError, ValueError) as e:
+                                # Skip if path can't be resolved (file deleted, invalid path, etc.)
+                                logger.debug(f"  ⚠️  Could not resolve existing path '{existing_movie.file_path}': {e}")
+                                continue
                     
                     if existing:
                         logger.info(f"  💾 Updating existing movie (ID: {existing.id})")
                         movie = existing
-                        # Update file_path to normalized version if different
+                        # Always update file_path to normalized version (ensures consistency)
                         if movie.file_path != normalized_path:
                             logger.info(f"     Normalizing path: '{movie.file_path}' → '{normalized_path}'")
                             movie.file_path = normalized_path
                     else:
+                        # Double-check: Query one more time by exact path before creating
+                        # This handles race conditions if the same file is processed simultaneously
+                        final_check = await session.execute(
+                            select(VideoMovie).where(VideoMovie.file_path == normalized_path)
+                        )
+                        if final_check.scalar_one_or_none():
+                            logger.info(f"  ⚠️  Duplicate detected on second check, skipping creation")
+                            continue
+                        
                         logger.info(f"  💾 Creating new movie")
                         movie = VideoMovie(
                             file_path=normalized_path,
@@ -183,11 +200,22 @@ class VideoScanner:
                         movie.resolution = video_meta.get('resolution')
                         movie.codec = video_meta.get('codec')
                     
+                    # Flush before commit to trigger any unique constraint violations early
+                    await session.flush()
+                    
+                    # Commit the changes
                     await session.commit()
                     movie_count += 1
                     logger.info(f"  ✅ Saved: '{movie.title}'")
                     
                 except Exception as e:
+                    # Check if it's a unique constraint violation (duplicate)
+                    from sqlalchemy.exc import IntegrityError
+                    if isinstance(e, IntegrityError) or (hasattr(e, 'orig') and 'unique constraint' in str(e.orig).lower()):
+                        logger.warning(f"  ⚠️  Duplicate detected for {movie_file.name} (unique constraint violation) - skipping")
+                        await session.rollback()
+                        continue
+                    
                     logger.error(f"  ❌ Error processing {movie_file.name}: {e}")
                     logger.error(f"      Exception type: {type(e).__name__}")
                     if hasattr(e, 'orig'):
