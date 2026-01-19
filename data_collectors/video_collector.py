@@ -94,10 +94,54 @@ class VideoScanner:
         logger.info(f"Found {len(movie_files)} movie files")
         
         movie_count = 0
+        
+        # First, pre-load all existing movie paths into a set for fast lookup
+        # This avoids checking the database for each file and ensures we see all existing paths
+        async with AsyncSessionLocal() as pre_session:
+            pre_result = await pre_session.execute(select(VideoMovie.file_path))
+            existing_paths = {path for (path,) in pre_result.all() if path}
+            
+            # Also build a map of resolved paths -> movie IDs for path normalization checks
+            resolved_path_map = {}
+            all_movies_result = await pre_session.execute(select(VideoMovie))
+            for movie in all_movies_result.scalars().all():
+                if movie.file_path:
+                    try:
+                        resolved = str(Path(movie.file_path).resolve())
+                        if resolved not in resolved_path_map:
+                            resolved_path_map[resolved] = movie.id
+                    except (OSError, ValueError):
+                        pass
+        
+        logger.info(f"📊 Loaded {len(existing_paths)} existing movie paths from database")
+        
         async with AsyncSessionLocal() as session:
             for idx, movie_file in enumerate(movie_files, 1):
                 try:
                     logger.info(f"\n[{idx}/{len(movie_files)}] {movie_file.name}")
+                    
+                    # Normalize path FIRST before any other processing
+                    try:
+                        normalized_path = str(movie_file.resolve())
+                    except (OSError, ValueError) as e:
+                        logger.warning(f"  ⚠️  Could not resolve path '{movie_file}': {e}, using as-is")
+                        normalized_path = str(movie_file)
+                    
+                    # CRITICAL CHECK: If path is already in DB, skip this file entirely
+                    if normalized_path in existing_paths:
+                        logger.info(f"  ⏭️  SKIP: Path already in database: '{normalized_path}'")
+                        continue
+                    
+                    # Also check if resolved path matches any existing resolved path
+                    current_resolved = normalized_path
+                    try:
+                        current_resolved = str(movie_file.resolve())
+                    except (OSError, ValueError):
+                        pass
+                    
+                    if current_resolved in resolved_path_map:
+                        logger.info(f"  ⏭️  SKIP: Resolved path already exists (ID: {resolved_path_map[current_resolved]}): '{current_resolved}'")
+                        continue
                     
                     # Step 1: Parse filename
                     parsed = self._parse_movie_filename(movie_file.name)
@@ -122,60 +166,27 @@ class VideoScanner:
                         else:
                             logger.warning(f"  ❌ Not found on TMDB")
                     
-                    # Step 4: Save to database
-                    # Normalize path to absolute to ensure consistent matching
-                    try:
-                        normalized_path = str(movie_file.resolve())
-                    except (OSError, ValueError) as e:
-                        logger.warning(f"  ⚠️  Could not resolve path '{movie_file}': {e}, using as-is")
-                        normalized_path = str(movie_file)
-                    
-                    # Simple check: if this exact path exists in DB, don't insert - just update existing
+                    # Step 4: Final DB check (double-check after all processing)
                     result = await session.execute(
                         select(VideoMovie).where(VideoMovie.file_path == normalized_path)
                     )
                     existing = result.scalar_one_or_none()
                     
-                    # If not found by exact match, check all movies for path that resolves to same file
-                    if not existing:
-                        all_movies_result = await session.execute(select(VideoMovie))
-                        all_movies = all_movies_result.scalars().all()
-                        
-                        current_resolved = None
-                        try:
-                            current_resolved = movie_file.resolve()
-                        except (OSError, ValueError):
-                            pass
-                        
-                        if current_resolved:
-                            for existing_movie in all_movies:
-                                if not existing_movie.file_path:
-                                    continue
-                                try:
-                                    existing_resolved = Path(existing_movie.file_path).resolve()
-                                    if existing_resolved == current_resolved:
-                                        existing = existing_movie
-                                        logger.info(f"  🔍 Found duplicate by resolved path (ID: {existing.id})")
-                                        break
-                                except (OSError, ValueError):
-                                    continue
-                    
-                    # If path is already in DB, skip inserting - just update existing entry
                     if existing:
-                        logger.info(f"  💾 Updating existing movie (ID: {existing.id}) - path already in DB")
-                        movie = existing
-                        # Update file_path to normalized version if different
-                        if movie.file_path != normalized_path:
-                            logger.info(f"     Normalizing path: '{movie.file_path}' → '{normalized_path}'")
-                            movie.file_path = normalized_path
-                    else:
-                        # Path not in DB - safe to create new movie
-                        logger.info(f"  💾 Creating new movie")
-                        movie = VideoMovie(
-                            file_path=normalized_path,
-                            file_size=movie_file.stat().st_size
-                        )
-                        session.add(movie)
+                        logger.info(f"  ⏭️  SKIP: Path found in DB during final check (ID: {existing.id})")
+                        # Update the in-memory set so we don't check again
+                        existing_paths.add(normalized_path)
+                        if current_resolved:
+                            resolved_path_map[current_resolved] = existing.id
+                        continue
+                    
+                    # Step 5: Create new movie - path confirmed NOT in DB
+                    logger.info(f"  💾 Creating new movie")
+                    movie = VideoMovie(
+                        file_path=normalized_path,
+                        file_size=movie_file.stat().st_size
+                    )
+                    session.add(movie)
                     
                     # Update fields
                     if tmdb_data:
@@ -207,6 +218,12 @@ class VideoScanner:
                     
                     # Commit the changes
                     await session.commit()
+                    
+                    # Update in-memory set immediately after successful commit
+                    existing_paths.add(normalized_path)
+                    if current_resolved:
+                        resolved_path_map[current_resolved] = movie.id
+                    
                     movie_count += 1
                     logger.info(f"  ✅ Saved: '{movie.title}'")
                     
