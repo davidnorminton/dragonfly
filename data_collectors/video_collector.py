@@ -124,7 +124,11 @@ class VideoScanner:
                     
                     # Step 4: Save to database
                     # Normalize path to absolute to ensure consistent matching
-                    normalized_path = str(movie_file.resolve())
+                    try:
+                        normalized_path = str(movie_file.resolve())
+                    except (OSError, ValueError) as e:
+                        logger.warning(f"  ⚠️  Could not resolve path '{movie_file}': {e}, using as-is")
+                        normalized_path = str(movie_file)
                     
                     # Check for exact match first
                     result = await session.execute(
@@ -133,22 +137,40 @@ class VideoScanner:
                     existing = result.scalar_one_or_none()
                     
                     # Also check for any existing entries with the same file (by comparing resolved paths)
+                    # This catches cases where paths were stored in different formats
                     if not existing:
                         # Get all movies and check if any resolve to the same path
                         all_movies_result = await session.execute(select(VideoMovie))
                         all_movies = all_movies_result.scalars().all()
                         
+                        current_resolved = None
+                        try:
+                            current_resolved = movie_file.resolve()
+                        except (OSError, ValueError):
+                            pass
+                        
                         for existing_movie in all_movies:
+                            if not existing_movie.file_path:
+                                continue
+                                
                             try:
-                                if existing_movie.file_path:
-                                    existing_resolved = Path(existing_movie.file_path).resolve()
-                                    if existing_resolved == movie_file.resolve():
-                                        existing = existing_movie
-                                        logger.info(f"  🔍 Found duplicate by path normalization (ID: {existing.id}, old path: '{existing.file_path}', new path: '{normalized_path}')")
-                                        break
-                            except (OSError, ValueError) as e:
-                                # Skip if path can't be resolved (file deleted, invalid path, etc.)
-                                logger.debug(f"  ⚠️  Could not resolve existing path '{existing_movie.file_path}': {e}")
+                                existing_resolved = Path(existing_movie.file_path).resolve()
+                                # Compare resolved paths if both can be resolved
+                                if current_resolved and existing_resolved == current_resolved:
+                                    existing = existing_movie
+                                    logger.info(f"  🔍 Found duplicate by path normalization (ID: {existing.id}, old path: '{existing.file_path}', new path: '{normalized_path}')")
+                                    break
+                                # Also check if normalized strings match (handles case-insensitive filesystems)
+                                elif str(existing_resolved).lower() == normalized_path.lower():
+                                    existing = existing_movie
+                                    logger.info(f"  🔍 Found duplicate by case-insensitive path (ID: {existing.id})")
+                                    break
+                            except (OSError, ValueError):
+                                # Can't resolve existing path - check if strings match (case-insensitive)
+                                if existing_movie.file_path.lower() == normalized_path.lower():
+                                    existing = existing_movie
+                                    logger.info(f"  🔍 Found duplicate by case-insensitive string match (ID: {existing.id})")
+                                    break
                                 continue
                     
                     if existing:
@@ -166,6 +188,20 @@ class VideoScanner:
                         )
                         if final_check.scalar_one_or_none():
                             logger.info(f"  ⚠️  Duplicate detected on second check, skipping creation")
+                            continue
+                        
+                        # Final check: query case-insensitive match
+                        # Some filesystems are case-insensitive but database might have different case
+                        final_check_case = await session.execute(
+                            select(VideoMovie)
+                        )
+                        for potential_dup in final_check_case.scalars().all():
+                            if potential_dup.file_path and potential_dup.file_path.lower() == normalized_path.lower():
+                                existing = potential_dup
+                                logger.info(f"  ⚠️  Duplicate detected by case-insensitive match (ID: {existing.id}), skipping creation")
+                                break
+                        
+                        if existing:
                             continue
                         
                         logger.info(f"  💾 Creating new movie")
