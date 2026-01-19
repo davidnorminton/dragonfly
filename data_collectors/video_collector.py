@@ -130,16 +130,14 @@ class VideoScanner:
                         logger.warning(f"  ⚠️  Could not resolve path '{movie_file}': {e}, using as-is")
                         normalized_path = str(movie_file)
                     
-                    # Check for exact match first
+                    # Simple check: if this exact path exists in DB, don't insert - just update existing
                     result = await session.execute(
                         select(VideoMovie).where(VideoMovie.file_path == normalized_path)
                     )
                     existing = result.scalar_one_or_none()
                     
-                    # Also check for any existing entries with the same file (by comparing resolved paths)
-                    # This catches cases where paths were stored in different formats
+                    # If not found by exact match, check all movies for path that resolves to same file
                     if not existing:
-                        # Get all movies and check if any resolve to the same path
                         all_movies_result = await session.execute(select(VideoMovie))
                         all_movies = all_movies_result.scalars().all()
                         
@@ -149,61 +147,29 @@ class VideoScanner:
                         except (OSError, ValueError):
                             pass
                         
-                        for existing_movie in all_movies:
-                            if not existing_movie.file_path:
-                                continue
-                                
-                            try:
-                                existing_resolved = Path(existing_movie.file_path).resolve()
-                                # Compare resolved paths if both can be resolved
-                                if current_resolved and existing_resolved == current_resolved:
-                                    existing = existing_movie
-                                    logger.info(f"  🔍 Found duplicate by path normalization (ID: {existing.id}, old path: '{existing.file_path}', new path: '{normalized_path}')")
-                                    break
-                                # Also check if normalized strings match (handles case-insensitive filesystems)
-                                elif str(existing_resolved).lower() == normalized_path.lower():
-                                    existing = existing_movie
-                                    logger.info(f"  🔍 Found duplicate by case-insensitive path (ID: {existing.id})")
-                                    break
-                            except (OSError, ValueError):
-                                # Can't resolve existing path - check if strings match (case-insensitive)
-                                if existing_movie.file_path.lower() == normalized_path.lower():
-                                    existing = existing_movie
-                                    logger.info(f"  🔍 Found duplicate by case-insensitive string match (ID: {existing.id})")
-                                    break
-                                continue
+                        if current_resolved:
+                            for existing_movie in all_movies:
+                                if not existing_movie.file_path:
+                                    continue
+                                try:
+                                    existing_resolved = Path(existing_movie.file_path).resolve()
+                                    if existing_resolved == current_resolved:
+                                        existing = existing_movie
+                                        logger.info(f"  🔍 Found duplicate by resolved path (ID: {existing.id})")
+                                        break
+                                except (OSError, ValueError):
+                                    continue
                     
+                    # If path is already in DB, skip inserting - just update existing entry
                     if existing:
-                        logger.info(f"  💾 Updating existing movie (ID: {existing.id})")
+                        logger.info(f"  💾 Updating existing movie (ID: {existing.id}) - path already in DB")
                         movie = existing
-                        # Always update file_path to normalized version (ensures consistency)
+                        # Update file_path to normalized version if different
                         if movie.file_path != normalized_path:
                             logger.info(f"     Normalizing path: '{movie.file_path}' → '{normalized_path}'")
                             movie.file_path = normalized_path
                     else:
-                        # Double-check: Query one more time by exact path before creating
-                        # This handles race conditions if the same file is processed simultaneously
-                        final_check = await session.execute(
-                            select(VideoMovie).where(VideoMovie.file_path == normalized_path)
-                        )
-                        if final_check.scalar_one_or_none():
-                            logger.info(f"  ⚠️  Duplicate detected on second check, skipping creation")
-                            continue
-                        
-                        # Final check: query case-insensitive match
-                        # Some filesystems are case-insensitive but database might have different case
-                        final_check_case = await session.execute(
-                            select(VideoMovie)
-                        )
-                        for potential_dup in final_check_case.scalars().all():
-                            if potential_dup.file_path and potential_dup.file_path.lower() == normalized_path.lower():
-                                existing = potential_dup
-                                logger.info(f"  ⚠️  Duplicate detected by case-insensitive match (ID: {existing.id}), skipping creation")
-                                break
-                        
-                        if existing:
-                            continue
-                        
+                        # Path not in DB - safe to create new movie
                         logger.info(f"  💾 Creating new movie")
                         movie = VideoMovie(
                             file_path=normalized_path,
