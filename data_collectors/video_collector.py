@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from database.base import AsyncSessionLocal
-from database.models import VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode
-from sqlalchemy import select
+from database.models import VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent
+from sqlalchemy import select, delete
 from services.tmdb_service import TMDBService
 
 logger = logging.getLogger(__name__)
@@ -863,3 +863,23 @@ class VideoScanner:
         except Exception as e:
             logger.debug(f"Could not extract video metadata from {video_path}: {e}")
             return None
+
+
+async def clear_video_library() -> bool:
+    """Clear all video library data from the database."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Delete in correct order due to foreign key constraints
+            # Start with dependent tables first
+            await session.execute(delete(VideoPlaybackProgress))
+            await session.execute(delete(VideoSimilarContent))
+            await session.execute(delete(VideoTVEpisode))
+            await session.execute(delete(VideoTVSeason))
+            await session.execute(delete(VideoTVShow))
+            await session.execute(delete(VideoMovie))
+            await session.commit()
+            logger.info("Cleared all video library data")
+            return True
+    except Exception as e:
+        logger.error(f"Error clearing video library: {e}", exc_info=True)
+        return False
