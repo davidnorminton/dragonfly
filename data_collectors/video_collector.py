@@ -32,6 +32,26 @@ class VideoScanner:
         logger.info(f"   TV directory: {self.tv_dir}")
         logger.info(f"   TMDB API: {'✓ Configured' if self.tmdb_service else '✗ Not configured'}")
         
+    def _cleanup_metadata_files(self, directory: Path) -> int:
+        """Delete macOS metadata files (._* and .DS_Store) from directory recursively."""
+        deleted_count = 0
+        try:
+            for item in directory.rglob('*'):
+                if item.is_file():
+                    # Delete macOS metadata files
+                    if item.name.startswith('._') or item.name == '.DS_Store':
+                        try:
+                            item.unlink()
+                            deleted_count += 1
+                            logger.debug(f"Deleted metadata file: {item}")
+                        except (OSError, PermissionError) as e:
+                            logger.warning(f"Could not delete metadata file {item}: {e}")
+            if deleted_count > 0:
+                logger.info(f"🗑️  Deleted {deleted_count} macOS metadata files from {directory}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up metadata files in {directory}: {e}")
+        return deleted_count
+    
     async def scan_library(self) -> Dict[str, Any]:
         """Scan the entire video library."""
         logger.info("="*80)
@@ -46,6 +66,16 @@ class VideoScanner:
             "episodes_scanned": 0,
             "errors": []
         }
+        
+        # Clean up macOS metadata files before scanning
+        logger.info("🧹 Cleaning up macOS metadata files...")
+        total_deleted = 0
+        if self.movies_dir.exists():
+            total_deleted += self._cleanup_metadata_files(self.movies_dir)
+        if self.tv_dir.exists():
+            total_deleted += self._cleanup_metadata_files(self.tv_dir)
+        if total_deleted > 0:
+            logger.info(f"✅ Cleaned up {total_deleted} metadata files")
         
         # Scan Movies
         if self.movies_dir.exists():
