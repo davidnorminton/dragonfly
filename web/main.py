@@ -537,11 +537,11 @@ async def _get_music_directory() -> Path:
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
-                select(SystemConfig).where(SystemConfig.key == "paths")
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
             )
             config = result.scalar_one_or_none()
-            if config and config.value:
-                paths_config = config.value
+            if config and config.config_value:
+                paths_config = config.config_value
                 if paths_config.get("music_directory"):
                     return Path(paths_config["music_directory"])
     except Exception as e:
