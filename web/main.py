@@ -4171,7 +4171,10 @@ async def scan_music_library():
                 try:
                     rel_img = full_image_path.relative_to(base_path)
                     parts_img = rel_img.parts
-                    if len(parts_img) == 1 and full_image_path.suffix.lower() in image_exts:
+                    if (len(parts_img) == 1 
+                        and full_image_path.suffix.lower() in image_exts
+                        and not f.startswith('._')  # Skip macOS metadata files
+                        and not f.startswith('.DS_Store')):  # Skip Finder files
                         artist_dir = parts_img[0]
                         # Prioritize cover.jpg for artist images
                         if f.lower() == "cover.jpg":
@@ -4280,15 +4283,29 @@ async def scan_music_library():
                 artist_name = album_metadata[album_key]["artist"]
                 album_name = album_metadata[album_key]["album"]
                 if tree[artist_name][album_name]["image"] is None:
-                    for img in current_dir.iterdir():
-                        if img.is_file() and img.suffix.lower() in image_exts:
-                            rel_img = str(img.relative_to(base_path))
-                            tree[artist_name][album_name]["image"] = rel_img
-                            # update collected_songs album_image for this album
-                            for cs in collected_songs:
-                                if cs["artist"] == artist_name and cs["album"] == album_name:
-                                    cs["album_image"] = rel_img
-                            break
+                    # First, try to find cover.jpg (prioritize it)
+                    cover_jpg = current_dir / "cover.jpg"
+                    if cover_jpg.is_file():
+                        rel_img = str(cover_jpg.relative_to(base_path))
+                        tree[artist_name][album_name]["image"] = rel_img
+                        # update collected_songs album_image for this album
+                        for cs in collected_songs:
+                            if cs["artist"] == artist_name and cs["album"] == album_name:
+                                cs["album_image"] = rel_img
+                    else:
+                        # If no cover.jpg, look for other image files (but skip ._ files)
+                        for img in current_dir.iterdir():
+                            if (img.is_file() 
+                                and img.suffix.lower() in image_exts
+                                and not img.name.startswith('._')  # Skip macOS metadata files
+                                and not img.name.startswith('.DS_Store')):  # Skip Finder files
+                                rel_img = str(img.relative_to(base_path))
+                                tree[artist_name][album_name]["image"] = rel_img
+                                # update collected_songs album_image for this album
+                                for cs in collected_songs:
+                                    if cs["artist"] == artist_name and cs["album"] == album_name:
+                                        cs["album_image"] = rel_img
+                                break
 
     # Extract album covers from MP3 metadata or download from MusicBrainz
     logger.info("Checking for missing album covers...")
@@ -7088,6 +7105,26 @@ async def get_system_stats():
     """Get system statistics (CPU, RAM, Disk) across all drives."""
     try:
         import psutil
+    except ImportError:
+        logger.error("psutil not available, cannot get system stats")
+        return {
+            "cpu_percent": 0.0,
+            "memory_total_gb": 0.0,
+            "memory_used_gb": 0.0,
+            "memory_percent": 0.0,
+            "disk_total_gb": 0.0,
+            "disk_used_gb": 0.0,
+            "disk_free_gb": 0.0,
+            "disk_percent": 0.0,
+            "music_dir_size": "N/A",
+            "music_dir_size_bytes": 0,
+            "audio_dir_size": "N/A",
+            "audio_dir_size_bytes": 0,
+            "video_dir_size": "N/A",
+            "video_dir_size_bytes": 0
+        }
+    
+    try:
         # Get average CPU usage across all cores
         cpu_percent = psutil.cpu_percent(interval=0.1, percpu=False)
         memory = psutil.virtual_memory()
@@ -7249,24 +7286,14 @@ async def get_system_stats():
         
         # Log the stats
         logger.info(f"System stats updated: CPU={cpu_percent:.1f}%, Memory={memory.percent:.1f}%, Disk={disk_percent:.1f}%")
+        logger.info(f"Directory sizes: Music={_format_size(music_library_total_bytes)}, Audio={_format_size(audio_dir_size_bytes)}, Video={_format_size(video_dir_size_bytes)}")
         
         return stats
-    except ImportError:
-        logger.error("psutil not available, cannot get system stats")
-        # Return zero data if psutil not available
-        return {
-            "cpu_percent": 0.0,
-            "memory_total_gb": 0.0,
-            "memory_used_gb": 0.0,
-            "memory_percent": 0.0,
-            "disk_total_gb": 0.0,
-            "disk_used_gb": 0.0,
-            "disk_free_gb": 0.0,
-            "disk_percent": 0.0
-        }
     except Exception as e:
         logger.error(f"Error getting system stats: {e}", exc_info=True)
-        # Return zero data on error
+        # Return zero data on error but log the full exception
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return {
             "cpu_percent": 0.0,
             "memory_total_gb": 0.0,
@@ -7275,7 +7302,14 @@ async def get_system_stats():
             "disk_total_gb": 0.0,
             "disk_used_gb": 0.0,
             "disk_free_gb": 0.0,
-            "disk_percent": 0.0
+            "disk_percent": 0.0,
+            "music_dir_size": "Error",
+            "music_dir_size_bytes": 0,
+            "audio_dir_size": "Error",
+            "audio_dir_size_bytes": 0,
+            "video_dir_size": "Error",
+            "video_dir_size_bytes": 0,
+            "error": str(e)
         }
 
 
