@@ -54,6 +54,12 @@ export function SystemStats() {
         </span>
         <span className="stat-value">{stats.music_dir_size ?? '...'}</span>
       </div>
+      {stats.database_size && stats.database_size !== '0 B' && (
+        <div className="stat-row stat-subrow">
+          <span className="stat-label stat-sublabel">└ Database</span>
+          <span className="stat-value stat-subvalue">{stats.database_size}</span>
+        </div>
+      )}
       <div className="stat-row">
         <span className="stat-label" title={stats.audio_dir_path || 'Audio Directory'}>
           Generated Audio
@@ -66,6 +72,12 @@ export function SystemStats() {
         </span>
         <span className="stat-value">{stats.video_dir_size ?? '...'}</span>
       </div>
+      {stats.database_size && stats.database_size !== '0 B' && (
+        <div className="stat-row stat-subrow">
+          <span className="stat-label stat-sublabel">└ Database</span>
+          <span className="stat-value stat-subvalue">{stats.database_size}</span>
+        </div>
+      )}
     </div>
   );
 }

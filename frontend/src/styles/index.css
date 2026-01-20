@@ -359,6 +359,25 @@ body {
   font-size: 0.85em;
 }
 
+.stat-subrow {
+  margin-left: 8px;
+  margin-top: -4px;
+  margin-bottom: 8px;
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+
+.stat-sublabel {
+  color: #808080;
+  font-size: 0.9em;
+}
+
+.stat-subvalue {
+  font-size: 0.85em;
+  font-weight: 500;
+  color: #b0b0b0;
+}
+
 .widget-content {
   display: flex;
   flex-direction: column;
