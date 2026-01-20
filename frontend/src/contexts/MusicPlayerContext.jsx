@@ -79,10 +79,34 @@ export function MusicPlayerProvider({ children }) {
   const playSong = useCallback((song, index, songPlaylist) => {
     if (!audioRef.current) return;
     
-    const songPath = song.file_path || song.path;
+    let songPath = song.file_path || song.path;
     if (!songPath) {
       console.error('Song has no path:', song);
       return;
+    }
+
+    // Normalize path: if it's absolute, convert to relative
+    // The path should be relative to the music directory stored in settings
+    // Remove any leading absolute path prefixes
+    if (songPath.startsWith('/')) {
+      // Try to detect and remove common absolute path prefixes
+      // The backend will handle relative paths correctly
+      const absolutePrefixes = [
+        '/Users/davidnorminton/Music/',
+        '/Users/davidnorminton/Music',
+        '/home/dave/Music/',
+        '/home/dave/Music',
+      ];
+      for (const prefix of absolutePrefixes) {
+        if (songPath.startsWith(prefix)) {
+          songPath = songPath.substring(prefix.length);
+          // Remove leading slash if present
+          if (songPath.startsWith('/')) {
+            songPath = songPath.substring(1);
+          }
+          break;
+        }
+      }
     }
 
     // Update playlist if provided
@@ -97,7 +121,7 @@ export function MusicPlayerProvider({ children }) {
     // Reset progress
     setProgress(0);
     
-    // Set source and play
+    // Set source and play - path should now be relative
     audioRef.current.src = `/api/music/stream?path=${encodeURIComponent(songPath)}`;
     audioRef.current.currentTime = 0;
     audioRef.current.play()
