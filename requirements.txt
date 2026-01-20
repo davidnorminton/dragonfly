@@ -41,6 +41,7 @@ vosk==0.3.44
 faster-whisper>=1.2.1
 soundfile==0.12.1
 pydub==0.25.1
+mutagen==1.47.0  # For audio metadata (MP3 tags)
 
 # Testing
 pytest==7.4.3
