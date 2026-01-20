@@ -7098,34 +7098,69 @@ async def get_system_stats():
         total_disk_free = 0
         
         system = platform.system().lower()
-        partitions = psutil.disk_partitions()
         
-        for partition in partitions:
+        # Check if Ubuntu and use df command for better results
+        is_ubuntu = False
+        try:
+            with open('/etc/os-release', 'r') as f:
+                os_release = f.read()
+                if 'ubuntu' in os_release.lower():
+                    is_ubuntu = True
+        except (OSError, FileNotFoundError):
+            pass
+        
+        if is_ubuntu:
+            # Use df command for Ubuntu (more reliable)
             try:
-                # Skip certain filesystem types that might cause errors
-                if system == 'linux' and partition.fstype in ['tmpfs', 'devtmpfs', 'sysfs', 'proc', 'devpts']:
-                    continue
-                if system == 'darwin' and partition.fstype in ['devfs', 'autofs']:
-                    continue
-                
-                usage = psutil.disk_usage(partition.mountpoint)
-                total_disk_space += usage.total
-                total_disk_used += usage.used
-                total_disk_free += usage.free
-            except (OSError, PermissionError):
-                # Skip partitions we can't access
-                continue
+                import subprocess
+                result = subprocess.run(
+                    ['df', '-B1', '/'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if len(lines) > 1:
+                        parts = lines[1].split()
+                        if len(parts) >= 4:
+                            total_disk_space = int(parts[1])
+                            total_disk_used = int(parts[2])
+                            total_disk_free = int(parts[3])
+                            logger.debug(f"Ubuntu: Using df command results")
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, ValueError) as e:
+                logger.debug(f"df command failed, falling back to psutil: {e}")
         
-        # If no partitions were accessible, try root as fallback
+        # Fallback to psutil if df didn't work or not Ubuntu
         if total_disk_space == 0:
-            try:
-                root_path = '/' if system != 'windows' else 'C:\\'
-                usage = psutil.disk_usage(root_path)
-                total_disk_space = usage.total
-                total_disk_used = usage.used
-                total_disk_free = usage.free
-            except (OSError, PermissionError):
-                logger.warning("Could not access disk usage, using placeholder data")
+            partitions = psutil.disk_partitions()
+            
+            for partition in partitions:
+                try:
+                    # Skip certain filesystem types that might cause errors
+                    if system == 'linux' and partition.fstype in ['tmpfs', 'devtmpfs', 'sysfs', 'proc', 'devpts']:
+                        continue
+                    if system == 'darwin' and partition.fstype in ['devfs', 'autofs']:
+                        continue
+                    
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    total_disk_space += usage.total
+                    total_disk_used += usage.used
+                    total_disk_free += usage.free
+                except (OSError, PermissionError):
+                    # Skip partitions we can't access
+                    continue
+            
+            # If no partitions were accessible, try root as fallback
+            if total_disk_space == 0:
+                try:
+                    root_path = '/' if system != 'windows' else 'C:\\'
+                    usage = psutil.disk_usage(root_path)
+                    total_disk_space = usage.total
+                    total_disk_used = usage.used
+                    total_disk_free = usage.free
+                except (OSError, PermissionError):
+                    logger.warning("Could not access disk usage, using placeholder data")
                 return {
                     "cpu_percent": 0.0,
                     "memory_total_gb": 0.0,
@@ -7154,11 +7189,11 @@ async def get_system_stats():
         try:
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
-                    select(SystemConfig).where(SystemConfig.key == "paths")
+                    select(SystemConfig).where(SystemConfig.config_key == "paths")
                 )
                 config = result.scalar_one_or_none()
-                if config and config.value:
-                    paths_config = config.value
+                if config and config.config_value:
+                    paths_config = config.config_value
                     if paths_config.get("audio_directory"):
                         audio_dir_path = Path(paths_config["audio_directory"])
                     if paths_config.get("video_directory"):
@@ -7166,10 +7201,27 @@ async def get_system_stats():
         except Exception as e:
             logger.debug(f"Could not load paths from config: {e}")
         
+        # Get database size
+        database_size_bytes = 0
+        try:
+            async with AsyncSessionLocal() as session:
+                # PostgreSQL query to get database size
+                db_result = await session.execute(
+                    text("SELECT pg_database_size(current_database())")
+                )
+                db_size = db_result.scalar()
+                if db_size:
+                    database_size_bytes = db_size
+        except Exception as e:
+            logger.debug(f"Could not get database size: {e}")
+        
         # Calculate directory sizes (do this in a thread to not block)
         music_dir_size_bytes = _get_directory_size(music_dir_path)
         audio_dir_size_bytes = _get_directory_size(audio_dir_path)
         video_dir_size_bytes = _get_directory_size(video_dir_path)
+        
+        # Add database size to music library size
+        music_library_total_bytes = music_dir_size_bytes + database_size_bytes
         
         stats = {
             "cpu_percent": cpu_percent,
@@ -7180,9 +7232,13 @@ async def get_system_stats():
             "disk_used_gb": total_disk_used / (1024**3),
             "disk_free_gb": total_disk_free / (1024**3),
             "disk_percent": disk_percent,
-            "music_dir_size": _format_size(music_dir_size_bytes),
-            "music_dir_size_bytes": music_dir_size_bytes,
+            "music_dir_size": _format_size(music_library_total_bytes),
+            "music_dir_size_bytes": music_library_total_bytes,
             "music_dir_path": str(music_dir_path),
+            "music_dir_size_only": _format_size(music_dir_size_bytes),
+            "music_dir_size_only_bytes": music_dir_size_bytes,
+            "database_size": _format_size(database_size_bytes),
+            "database_size_bytes": database_size_bytes,
             "audio_dir_size": _format_size(audio_dir_size_bytes),
             "audio_dir_size_bytes": audio_dir_size_bytes,
             "audio_dir_path": str(audio_dir_path),
