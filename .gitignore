@@ -61,6 +61,9 @@ frontend/dist/
 frontend/build/
 frontend/.vite/
 
+# Backend static files (built frontend)
+web/static/
+
 # Data directories (audio and transcripts)
 data/audio/*
 !data/audio/.gitkeep
