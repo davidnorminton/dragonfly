@@ -78,6 +78,17 @@ export function SystemStats() {
           <span className="stat-value stat-subvalue">{stats.database_size}</span>
         </div>
       )}
+      
+      {/* Total Database Size */}
+      {stats.database_size && stats.database_size !== '0 B' && (
+        <>
+          <div className="stat-divider"></div>
+          <div className="stat-row">
+            <span className="stat-label">Database Size</span>
+            <span className="stat-value">{stats.database_size}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
