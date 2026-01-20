@@ -25,8 +25,8 @@ python-dotenv==1.0.0
 psutil==5.9.8
 
 # AI/LLM APIs
-anthropic>=0.34.0  # Updated to support newer httpx
-httpx>=0.27.2  # Required by fish-audio-sdk, compatible with anthropic
+anthropic>=0.40.0  # Updated to support httpx>=0.27.2
+httpx>=0.27.2,<1.0  # Required by fish-audio-sdk
 requests==2.31.0
 
 # Text-to-Speech
