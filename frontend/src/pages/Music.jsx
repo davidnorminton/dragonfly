@@ -1020,14 +1020,35 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
     return parts.slice(0, -2).join('/');
   };
 
+  const [musicDirectory, setMusicDirectory] = useState('/Users/davidnorminton/Music'); // Default fallback
+  
+  // Load music directory from system config
+  useEffect(() => {
+    const loadMusicDirectory = async () => {
+      try {
+        const response = await fetch('/api/config/system');
+        if (response.ok) {
+          const config = await response.json();
+          const musicDir = config?.paths?.music_directory;
+          if (musicDir) {
+            setMusicDirectory(musicDir);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load music directory from config:', e);
+      }
+    };
+    loadMusicDirectory();
+  }, []);
+
   const normalizeMusicPath = (path) => {
     if (!path) return null;
-    // Convert absolute paths to relative paths
-    const musicBase = '/Users/davidnorminton/Music/';
+    // Convert absolute paths to relative paths using music directory from settings
+    const musicBase = musicDirectory.endsWith('/') ? musicDirectory : musicDirectory + '/';
     if (path.startsWith(musicBase)) {
       return path.substring(musicBase.length);
-    } else if (path.startsWith('/Users/davidnorminton/Music')) {
-      let relPath = path.substring('/Users/davidnorminton/Music'.length);
+    } else if (path.startsWith(musicDirectory)) {
+      let relPath = path.substring(musicDirectory.length);
       if (relPath.startsWith('/')) {
         relPath = relPath.substring(1);
       }
@@ -1066,7 +1087,7 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
     const artistDir = guessArtistDirectoryFromSongs(artist);
     const roots = [];
     if (artistDir) roots.push(artistDir);
-    if (artistName) roots.push(`/Users/davidnorminton/Music/${artistName}`);
+    if (artistName) roots.push(`${musicDirectory}/${artistName}`);
 
     roots.forEach((root) => {
       push(`${root}/cover.jpg`);
