@@ -4164,6 +4164,10 @@ async def scan_music_library():
     
     for root, _, files in os.walk(base_path):
         for f in files:
+            # Skip macOS metadata files immediately
+            if f.startswith('._') or f.startswith('.DS_Store'):
+                continue
+            
             suffix = Path(f).suffix.lower()
             if suffix not in audio_exts:
                 # Capture artist hero image from artist root folder
@@ -7253,12 +7257,19 @@ async def get_system_stats():
             logger.debug(f"Could not get database size: {e}")
         
         # Calculate directory sizes (do this in a thread to not block)
+        logger.info(f"Calculating directory sizes: music={music_dir_path}, audio={audio_dir_path}, video={video_dir_path}")
         music_dir_size_bytes = _get_directory_size(music_dir_path)
+        logger.info(f"Music dir size: {music_dir_size_bytes} bytes = {_format_size(music_dir_size_bytes)}")
+        
         audio_dir_size_bytes = _get_directory_size(audio_dir_path)
+        logger.info(f"Audio dir size: {audio_dir_size_bytes} bytes = {_format_size(audio_dir_size_bytes)}")
+        
         video_dir_size_bytes = _get_directory_size(video_dir_path)
+        logger.info(f"Video dir size: {video_dir_size_bytes} bytes = {_format_size(video_dir_size_bytes)}")
         
         # Add database size to music library size
         music_library_total_bytes = music_dir_size_bytes + database_size_bytes
+        logger.info(f"Music library total: {music_library_total_bytes} bytes (dir: {music_dir_size_bytes} + db: {database_size_bytes})")
         
         stats = {
             "cpu_percent": cpu_percent,
@@ -7281,12 +7292,15 @@ async def get_system_stats():
             "audio_dir_path": str(audio_dir_path),
             "video_dir_size": _format_size(video_dir_size_bytes),
             "video_dir_size_bytes": video_dir_size_bytes,
-            "video_dir_path": str(video_dir_path)
+            "video_dir_path": str(video_dir_path),
+            "system": system,
+            "is_ubuntu": is_ubuntu
         }
         
         # Log the stats
         logger.info(f"System stats updated: CPU={cpu_percent:.1f}%, Memory={memory.percent:.1f}%, Disk={disk_percent:.1f}%")
         logger.info(f"Directory sizes: Music={_format_size(music_library_total_bytes)}, Audio={_format_size(audio_dir_size_bytes)}, Video={_format_size(video_dir_size_bytes)}")
+        logger.info(f"Returning stats with {len(stats)} fields")
         
         return stats
     except Exception as e:
