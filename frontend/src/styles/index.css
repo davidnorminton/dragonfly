@@ -351,6 +351,17 @@ body {
   transition: width 0.3s;
 }
 
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.stats-column {
+  display: flex;
+  flex-direction: column;
+}
+
 .stat-row {
   display: flex;
   justify-content: space-between;
