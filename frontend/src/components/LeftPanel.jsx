@@ -1,4 +1,5 @@
 import { SystemStats } from './SystemStats';
+import { StorageSizes } from './StorageSizes';
 import { Weather } from './Weather';
 import { Uptime } from './Uptime';
 import { IPAddress } from './IPAddress';
@@ -10,6 +11,7 @@ export function LeftPanel() {
       <TimeDate />
       <Weather />
       <SystemStats />
+      <StorageSizes />
       <IPAddress />
       <Uptime />
     </div>
