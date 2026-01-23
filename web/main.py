@@ -9647,6 +9647,48 @@ async def stream_video(video_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/images/{filename:path}")
+async def serve_video_image(filename: str):
+    """Serve images from Movies/images or TV/images directories."""
+    try:
+        # Get video directory from system config
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = result.scalar_one_or_none()
+            
+            if not config or not config.config_value:
+                raise HTTPException(status_code=404, detail="Video directory not configured")
+            
+            video_dir = Path(config.config_value.get("video_directory", ""))
+            if not video_dir.exists():
+                raise HTTPException(status_code=404, detail="Video directory not found")
+        
+        # Try Movies/images first
+        movies_image = video_dir / "Movies" / "images" / filename
+        if movies_image.exists() and movies_image.is_file():
+            return FileResponse(movies_image)
+        
+        # Try TV/images
+        tv_image = video_dir / "TV" / "images" / filename
+        if tv_image.exists() and tv_image.is_file():
+            return FileResponse(tv_image)
+        
+        # Try Tv/images (lowercase 'v')
+        tv_image_alt = video_dir / "Tv" / "images" / filename
+        if tv_image_alt.exists() and tv_image_alt.is_file():
+            return FileResponse(tv_image_alt)
+        
+        raise HTTPException(status_code=404, detail="Image not found")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving image {filename}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/video/search-by-actor/{actor_name}")
 async def search_by_actor(actor_name: str):
     """Search for movies by actor name in cast/crew database."""
