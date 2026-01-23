@@ -1789,10 +1789,10 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                   
                   {/* Genre Carousels */}
                   {!selectedMovie && !selectedShow && (() => {
-                    // Helper function to get kids-friendly items (U, PG, 12, 12A)
+                    // Helper function to get kids-friendly items (U, PG)
                     const getKidsItems = () => {
                       const items = [];
-                      const kidsCertifications = ['U', 'PG', '12', '12A'];
+                      const kidsCertifications = ['U', 'PG'];
                       
                       // Only show for movies view mode
                       if (viewMode === 'movies') {
