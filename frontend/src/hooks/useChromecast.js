@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
  * Custom hook for Google Cast integration
  */
 export const useChromecast = () => {
-  const [castAvailable, setCastAvailable] = useState(false);
+  const [castAvailable, setCastAvailable] = useState(true); // Always show cast button
   const [casting, setCasting] = useState(false);
   const [castSession, setCastSession] = useState(null);
   const [currentMedia, setCurrentMedia] = useState(null);
@@ -46,11 +46,15 @@ export const useChromecast = () => {
           resumeSavedSession: true // Resume previous session if available
         });
 
+        // Always show cast button once SDK is initialized
+        setCastAvailable(true);
+        
         castContext.addEventListener(
           window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
           (event) => {
-            const isAvailable = event.castState !== window.cast.framework.CastState.NO_DEVICES_AVAILABLE;
-            setCastAvailable(isAvailable);
+            // Keep button available regardless of device detection
+            // The Cast SDK will show device picker when clicked
+            console.log('📡 Cast state changed:', event.castState);
           }
         );
 
