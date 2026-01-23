@@ -956,6 +956,43 @@ class VideoScanner:
                 'title': title_part if title_part else None
             }
         
+        # Try E## format (without season, e.g., "E01 Pilot.mp4")
+        match = re.search(r'^[Ee](\d+)', name)
+        if match:
+            ep_num = int(match.group(1))
+            
+            # Extract title after episode marker
+            title_part = name[match.end():].strip()
+            title_part = re.sub(r'^[\s\-\.]+', '', title_part)
+            
+            if title_part:
+                title_part = title_part.replace('.', ' ').replace('_', ' ')
+                title_part = re.sub(r'\b(1080p|720p|480p|HEVC|x264|x265)\b.*', '', title_part, flags=re.IGNORECASE)
+                title_part = re.sub(r'\s+', ' ', title_part).strip()
+            
+            return {
+                'episode_number': ep_num,
+                'title': title_part if title_part else None
+            }
+        
+        # Try ##-Title format (e.g., "1-One Punch Man.mp4", "10-One Punch Man.mp4")
+        match = re.search(r'^(\d+)[-\s]', name)
+        if match:
+            ep_num = int(match.group(1))
+            
+            # Extract title after dash/space
+            title_part = name[match.end():].strip()
+            
+            if title_part:
+                title_part = title_part.replace('.', ' ').replace('_', ' ')
+                title_part = re.sub(r'\b(1080p|720p|480p|HEVC|x264|x265)\b.*', '', title_part, flags=re.IGNORECASE)
+                title_part = re.sub(r'\s+', ' ', title_part).strip()
+            
+            return {
+                'episode_number': ep_num,
+                'title': title_part if title_part else None
+            }
+        
         # Fall back to simple numbered filename (e.g., "1.mkv", "2.mkv")
         if name.isdigit():
             return {
