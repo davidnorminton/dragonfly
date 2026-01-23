@@ -137,6 +137,8 @@ class VideoScanner:
             and f.suffix.lower() in VIDEO_EXTENSIONS
             and not f.name.startswith('._')  # Skip macOS metadata files
             and not f.name.startswith('.DS_Store')  # Skip macOS Finder files
+            and not f.name.endswith('.tvlibrary')  # Skip Apple TV Library files
+            and not f.name.endswith('.localized')  # Skip macOS localized files
         ]
         
         logger.info(f"Found {len(movie_files)} movie files (excluding hidden/metadata files)")
@@ -356,6 +358,8 @@ class VideoScanner:
                                 and f.suffix.lower() in VIDEO_EXTENSIONS
                                 and not f.name.startswith('._')  # Skip macOS metadata files
                                 and not f.name.startswith('.DS_Store')  # Skip macOS Finder files
+                                and not f.name.endswith('.tvlibrary')  # Skip Apple TV Library files
+                                and not f.name.endswith('.localized')  # Skip macOS localized files
                             ]
                             for ep_file in episode_files[:3]:  # Check first 3 episodes
                                 show_name_from_metadata = self._extract_show_name_from_metadata(ep_file)
@@ -473,6 +477,8 @@ class VideoScanner:
                             and f.suffix.lower() in VIDEO_EXTENSIONS
                             and not f.name.startswith('._')  # Skip macOS metadata files
                             and not f.name.startswith('.DS_Store')  # Skip macOS Finder files
+                            and not f.name.endswith('.tvlibrary')  # Skip Apple TV Library files
+                            and not f.name.endswith('.localized')  # Skip macOS localized files
                         ]
                         logger.info(f"    📹 Found {len(episode_files)} episode files")
                         
