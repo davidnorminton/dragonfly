@@ -1789,6 +1789,24 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                   
                   {/* Genre Carousels */}
                   {!selectedMovie && !selectedShow && (() => {
+                    // Helper function to get kids-friendly items (U, PG, 12, 12A)
+                    const getKidsItems = () => {
+                      const items = [];
+                      const kidsCertifications = ['U', 'PG', '12', '12A'];
+                      
+                      // Only show for movies view mode
+                      if (viewMode === 'movies') {
+                        library.movies.forEach(movie => {
+                          const cert = movie.uk_certification;
+                          if (cert && kidsCertifications.includes(cert.toUpperCase())) {
+                            items.push({ ...movie, type: 'movie' });
+                          }
+                        });
+                      }
+                      
+                      return items;
+                    };
+                    
                     // Helper function to get items by genre
                     const getItemsByGenre = (genreName) => {
                       const items = [];
@@ -1824,14 +1842,12 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                       return items;
                     };
                     
-                    // Helper function to render a genre carousel
-                    const renderGenreCarousel = (genreName, displayName) => {
-                      const items = getItemsByGenre(genreName);
-                      
+                    // Helper function to render a carousel
+                    const renderCarousel = (items, displayName, key) => {
                       if (items.length === 0) return null;
                       
                       return (
-                        <div key={genreName} className="recently-played-section" style={{ marginTop: '40px' }}>
+                        <div key={key} className="recently-played-section" style={{ marginTop: '40px' }}>
                           <div className="recently-played-title">
                             {displayName}
                           </div>
@@ -1882,14 +1898,15 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                       );
                     };
                     
-                    // Render all genre carousels
+                    // Render all carousels
                     return (
                       <>
-                        {renderGenreCarousel('horror', 'Horror')}
-                        {renderGenreCarousel('comedy', 'Comedy')}
-                        {renderGenreCarousel('science fiction', 'Sci-Fi')}
-                        {renderGenreCarousel('animation', 'Animation')}
-                        {renderGenreCarousel('documentary', 'Documentary')}
+                        {renderCarousel(getKidsItems(), 'Kids', 'kids')}
+                        {renderCarousel(getItemsByGenre('horror'), 'Horror', 'horror')}
+                        {renderCarousel(getItemsByGenre('comedy'), 'Comedy', 'comedy')}
+                        {renderCarousel(getItemsByGenre('science fiction'), 'Sci-Fi', 'sci-fi')}
+                        {renderCarousel(getItemsByGenre('animation'), 'Animation', 'animation')}
+                        {renderCarousel(getItemsByGenre('documentary'), 'Documentary', 'documentary')}
                       </>
                     );
                   })()}
