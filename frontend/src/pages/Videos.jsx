@@ -1029,11 +1029,11 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
       : (viewMode === 'movies' ? 'Movies' : 'TV Shows');
 
   const heroSub = selectedMovie
-    ? `${selectedMovie.year || ''}${selectedMovie.duration ? ` • ${formatDuration(selectedMovie.duration)}` : ''}`
+    ? `${selectedMovie.year || ''}${selectedMovie.uk_certification ? ` • ${selectedMovie.uk_certification}` : ''}${selectedMovie.duration ? ` • ${formatDuration(selectedMovie.duration)}` : ''}`
     : selectedShow
       ? currentSeason
         ? `Season ${currentSeason.season_number}`
-        : `${selectedShow.year || ''}${selectedShow.seasons?.length ? ` • ${selectedShow.seasons.length} ${selectedShow.seasons.length === 1 ? 'season' : 'seasons'}` : ''}`
+        : `${selectedShow.year || ''}${selectedShow.uk_certification ? ` • ${selectedShow.uk_certification}` : ''}${selectedShow.seasons?.length ? ` • ${selectedShow.seasons.length} ${selectedShow.seasons.length === 1 ? 'season' : 'seasons'}` : ''}`
       : `${viewMode === 'movies' ? filteredMovies.length : filteredTVShows.length} ${viewMode === 'movies' ? 'movies' : 'shows'} added`;
 
   const heroPoster = selectedMovie
