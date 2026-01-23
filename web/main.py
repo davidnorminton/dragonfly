@@ -2180,18 +2180,9 @@ async def _download_album_cover(artist: str, album: str, save_dir: Path) -> Opti
             cover_response = await client.get(cover_url, headers=headers, follow_redirects=True)
             cover_response.raise_for_status()
             
-            # Save the cover image to centralized images directory
-            base_path = Path(await _get_music_directory())
-            images_dir = base_path / "images"
-            images_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Generate safe filename from artist and album
-            import hashlib
-            safe_name = re.sub(r'[^\w\s-]', '', f"{artist}_{album}").strip().replace(' ', '_')[:80]
-            # Add hash to ensure uniqueness
-            name_hash = hashlib.md5(f"{artist}_{album}".encode()).hexdigest()[:8]
-            cover_filename = f"{safe_name}_{name_hash}.jpg"
-            cover_path = images_dir / cover_filename
+            # Save the cover image
+            save_dir.mkdir(parents=True, exist_ok=True)
+            cover_path = save_dir / "cover.jpg"
             
             with open(cover_path, "wb") as f:
                 f.write(cover_response.content)
@@ -2199,6 +2190,7 @@ async def _download_album_cover(artist: str, album: str, save_dir: Path) -> Opti
             logger.info(f"Downloaded cover art for {artist} - {album} to {cover_path}")
             
             # Return relative path from music base
+            base_path = await _get_music_directory()
             rel_path = str(cover_path.relative_to(base_path))
             return rel_path
             
@@ -2207,35 +2199,22 @@ async def _download_album_cover(artist: str, album: str, save_dir: Path) -> Opti
         return None
 
 
-def _extract_album_art_from_mp3(mp3_path: Path, artist_name: str, album_name: str, base_path: Path) -> Optional[str]:
+def _extract_album_art_from_mp3(mp3_path: Path, save_dir: Path, base_path: Path) -> Optional[str]:
     """
-    Extract embedded album art from MP3 file and save to centralized images directory.
+    Extract embedded album art from MP3 file and save as cover.jpg.
     Returns the relative path to the saved cover, or None if not found.
     """
     try:
         from mutagen.id3 import ID3, APIC
-        import hashlib
         
         audio = ID3(str(mp3_path))
         
         # Look for APIC (Attached Picture) frames
         for tag in audio.values():
             if isinstance(tag, APIC):
-                # Save to centralized images directory
-                images_dir = base_path / "images"
-                images_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Generate safe filename from artist and album
-                safe_name = re.sub(r'[^\w\s-]', '', f"{artist_name}_{album_name}").strip().replace(' ', '_')[:80]
-                # Add hash to ensure uniqueness
-                name_hash = hashlib.md5(f"{artist_name}_{album_name}".encode()).hexdigest()[:8]
-                cover_filename = f"{safe_name}_{name_hash}.jpg"
-                cover_path = images_dir / cover_filename
-                
-                # Skip if already exists
-                if cover_path.exists():
-                    logger.debug(f"Cover already exists: {cover_filename}")
-                    return str(cover_path.relative_to(base_path))
+                # Save the image
+                save_dir.mkdir(parents=True, exist_ok=True)
+                cover_path = save_dir / "cover.jpg"
                 
                 with open(cover_path, "wb") as f:
                     f.write(tag.data)
@@ -4362,7 +4341,7 @@ async def scan_music_library():
                 for song in album_data["songs"]:
                     song_path = base_path / song["path"]
                     if song_path.exists():
-                        extracted_cover = _extract_album_art_from_mp3(song_path, artist_name, album_name, base_path)
+                        extracted_cover = _extract_album_art_from_mp3(song_path, album_dir_path, base_path)
                         if extracted_cover:
                             logger.info(f"Successfully extracted cover art from {song_path.name}")
                             break
