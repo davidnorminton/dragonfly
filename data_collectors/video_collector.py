@@ -3,6 +3,8 @@ import logging
 import re
 import subprocess
 import json
+import hashlib
+import httpx
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from database.base import AsyncSessionLocal
@@ -64,6 +66,53 @@ class VideoScanner:
         except Exception as e:
             logger.warning(f"Error cleaning up metadata files in {directory}: {e}")
         return deleted_count
+    
+    async def _download_image(self, url: str, save_directory: Path, filename_prefix: str) -> Optional[str]:
+        """
+        Download an image from URL and save it locally.
+        
+        Args:
+            url: Image URL to download
+            save_directory: Directory to save the image (e.g., Movies/images or TV/images)
+            filename_prefix: Prefix for the filename (e.g., movie title or show name)
+            
+        Returns:
+            Relative path to saved image or None if failed
+        """
+        if not url:
+            return None
+            
+        try:
+            # Create images directory if it doesn't exist
+            images_dir = save_directory / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate a safe filename from the prefix and URL hash
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+            safe_prefix = re.sub(r'[^\w\s-]', '', filename_prefix).strip().replace(' ', '_')[:50]
+            ext = Path(url).suffix or '.jpg'
+            filename = f"{safe_prefix}_{url_hash}{ext}"
+            filepath = images_dir / filename
+            
+            # Check if already downloaded
+            if filepath.exists():
+                logger.debug(f"Image already exists: {filepath.name}")
+                return str(filepath.relative_to(save_directory))
+            
+            # Download the image
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                
+                # Save the image
+                filepath.write_bytes(response.content)
+                logger.info(f"  📥 Downloaded image: {filepath.name}")
+                
+                return str(filepath.relative_to(save_directory))
+                
+        except Exception as e:
+            logger.warning(f"Failed to download image from {url}: {e}")
+            return None
     
     async def scan_library(self) -> Dict[str, Any]:
         """Scan the entire video library."""
@@ -252,13 +301,34 @@ class VideoScanner:
                         movie.year = tmdb_data.get('year')
                         movie.uk_certification = uk_cert
                         movie.description = tmdb_data.get('description')
-                        movie.poster_path = tmdb_data.get('poster_path')
+                        
+                        # Download poster image if available
+                        if tmdb_data.get('poster_path'):
+                            local_poster = await self._download_image(
+                                tmdb_data['poster_path'], 
+                                self.movies_dir, 
+                                movie.title
+                            )
+                            movie.poster_path = local_poster if local_poster else tmdb_data.get('poster_path')
+                        else:
+                            movie.poster_path = None
+                        
+                        # Download backdrop image if available
+                        backdrop_url = tmdb_data.get('backdrop_path')
+                        local_backdrop = None
+                        if backdrop_url:
+                            local_backdrop = await self._download_image(
+                                backdrop_url,
+                                self.movies_dir,
+                                f"{movie.title}_backdrop"
+                            )
+                        
                         movie.extra_metadata = {
                             'tmdb_id': tmdb_data.get('tmdb_id'),
                             'genres': tmdb_data.get('genres', []),
                             'rating': tmdb_data.get('rating'),
                             'imdb_id': tmdb_data.get('imdb_id'),
-                            'backdrop_path': tmdb_data.get('backdrop_path')
+                            'backdrop_path': local_backdrop if local_backdrop else backdrop_url
                         }
                         if tmdb_data.get('runtime'):
                             movie.duration = tmdb_data['runtime'] * 60
@@ -404,7 +474,28 @@ class VideoScanner:
                         show.title = tmdb_show['title']  # Always use API title when available
                         show.year = tmdb_show.get('year')
                         show.description = tmdb_show.get('description')
-                        show.poster_path = tmdb_show.get('poster_path')
+                        
+                        # Download poster image if available
+                        if tmdb_show.get('poster_path'):
+                            local_poster = await self._download_image(
+                                tmdb_show['poster_path'],
+                                self.tv_dir,
+                                show.title
+                            )
+                            show.poster_path = local_poster if local_poster else tmdb_show.get('poster_path')
+                        else:
+                            show.poster_path = None
+                        
+                        # Download backdrop image if available
+                        backdrop_url = tmdb_show.get('backdrop_path')
+                        local_backdrop = None
+                        if backdrop_url:
+                            local_backdrop = await self._download_image(
+                                backdrop_url,
+                                self.tv_dir,
+                                f"{show.title}_backdrop"
+                            )
+                        
                         show.extra_metadata = {
                             'tmdb_id': tmdb_show.get('tmdb_id'),
                             'genres': tmdb_show.get('genres', []),
@@ -412,7 +503,7 @@ class VideoScanner:
                             'status': tmdb_show.get('status'),
                             'number_of_seasons': tmdb_show.get('number_of_seasons'),
                             'networks': tmdb_show.get('networks', []),
-                            'backdrop_path': tmdb_show.get('backdrop_path')
+                            'backdrop_path': local_backdrop if local_backdrop else backdrop_url
                         }
                     else:
                         # Fallback: use metadata name if available, otherwise directory name
@@ -464,8 +555,13 @@ class VideoScanner:
                             )
                             session.add(season)
 
-                        if tmdb_season:
-                            season.poster_path = tmdb_season.get('poster_path')
+                        if tmdb_season and tmdb_season.get('poster_path'):
+                            local_season_poster = await self._download_image(
+                                tmdb_season['poster_path'],
+                                self.tv_dir,
+                                f"{show.title}_season_{season_num}"
+                            )
+                            season.poster_path = local_season_poster if local_season_poster else tmdb_season.get('poster_path')
                         
                         await session.flush()  # Get season.id
                         season_count += 1
