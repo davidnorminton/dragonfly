@@ -1787,6 +1787,113 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                     ) : null;
                   })()}
                   
+                  {/* Genre Carousels */}
+                  {!selectedMovie && !selectedShow && (() => {
+                    // Helper function to get items by genre
+                    const getItemsByGenre = (genreName) => {
+                      const items = [];
+                      
+                      // Add movies if in movies view mode
+                      if (viewMode === 'movies') {
+                        library.movies.forEach(movie => {
+                          const genres = movie.extra_metadata?.genres || movie.metadata?.genres || [];
+                          const hasGenre = genres.some(g => {
+                            const genre = (typeof g === 'string' ? g : g.name || '').toLowerCase();
+                            return genre === genreName.toLowerCase();
+                          });
+                          if (hasGenre) {
+                            items.push({ ...movie, type: 'movie' });
+                          }
+                        });
+                      }
+                      
+                      // Add TV shows if in tvshows view mode
+                      if (viewMode === 'tvshows') {
+                        library.tvShows.forEach(show => {
+                          const genres = show.extra_metadata?.genres || [];
+                          const hasGenre = genres.some(g => {
+                            const genre = (typeof g === 'string' ? g : g.name || '').toLowerCase();
+                            return genre === genreName.toLowerCase();
+                          });
+                          if (hasGenre) {
+                            items.push({ ...show, type: 'tvshow' });
+                          }
+                        });
+                      }
+                      
+                      return items;
+                    };
+                    
+                    // Helper function to render a genre carousel
+                    const renderGenreCarousel = (genreName, displayName) => {
+                      const items = getItemsByGenre(genreName);
+                      
+                      if (items.length === 0) return null;
+                      
+                      return (
+                        <div key={genreName} className="recently-played-section" style={{ marginTop: '40px' }}>
+                          <div className="recently-played-title">
+                            {displayName}
+                          </div>
+                          <div className="recently-played-list">
+                            {items.map((item, idx) => {
+                              const handleClick = () => {
+                                if (item.type === 'movie') {
+                                  setSelectedMovie(item);
+                                  setSelectedShow(null);
+                                  setSelectedSeason(null);
+                                  setViewMode('movies');
+                                } else if (item.type === 'tvshow') {
+                                  setSelectedShow(item);
+                                  setSelectedSeason(null);
+                                  setSelectedMovie(null);
+                                  setViewMode('tvshows');
+                                }
+                              };
+
+                              return (
+                                <div 
+                                  key={idx} 
+                                  className="recently-played-item"
+                                  onClick={handleClick}
+                                >
+                                  <div className="recently-played-poster-container">
+                                    {item.poster_path && (
+                                      <img 
+                                        src={item.poster_path} 
+                                        alt={item.title}
+                                        className="recently-played-poster"
+                                      />
+                                    )}
+                                  </div>
+                                  <div className="recently-played-info">
+                                    <div className="recently-played-item-title">{item.title}</div>
+                                    {item.year && (
+                                      <div className="recently-played-time">
+                                        {item.year} • {item.type === 'movie' ? 'Movie' : 'TV Show'}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    };
+                    
+                    // Render all genre carousels
+                    return (
+                      <>
+                        {renderGenreCarousel('horror', 'Horror')}
+                        {renderGenreCarousel('comedy', 'Comedy')}
+                        {renderGenreCarousel('science fiction', 'Sci-Fi')}
+                        {renderGenreCarousel('animation', 'Animation')}
+                        {renderGenreCarousel('documentary', 'Documentary')}
+                      </>
+                    );
+                  })()}
+                  
                   {/* Empty State */}
                   {!selectedMovie && !selectedShow && recentlyPlayed.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'episode').length === 0 && recentlyAdded.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'tvshow').length === 0 && (
                     <div className="video-empty">
