@@ -23,7 +23,20 @@ class VideoScanner:
         """Initialize scanner with video directory path."""
         self.video_directory = Path(video_directory)
         self.movies_dir = self.video_directory / "Movies"
-        self.tv_dir = self.video_directory / "Tv"
+        
+        # Check for both "Tv" and "TV" (case variations)
+        tv_options = ["Tv", "TV", "tv"]
+        self.tv_dir = None
+        for tv_name in tv_options:
+            tv_path = self.video_directory / tv_name
+            if tv_path.exists():
+                self.tv_dir = tv_path
+                break
+        
+        # Default to "Tv" if none exist
+        if self.tv_dir is None:
+            self.tv_dir = self.video_directory / "Tv"
+        
         self.tmdb_service = TMDBService(tmdb_api_key) if tmdb_api_key else None
         
         logger.info(f"📁 Video Scanner initialized")
