@@ -202,6 +202,7 @@ class VideoScanner:
                     
                     # Step 3: Look up TMDB
                     tmdb_data = None
+                    uk_cert = None
                     if self.tmdb_service:
                         logger.info(f"  🔍 Searching TMDB...")
                         tmdb_data = self.tmdb_service.search_movie(parsed['title'], parsed.get('year'))
@@ -211,6 +212,13 @@ class VideoScanner:
                             logger.info(f"     ID: {tmdb_data.get('tmdb_id')}")
                             logger.info(f"     Poster: {'✓' if tmdb_data.get('poster_path') else '✗'}")
                             logger.info(f"     Description: {'✓' if tmdb_data.get('description') else '✗'}")
+                            
+                            # Fetch UK certification
+                            tmdb_id = tmdb_data.get('tmdb_id')
+                            if tmdb_id:
+                                uk_cert = self.tmdb_service.get_uk_certification(tmdb_id)
+                                if uk_cert:
+                                    logger.info(f"     UK Rating: {uk_cert}")
                         else:
                             logger.warning(f"  ❌ Not found on TMDB")
                     
@@ -240,6 +248,7 @@ class VideoScanner:
                     if tmdb_data:
                         movie.title = tmdb_data['title']
                         movie.year = tmdb_data.get('year')
+                        movie.uk_certification = uk_cert
                         movie.description = tmdb_data.get('description')
                         movie.poster_path = tmdb_data.get('poster_path')
                         movie.extra_metadata = {

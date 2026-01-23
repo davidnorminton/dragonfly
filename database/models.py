@@ -143,6 +143,7 @@ class VideoMovie(Base):
     file_size = Column(BigInteger, nullable=True)  # Size in bytes (BigInteger supports files > 2GB)
     duration = Column(BigInteger, nullable=True)  # Duration in seconds (BigInteger for safety)
     year = Column(Integer, nullable=True)
+    uk_certification = Column(String, nullable=True)  # UK rating: U, PG, 12, 12A, 15, 18, R18
     resolution = Column(String, nullable=True)  # 1080p, 4K, etc.
     codec = Column(String, nullable=True)  # h264, h265, etc.
     description = Column(Text, nullable=True)

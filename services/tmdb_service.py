@@ -477,3 +477,41 @@ class TMDBService:
         except Exception as e:
             logger.error(f"Error getting person credits for ID {person_id}: {e}")
             return None
+    
+    def get_uk_certification(self, movie_id: int) -> Optional[str]:
+        """
+        Get UK certification (rating) for a movie.
+        
+        Args:
+            movie_id: TMDB movie ID
+            
+        Returns:
+            UK certification (U, PG, 12, 12A, 15, 18, R18) or None
+        """
+        try:
+            response = self.session.get(
+                f"{TMDB_API_BASE_URL}/movie/{movie_id}/release_dates",
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            results = data.get("results", [])
+            
+            # Find UK release info
+            for country_data in results:
+                if country_data.get("iso_3166_1") == "GB":
+                    # Get the first release with a certification
+                    release_dates = country_data.get("release_dates", [])
+                    for release in release_dates:
+                        cert = release.get("certification", "").strip()
+                        if cert:
+                            logger.info(f"Found UK certification for movie {movie_id}: {cert}")
+                            return cert
+            
+            logger.debug(f"No UK certification found for movie {movie_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting UK certification for movie {movie_id}: {e}")
+            return None
