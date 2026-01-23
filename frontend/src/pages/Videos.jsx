@@ -630,6 +630,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
   const [isScrolled, setIsScrolled] = useState(false);
   const [recentlyPlayed, setRecentlyPlayed] = useState([]);
   const [recentlyAdded, setRecentlyAdded] = useState([]);
+  const [carouselVisibleCounts, setCarouselVisibleCounts] = useState({});
   
   const { castAvailable, castVideo } = useChromecast();
   
@@ -695,6 +696,11 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
       console.error('[Recently Added] Failed to load:', err);
     }
   };
+
+  // Reset carousel visible counts when viewMode changes
+  useEffect(() => {
+    setCarouselVisibleCounts({});
+  }, [viewMode]);
 
   // Listen for video selection from search overlay
   useEffect(() => {
@@ -1842,17 +1848,29 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                       return items;
                     };
                     
-                    // Helper function to render a carousel
+                    // Helper function to render a carousel with lazy loading
                     const renderCarousel = (items, displayName, key) => {
                       if (items.length === 0) return null;
+                      
+                      // Initialize visible count for this carousel if not set
+                      const visibleCount = carouselVisibleCounts[key] || 15;
+                      const visibleItems = items.slice(0, visibleCount);
+                      const hasMore = items.length > visibleCount;
+                      
+                      const loadMore = () => {
+                        setCarouselVisibleCounts(prev => ({
+                          ...prev,
+                          [key]: (prev[key] || 15) + 15
+                        }));
+                      };
                       
                       return (
                         <div key={key} className="recently-played-section" style={{ marginTop: '40px' }}>
                           <div className="recently-played-title">
-                            {displayName}
+                            {displayName} {items.length > 15 && `(${visibleItems.length} of ${items.length})`}
                           </div>
                           <div className="recently-played-list">
-                            {items.map((item, idx) => {
+                            {visibleItems.map((item, idx) => {
                               const handleClick = () => {
                                 if (item.type === 'movie') {
                                   setSelectedMovie(item);
@@ -1893,6 +1911,26 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                                 </div>
                               );
                             })}
+                            {hasMore && (
+                              <div 
+                                className="recently-played-item" 
+                                onClick={loadMore}
+                                style={{ 
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  minWidth: '150px',
+                                  opacity: 0.7
+                                }}
+                              >
+                                <div style={{ textAlign: 'center', padding: '20px' }}>
+                                  <div style={{ fontSize: '2rem', marginBottom: '8px' }}>+</div>
+                                  <div style={{ fontSize: '0.9rem' }}>Load More</div>
+                                  <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>{items.length - visibleCount} remaining</div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
