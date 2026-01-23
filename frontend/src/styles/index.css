@@ -4096,6 +4096,7 @@ body {
   margin-top: 16px;
   overflow: auto;
   max-height: 100vh;
+  padding-bottom: 50px;
 }
 
 .music-empty {
@@ -4280,6 +4281,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  font-size: 14px;
 }
 
 .artist-only.active {

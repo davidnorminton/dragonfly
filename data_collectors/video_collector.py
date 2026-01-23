@@ -402,62 +402,62 @@ class VideoScanner:
                     show_name_from_api = None
                     show_name_from_metadata = None
                     
-                    # Step 1: Try TMDB API first (PRIMARY) with multiple name variations
+                    # Step 1: Collect all possible show name variations
+                    logger.info(f"  🔍 [1/3] Collecting show name variations...")
+                    all_name_variations = []
+                    
+                    # 1a. Get variations from directory name
+                    dir_variations = self._get_tv_show_search_variations(show_name)
+                    all_name_variations.extend(dir_variations)
+                    logger.info(f"  📁 Directory variations: {len(dir_variations)}")
+                    
+                    # 1b. Try extracting from first episode metadata
+                    logger.info(f"  🔍 Checking episode metadata for show name...")
+                    show_name_from_metadata = None
+                    season_dirs = [d for d in show_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+                    
+                    for season_dir in season_dirs[:1]:  # Check first season only
+                        episode_files = [
+                            f for f in season_dir.iterdir()
+                            if f.is_file() 
+                            and f.suffix.lower() in VIDEO_EXTENSIONS
+                            and not f.name.startswith('._')
+                            and not f.name.startswith('.DS_Store')
+                            and not f.name.endswith('.tvlibrary')
+                            and not f.name.endswith('.localized')
+                        ]
+                        
+                        # Try first episode
+                        if episode_files:
+                            first_ep = sorted(episode_files)[0]
+                            logger.info(f"  📄 Checking metadata in: {first_ep.name}")
+                            show_name_from_metadata = self._extract_show_name_from_metadata(first_ep)
+                            if show_name_from_metadata:
+                                logger.info(f"  ✅ Found in metadata: '{show_name_from_metadata}'")
+                                # Add metadata name to front of list (highest priority)
+                                all_name_variations.insert(0, show_name_from_metadata)
+                            else:
+                                logger.info(f"  ⚠️  No show name in episode metadata")
+                        break
+                    
+                    # Step 2: Try TMDB API with all variations
                     if self.tmdb_service:
-                        logger.info(f"  🔍 [1/3] Searching TMDB API for show...")
+                        logger.info(f"  🔍 [2/3] Searching TMDB with {len(all_name_variations)} variations...")
                         
-                        # Try multiple variations of the show name
-                        search_variations = self._get_tv_show_search_variations(show_name)
-                        
-                        for idx, variation in enumerate(search_variations, 1):
-                            if idx > 1:
-                                logger.info(f"  🔍 Trying variation {idx}: '{variation}'")
+                        for idx, variation in enumerate(all_name_variations, 1):
+                            logger.info(f"  🔍 Variation {idx}: '{variation}'")
                             
                             tmdb_show = self.tmdb_service.search_tv_show(variation)
                             if tmdb_show:
+                                show_name_from_api = tmdb_show['title']
+                                logger.info(f"  ✅ TMDB MATCH: '{show_name_from_api}'")
+                                logger.info(f"     ID: {tmdb_show.get('tmdb_id')}")
+                                logger.info(f"     Seasons: {tmdb_show.get('number_of_seasons', 'N/A')}")
+                                logger.info(f"     Poster: {'✓' if tmdb_show.get('poster_path') else '✗'}")
                                 break
                         
-                        if tmdb_show:
-                            show_name_from_api = tmdb_show['title']
-                            logger.info(f"  ✅ TMDB API: '{show_name_from_api}'")
-                            logger.info(f"     ID: {tmdb_show.get('tmdb_id')}")
-                            logger.info(f"     Seasons: {tmdb_show.get('number_of_seasons', 'N/A')}")
-                            logger.info(f"     Poster: {'✓' if tmdb_show.get('poster_path') else '✗'}")
-                        else:
-                            logger.warning(f"  ❌ Show not found on TMDB API")
-                    
-                    # Step 2: If API failed, try extracting from video file metadata (FALLBACK)
-                    if not tmdb_show:
-                        logger.info(f"  🔍 [2/3] Extracting show name from video file metadata...")
-                        # Look for episode files to extract metadata
-                        season_dirs = [d for d in show_dir.iterdir() if d.is_dir() and d.name.isdigit()]
-                        for season_dir in season_dirs[:1]:  # Check first season only
-                            episode_files = [
-                                f for f in season_dir.iterdir()
-                                if f.is_file() 
-                                and f.suffix.lower() in VIDEO_EXTENSIONS
-                                and not f.name.startswith('._')  # Skip macOS metadata files
-                                and not f.name.startswith('.DS_Store')  # Skip macOS Finder files
-                                and not f.name.endswith('.tvlibrary')  # Skip Apple TV Library files
-                                and not f.name.endswith('.localized')  # Skip macOS localized files
-                            ]
-                            for ep_file in episode_files[:3]:  # Check first 3 episodes
-                                show_name_from_metadata = self._extract_show_name_from_metadata(ep_file)
-                                if show_name_from_metadata:
-                                    logger.info(f"  ✅ Metadata: '{show_name_from_metadata}'")
-                                    # Try TMDB again with metadata name
-                                    if self.tmdb_service:
-                                        logger.info(f"  🔍 Retrying TMDB API with metadata name...")
-                                        tmdb_show = self.tmdb_service.search_tv_show(show_name_from_metadata)
-                                        if tmdb_show:
-                                            show_name_from_api = tmdb_show['title']
-                                            logger.info(f"  ✅ TMDB API (retry): '{show_name_from_api}'")
-                                    break
-                            if show_name_from_metadata:
-                                break
-                        
-                        if not show_name_from_metadata:
-                            logger.info(f"  ⚠️  No show name found in video metadata")
+                        if not tmdb_show:
+                            logger.warning(f"  ❌ No TMDB match found for any variation")
                     
                     # Step 3: Use directory name as last resort
                     final_show_name = show_name_from_api or show_name_from_metadata or show_name

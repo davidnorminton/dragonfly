@@ -1348,24 +1348,6 @@ export function MusicPage({ searchQuery = '', onSearchResultsChange, selectedUse
               Artists
             </button>
             <button
-              className={`filter-pill ${viewMode === 'albums' ? 'active' : ''}`}
-              onClick={() => {
-                setViewMode('albums');
-                setSelectedPlaylist(null);
-                // Select first album if available
-                if (allAlbums.length > 0) {
-                  const firstAlbum = allAlbums[0];
-                  setSelectedArtist(firstAlbum.artistName);
-                  setSelectedAlbum(firstAlbum.name);
-                } else {
-                  setSelectedArtist(null);
-                  setSelectedAlbum(null);
-                }
-              }}
-            >
-              Albums
-            </button>
-            <button
               className={`filter-pill ${viewMode === 'playlists' ? 'active' : ''}`}
               onClick={() => {
                 setViewMode('playlists');
