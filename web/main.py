@@ -10538,6 +10538,7 @@ async def get_video_library():
                     "file_path": movie.file_path,
                     "file_size": movie.file_size,
                     "year": movie.year,
+                    "uk_certification": movie.uk_certification,
                     "resolution": movie.resolution,
                     "codec": movie.codec,
                     "duration": movie.duration,
