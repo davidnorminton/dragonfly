@@ -402,10 +402,20 @@ class VideoScanner:
                     show_name_from_api = None
                     show_name_from_metadata = None
                     
-                    # Step 1: Try TMDB API first (PRIMARY)
+                    # Step 1: Try TMDB API first (PRIMARY) with multiple name variations
                     if self.tmdb_service:
                         logger.info(f"  🔍 [1/3] Searching TMDB API for show...")
-                        tmdb_show = self.tmdb_service.search_tv_show(show_name)
+                        
+                        # Try multiple variations of the show name
+                        search_variations = self._get_tv_show_search_variations(show_name)
+                        
+                        for idx, variation in enumerate(search_variations, 1):
+                            if idx > 1:
+                                logger.info(f"  🔍 Trying variation {idx}: '{variation}'")
+                            
+                            tmdb_show = self.tmdb_service.search_tv_show(variation)
+                            if tmdb_show:
+                                break
                         
                         if tmdb_show:
                             show_name_from_api = tmdb_show['title']
@@ -932,6 +942,45 @@ class VideoScanner:
             title = re.sub(r'\b(1080p|720p)\b.*', '', cleaned, flags=re.IGNORECASE).strip()
         
         return {'title': title, 'year': year}
+    
+    def _get_tv_show_search_variations(self, directory_name: str) -> list:
+        """
+        Generate multiple search variations for a TV show directory name.
+        
+        Args:
+            directory_name: The directory name (e.g., "star trek - new worlds")
+            
+        Returns:
+            List of search variations to try, in order of priority
+        """
+        variations = []
+        
+        # 1. Original name as-is
+        variations.append(directory_name)
+        
+        # 2. Replace dash with colon (common pattern: "Show - Subtitle" -> "Show: Subtitle")
+        if ' - ' in directory_name:
+            colon_version = directory_name.replace(' - ', ': ')
+            variations.append(colon_version)
+        
+        # 3. Remove everything after dash (take just the main title)
+        if ' - ' in directory_name:
+            main_title = directory_name.split(' - ')[0].strip()
+            variations.append(main_title)
+        
+        # 4. Clean up underscores and dots
+        if '_' in directory_name or '.' in directory_name:
+            cleaned = directory_name.replace('_', ' ').replace('.', ' ')
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            if cleaned not in variations:
+                variations.append(cleaned)
+        
+        # 5. Remove year if present (e.g., "Show (2020)" -> "Show")
+        year_removed = re.sub(r'\s*[\(\[]\d{4}[\)\]]', '', directory_name).strip()
+        if year_removed != directory_name and year_removed not in variations:
+            variations.append(year_removed)
+        
+        return variations
     
     def _parse_episode_filename(self, filename: str) -> Dict[str, Any]:
         """Parse episode number and title from filename."""
