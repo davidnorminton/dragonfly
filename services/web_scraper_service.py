@@ -1,7 +1,7 @@
 """
 Web Scraper Service
 
-Scrapes articles from category pages and extracts content, images, and metadata.
+Scrapes articles from category pages, RSS feeds, and extracts content, images, and metadata.
 """
 import asyncio
 import hashlib
@@ -11,8 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from urllib.parse import urljoin, urlparse
+from email.utils import parsedate_to_datetime
 
 import httpx
+import feedparser
 from bs4 import BeautifulSoup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,7 +99,7 @@ class WebScraperService:
     
     async def scrape_source(self, source: ScraperSource, session: AsyncSession) -> Dict[str, int]:
         """
-        Scrape a single source (category page).
+        Scrape a single source (category page or RSS feed).
         
         Args:
             source: ScraperSource model instance
@@ -112,16 +114,31 @@ class WebScraperService:
         }
         
         try:
-            # Fetch the category page
+            # Fetch the source
             async with httpx.AsyncClient(timeout=30.0, headers=self.headers, follow_redirects=True) as client:
                 response = await client.get(source.url)
                 response.raise_for_status()
             
-            # Parse the page
-            soup = BeautifulSoup(response.text, 'html.parser')
+            # Check if this is an RSS/Atom feed
+            content_type = response.headers.get('content-type', '').lower()
+            is_feed = (
+                'xml' in content_type or
+                'rss' in content_type or
+                'atom' in content_type or
+                source.url.endswith('.xml') or
+                source.url.endswith('.rss') or
+                '/feed' in source.url.lower() or
+                '/rss' in source.url.lower()
+            )
             
-            # Extract article links from the category page
-            article_urls = self._extract_article_urls(soup, source.url)
+            if is_feed:
+                logger.info(f"Detected RSS/Atom feed: {source.url}")
+                article_urls = self._extract_urls_from_feed(response.text)
+            else:
+                logger.info(f"Detected HTML page: {source.url}")
+                soup = BeautifulSoup(response.text, 'html.parser')
+                article_urls = self._extract_article_urls(soup, source.url)
+            
             results["articles_found"] = len(article_urls)
             logger.info(f"Found {len(article_urls)} article URLs on {source.url}")
             
@@ -168,6 +185,33 @@ class WebScraperService:
             raise
         
         return results
+    
+    def _extract_urls_from_feed(self, feed_content: str) -> List[str]:
+        """
+        Extract article URLs from an RSS/Atom feed.
+        
+        Args:
+            feed_content: Raw feed content (XML)
+            
+        Returns:
+            List of article URLs
+        """
+        try:
+            feed = feedparser.parse(feed_content)
+            article_urls = []
+            
+            for entry in feed.entries:
+                # Get the article URL (link)
+                url = entry.get('link')
+                if url:
+                    article_urls.append(url)
+            
+            logger.info(f"Extracted {len(article_urls)} URLs from RSS/Atom feed")
+            return article_urls
+            
+        except Exception as e:
+            logger.error(f"Error parsing feed: {e}", exc_info=True)
+            return []
     
     def _extract_article_urls(self, soup: BeautifulSoup, base_url: str) -> List[str]:
         """
