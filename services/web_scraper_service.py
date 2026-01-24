@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.base import AsyncSessionLocal
-from database.models import ScraperSource, ScrapedArticle
+from database.models import ScraperSource, ScrapedArticle, ArticleTextContent, ArticleHtmlContent
 
 logger = logging.getLogger(__name__)
 
@@ -172,12 +172,11 @@ class WebScraperService:
                     article_data = await self.scrape_article(article_url)
                     
                     if article_data:
-                        # Create new scraped article
+                        # Create new scraped article (without content field)
                         article = ScrapedArticle(
                             source_id=source.id,
                             url=article_url,
                             title=article_data.get('title'),
-                            content=article_data.get('content'),
                             summary=article_data.get('summary'),
                             author=article_data.get('author'),
                             published_date=article_data.get('published_date'),
@@ -187,6 +186,35 @@ class WebScraperService:
                         )
                         
                         session.add(article)
+                        await session.flush()  # Get article.id before creating content
+                        
+                        # Create separate content records if content exists
+                        content = article_data.get('content')
+                        if content:
+                            # Create HTML content record
+                            html_content = ArticleHtmlContent(
+                                article_id=article.id,
+                                raw_html=content,
+                                sanitized_content=content,  # Could add sanitization here
+                                content_type='text/html',
+                                content_hash=hashlib.md5(content.encode()).hexdigest()
+                            )
+                            session.add(html_content)
+                            
+                            # Extract plain text from HTML for text content
+                            soup = BeautifulSoup(content, 'html.parser')
+                            plain_text = soup.get_text(separator=' ', strip=True)
+                            
+                            if plain_text:
+                                text_content = ArticleTextContent(
+                                    article_id=article.id,
+                                    plain_text=plain_text,
+                                    word_count=len(plain_text.split()),
+                                    character_count=len(plain_text),
+                                    content_hash=hashlib.md5(plain_text.encode()).hexdigest()
+                                )
+                                session.add(text_content)
+                        
                         await session.commit()
                         results["articles_saved"] += 1
                         logger.info(f"  ✓ Saved: {article_data.get('title', article_url)[:80]}")
