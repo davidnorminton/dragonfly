@@ -97,19 +97,18 @@ export default function TechNews({ searchQuery = '' }) {
     
     // Filter by domain if selected
     if (selectedDomain) {
+      const beforeCount = filtered.length;
       filtered = filtered.filter(article => {
-        const articleDomain = getDomainFromUrl(article.url || '');
-        // Debug logging
-        if (filtered.length < 5) {
-          console.log(`Article: ${article.title?.substring(0, 30)}...`);
-          console.log(`  URL: ${article.url}`);
-          console.log(`  Extracted domain: "${articleDomain}"`);
-          console.log(`  Selected domain: "${selectedDomain}"`);
-          console.log(`  Match: ${articleDomain === selectedDomain}`);
+        if (!article.url) return false;
+        const articleDomain = getDomainFromUrl(article.url);
+        const matches = articleDomain === selectedDomain;
+        // Debug first few mismatches to help troubleshoot
+        if (!matches && beforeCount < 20) {
+          console.log(`  ❌ Domain mismatch: "${articleDomain}" !== "${selectedDomain}" (URL: ${article.url?.substring(0, 60)}...)`);
         }
-        return articleDomain === selectedDomain;
+        return matches;
       });
-      console.log(`Domain filter: ${filtered.length} articles match "${selectedDomain}"`);
+      console.log(`🔍 Domain filter "${selectedDomain}": ${beforeCount} → ${filtered.length} articles`);
     }
     
     // Filter and calculate relevance if searching
