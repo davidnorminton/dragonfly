@@ -307,18 +307,6 @@ export default function TechNews({ searchQuery = '' }) {
     }
   };
 
-  // Extract domain name from URL  
-  const getDomainFromUrl = (url) => {
-    if (!url) return 'Unknown';
-    try {
-      const domain = new URL(url).hostname;
-      // Clean up common prefixes and make it more readable
-      return domain.replace(/^www\./, '').split('.')[0];
-    } catch {
-      return 'Unknown';
-    }
-  };
-
   // Basic HTML sanitizer to allow safe tags
   const sanitizeHTML = (html) => {
     if (!html) return '';
