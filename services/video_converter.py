@@ -41,7 +41,8 @@ class VideoConverter:
         self.failed_files = 0
         self.current_files = set()  # Currently processing files
         self.errors = []
-        self.lock = asyncio.Lock()  # For thread-safe counter updates
+        # Lock will be created lazily in async context when needed
+        self._lock = None
         
     async def convert_all(self) -> Dict[str, Any]:
         """
@@ -92,17 +93,21 @@ class VideoConverter:
         # Create semaphore to limit concurrent conversions
         semaphore = asyncio.Semaphore(self.max_concurrent)
         
+        # Create lock if not exists (lazy initialization in async context)
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        
         # Convert files concurrently with semaphore
         async def convert_with_semaphore(file_path: Path, index: int):
             async with semaphore:
                 try:
-                    async with self.lock:
+                    async with self._lock:
                         self.current_files.add(file_path.name)
                     
                     logger.info(f"\n[{index}/{len(files_to_convert)}] 🔄 Starting: {file_path.name}")
                     success = await self._convert_file(file_path, index, len(files_to_convert))
                     
-                    async with self.lock:
+                    async with self._lock:
                         self.current_files.discard(file_path.name)
                         if success:
                             self.converted_files += 1
@@ -115,7 +120,7 @@ class VideoConverter:
                     error_msg = f"Error converting {file_path.name}: {str(e)}"
                     logger.error(f"  ❌ {error_msg}")
                     
-                    async with self.lock:
+                    async with self._lock:
                         self.current_files.discard(file_path.name)
                         self.errors.append(error_msg)
                         self.failed_files += 1
