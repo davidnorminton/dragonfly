@@ -65,9 +65,13 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
         } catch (err) {
           console.error('Error loading video library:', err);
         }
+      } else if (activePage === 'tech-news') {
+        // For tech-news, we don't need to load anything here
+        // The search filtering is handled directly in the TechNews component
+        setResults([]);
       }
     };
-    
+
     loadData();
   }, [activePage, selectedUser]);
 
@@ -422,7 +426,11 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
           gap: '8px'
         }}>
           {searchQuery && (
-            <span>{results.length} result{results.length !== 1 ? 's' : ''}</span>
+            <span>
+              {activePage === 'tech-news' 
+                ? 'Filtering articles...' 
+                : `${results.length} result${results.length !== 1 ? 's' : ''}`}
+            </span>
           )}
         </div>
       </div>
@@ -441,6 +449,20 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
             marginTop: '100px'
           }}>
             Start typing to search...
+          </div>
+        ) : activePage === 'tech-news' ? (
+          <div style={{
+            textAlign: 'center',
+            color: '#9da7b8',
+            fontSize: '1.1rem',
+            marginTop: '100px',
+            padding: '20px'
+          }}>
+            <div style={{ marginBottom: '16px', fontSize: '1.2rem' }}>🔍</div>
+            <div style={{ marginBottom: '8px' }}>Search applied to Tech News articles</div>
+            <div style={{ fontSize: '0.9rem', opacity: 0.7 }}>
+              Close this overlay to see filtered results
+            </div>
           </div>
         ) : results.length === 0 ? (
           <div style={{
