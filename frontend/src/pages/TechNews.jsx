@@ -8,7 +8,15 @@ export default function TechNews({ searchQuery = '' }) {
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
   const [sortBy, setSortBy] = useState('latest'); // latest, oldest, title-asc, title-desc
-  const [selectedDomain, setSelectedDomain] = useState('');
+  const [selectedDomain, setSelectedDomain] = useState(() => {
+    // Initialize from localStorage if available, but clear it on mount to ensure fresh state
+    const stored = localStorage.getItem('techNewsSelectedDomain');
+    if (stored) {
+      // Clear it immediately so it doesn't persist
+      localStorage.removeItem('techNewsSelectedDomain');
+    }
+    return '';
+  });
   const [availableDomains, setAvailableDomains] = useState([]);
 
   // Strip HTML tags from text for search
@@ -210,6 +218,9 @@ export default function TechNews({ searchQuery = '' }) {
   }, [articles, searchQuery, sortBy, selectedDomain]);
 
   useEffect(() => {
+    // Ensure selectedDomain is cleared on mount (in case of stale state)
+    setSelectedDomain('');
+    
     loadArticles();
     
     // Listen for article selection from SearchOverlay
