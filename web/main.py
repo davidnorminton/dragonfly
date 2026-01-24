@@ -16346,6 +16346,7 @@ async def get_scraped_articles(limit: int = 100, offset: int = 0):
                         "published_date": article.published_date.isoformat() if article.published_date else None,
                         "image_path": article.image_path,
                         "image_url": article.image_url,
+                        "read": article.read,  # Read status
                         "scraped_at": article.scraped_at.isoformat() if article.scraped_at else None,
                     }
                     for article in articles
@@ -16358,7 +16359,7 @@ async def get_scraped_articles(limit: int = 100, offset: int = 0):
 
 @app.get("/api/scraper/articles/{article_id}")
 async def get_scraped_article(article_id: int):
-    """Get a single scraped article with full content."""
+    """Get a single scraped article with full content and mark as read."""
     try:
         async with AsyncSessionLocal() as session:
             # Use eager loading to fetch article with content
@@ -16374,6 +16375,11 @@ async def get_scraped_article(article_id: int):
             
             if not article:
                 return {"success": False, "error": "Article not found"}
+            
+            # Mark article as read
+            if not article.read:
+                article.read = True
+                await session.commit()
             
             # Get content from separate tables
             text_content = article.text_content.content if article.text_content else None
@@ -16400,6 +16406,7 @@ async def get_scraped_article(article_id: int):
                     "image_path": article.image_path,
                     "image_url": article.image_url,
                     "metadata": article.article_metadata,
+                    "read": article.read,  # Read status
                     "scraped_at": article.scraped_at.isoformat() if article.scraped_at else None,
                     # Content metadata
                     "content_stats": {

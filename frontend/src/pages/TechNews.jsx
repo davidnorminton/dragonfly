@@ -279,6 +279,14 @@ export default function TechNews({ searchQuery = '' }) {
       
       if (result.success) {
         setSelectedArticle(result.article);
+        // Update the article's read status in the articles list
+        setArticles(prevArticles => 
+          prevArticles.map(article => 
+            article.id === articleId 
+              ? { ...article, read: true }
+              : article
+          )
+        );
       } else {
         setMessage(`Error loading article: ${result.error}`);
       }
@@ -598,7 +606,8 @@ export default function TechNews({ searchQuery = '' }) {
                       overflow: 'hidden',
                       cursor: 'pointer',
                       transition: 'all 0.3s ease',
-                      boxShadow: selectedArticle?.id === article.id ? '0 8px 32px rgba(59, 130, 246, 0.3)' : '0 4px 16px rgba(0,0,0,0.1)'
+                      boxShadow: selectedArticle?.id === article.id ? '0 8px 32px rgba(59, 130, 246, 0.3)' : '0 4px 16px rgba(0,0,0,0.1)',
+                      position: 'relative'
                     }}
                     onClick={() => loadArticleDetails(article.id)}
                     onMouseEnter={(e) => {
@@ -612,6 +621,26 @@ export default function TechNews({ searchQuery = '' }) {
                       e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
                     }}
                   >
+                    {/* Read Checkmark */}
+                    {article.read && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '12px',
+                        right: '12px',
+                        background: 'rgba(34, 197, 94, 0.9)',
+                        borderRadius: '50%',
+                        width: '32px',
+                        height: '32px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10,
+                        boxShadow: '0 2px 8px rgba(34, 197, 94, 0.4)'
+                      }}>
+                        <span style={{ color: '#fff', fontSize: '18px' }}>✓</span>
+                      </div>
+                    )}
+                    
                     {/* Article Image */}
                     {article.image_url && (
                       <div style={{
