@@ -13,6 +13,7 @@ import { VideosPage } from './pages/Videos';
 import { AnalyticsPage } from './pages/Analytics';
 import { ChatPage } from './pages/Chat';
 import { NewsPage } from './pages/News';
+import TechNews from './pages/TechNews';
 import { StoriesPage } from './pages/Stories';
 import { CreateStoryPage } from './pages/CreateStory';
 import { StoryViewPage } from './pages/StoryView';
@@ -204,6 +205,8 @@ function App() {
         />
       ) : activePage === 'news' ? (
         <NewsPage />
+      ) : activePage === 'tech-news' ? (
+        <TechNews />
       ) : activePage === 'stories' ? (
         <StoriesPage
           onNavigate={(page, data) => {

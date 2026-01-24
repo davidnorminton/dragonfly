@@ -244,18 +244,32 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
               <span>Movies</span>
             </button>
             {isAdmin && (
-              <button
-                className={`side-nav-media-submenu-item ${activePage === 'news' ? 'active' : ''}`}
-                onClick={() => {
-                  setMediaMenuOpen(false);
-                  onNavigate?.('news');
-                }}
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
-                </svg>
-                <span>News</span>
-              </button>
+              <>
+                <button
+                  className={`side-nav-media-submenu-item ${activePage === 'news' ? 'active' : ''}`}
+                  onClick={() => {
+                    setMediaMenuOpen(false);
+                    onNavigate?.('news');
+                  }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                  </svg>
+                  <span>News</span>
+                </button>
+                <button
+                  className={`side-nav-media-submenu-item ${activePage === 'tech-news' ? 'active' : ''}`}
+                  onClick={() => {
+                    setMediaMenuOpen(false);
+                    onNavigate?.('tech-news');
+                  }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/>
+                  </svg>
+                  <span>Tech News</span>
+                </button>
+              </>
             )}
           </div>
         </div>
