@@ -6,6 +6,8 @@ export default function TechNews() {
   const [scraping, setScraping] = useState(false);
   const [message, setMessage] = useState('');
   const [debugInfo, setDebugInfo] = useState(null);
+  const [selectedArticle, setSelectedArticle] = useState(null);
+  const [loadingArticle, setLoadingArticle] = useState(false);
 
   useEffect(() => {
     loadArticles();
@@ -14,7 +16,7 @@ export default function TechNews() {
   const loadArticles = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/scraper/articles?limit=50');
+      const response = await fetch('/api/scraper/articles?limit=200');
       const result = await response.json();
       if (result.success) {
         setArticles(result.articles || []);
@@ -64,71 +66,21 @@ export default function TechNews() {
     }
   };
 
-  const viewArticle = async (articleId) => {
+  const loadArticleDetails = async (articleId) => {
+    setLoadingArticle(true);
     try {
       const response = await fetch(`/api/scraper/articles/${articleId}`);
       const result = await response.json();
       
       if (result.success) {
-        // Open article in new window
-        const article = result.article;
-        const win = window.open('', '_blank');
-        win.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>${article.title || 'Article'}</title>
-              <style>
-                body {
-                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                  max-width: 800px;
-                  margin: 40px auto;
-                  padding: 20px;
-                  background: #f5f5f5;
-                  color: #333;
-                }
-                h1 { margin-bottom: 10px; }
-                .meta {
-                  color: #666;
-                  font-size: 0.9em;
-                  margin-bottom: 20px;
-                  border-bottom: 1px solid #ddd;
-                  padding-bottom: 10px;
-                }
-                .content {
-                  background: white;
-                  padding: 30px;
-                  border-radius: 8px;
-                  line-height: 1.6;
-                  white-space: pre-wrap;
-                }
-                img {
-                  max-width: 100%;
-                  height: auto;
-                  border-radius: 8px;
-                  margin: 20px 0;
-                }
-                a { color: #0066cc; }
-              </style>
-            </head>
-            <body>
-              <h1>${article.title || 'Untitled'}</h1>
-              <div class="meta">
-                ${article.author ? `By ${article.author} • ` : ''}
-                ${article.published_date ? new Date(article.published_date).toLocaleDateString() : 'Unknown date'}
-                <br>
-                <a href="${article.url}" target="_blank">View Original</a>
-              </div>
-              ${article.image_url ? `<img src="${article.image_url}" alt="Article image">` : ''}
-              ${article.summary ? `<p><strong>Summary:</strong> ${article.summary}</p>` : ''}
-              <div class="content">${article.content || 'No content available'}</div>
-            </body>
-          </html>
-        `);
-        win.document.close();
+        setSelectedArticle(result.article);
+      } else {
+        setMessage(`Error loading article: ${result.error}`);
       }
     } catch (err) {
-      alert(`Error loading article: ${err.message}`);
+      setMessage(`Failed to load article: ${err.message}`);
+    } finally {
+      setLoadingArticle(false);
     }
   };
 
@@ -184,77 +136,91 @@ export default function TechNews() {
         </div>
       )}
 
-      <div className="content-container">
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
-            Loading articles...
-          </div>
-        ) : articles.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
-            <p>No articles scraped yet.</p>
-            <p style={{ fontSize: '0.9em', marginTop: '8px' }}>
-              Configure sources in Settings → Web Scraper, then click "Run Scraper" above.
-            </p>
-          </div>
-        ) : (
+      <div style={{
+        display: 'flex',
+        gap: '20px',
+        height: 'calc(100vh - 200px)',
+        overflow: 'hidden'
+      }}>
+        {/* Left Pane - Article List */}
+        <div style={{
+          width: '400px',
+          flexShrink: 0,
+          background: 'rgba(255,255,255,0.03)',
+          borderRadius: '12px',
+          border: '1px solid rgba(255,255,255,0.1)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
+        }}>
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: '20px'
+            padding: '16px',
+            borderBottom: '1px solid rgba(255,255,255,0.1)',
+            fontWeight: '600',
+            color: '#fff'
           }}>
-            {articles.map((article) => (
-              <div
-                key={article.id}
-                style={{
-                  background: 'rgba(255,255,255,0.05)',
-                  borderRadius: '12px',
-                  overflow: 'hidden',
-                  cursor: 'pointer',
-                  transition: 'transform 0.2s, background 0.2s',
-                  border: '1px solid rgba(255,255,255,0.1)'
-                }}
-                onClick={() => viewArticle(article.id)}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                }}
-              >
-                {article.image_url && (
-                  <img
-                    src={article.image_url}
-                    alt={article.title}
-                    style={{
-                      width: '100%',
-                      height: '180px',
-                      objectFit: 'cover'
-                    }}
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                    }}
-                  />
-                )}
-                <div style={{ padding: '16px' }}>
-                  <h3 style={{
+            Articles ({articles.length})
+          </div>
+          <div style={{
+            flex: 1,
+            overflowY: 'auto',
+            overflowX: 'hidden'
+          }}>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
+                Loading articles...
+              </div>
+            ) : articles.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
+                <p>No articles scraped yet.</p>
+                <p style={{ fontSize: '0.9em', marginTop: '8px' }}>
+                  Configure sources in Settings → Web Scraper, then click "Run Scraper" above.
+                </p>
+              </div>
+            ) : (
+              articles.map((article) => (
+                <div
+                  key={article.id}
+                  style={{
+                    padding: '16px',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    cursor: 'pointer',
+                    background: selectedArticle?.id === article.id ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                    transition: 'background 0.2s'
+                  }}
+                  onClick={() => loadArticleDetails(article.id)}
+                  onMouseEnter={(e) => {
+                    if (selectedArticle?.id !== article.id) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (selectedArticle?.id !== article.id) {
+                      e.currentTarget.style.background = 'transparent';
+                    }
+                  }}
+                >
+                  <h4 style={{
                     margin: '0 0 8px 0',
-                    fontSize: '1.1em',
+                    fontSize: '0.95em',
                     fontWeight: '600',
                     color: '#fff',
-                    lineHeight: '1.4'
+                    lineHeight: '1.4',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden'
                   }}>
                     {article.title || 'Untitled Article'}
-                  </h3>
+                  </h4>
                   {article.summary && (
                     <p style={{
-                      margin: '0 0 12px 0',
-                      fontSize: '0.85em',
-                      color: 'rgba(255,255,255,0.6)',
-                      lineHeight: '1.5',
+                      margin: '0 0 8px 0',
+                      fontSize: '0.8em',
+                      color: 'rgba(255,255,255,0.5)',
+                      lineHeight: '1.4',
                       display: '-webkit-box',
-                      WebkitLineClamp: 3,
+                      WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
                       overflow: 'hidden'
                     }}>
@@ -262,26 +228,149 @@ export default function TechNews() {
                     </p>
                   )}
                   <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
                     fontSize: '0.75em',
-                    color: 'rgba(255,255,255,0.4)',
-                    borderTop: '1px solid rgba(255,255,255,0.1)',
-                    paddingTop: '12px'
+                    color: 'rgba(255,255,255,0.4)'
                   }}>
-                    <span>{article.author || 'Unknown'}</span>
-                    <span>
-                      {article.published_date
-                        ? new Date(article.published_date).toLocaleDateString()
-                        : new Date(article.scraped_at).toLocaleDateString()}
-                    </span>
+                    {article.published_date
+                      ? new Date(article.published_date).toLocaleDateString()
+                      : new Date(article.scraped_at).toLocaleDateString()}
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
-        )}
+        </div>
+
+        {/* Right Pane - Article Content */}
+        <div style={{
+          flex: 1,
+          background: 'rgba(255,255,255,0.03)',
+          borderRadius: '12px',
+          border: '1px solid rgba(255,255,255,0.1)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
+        }}>
+          {loadingArticle ? (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              height: '100%',
+              color: 'rgba(255,255,255,0.5)'
+            }}>
+              Loading article...
+            </div>
+          ) : selectedArticle ? (
+            <>
+              {/* Article Header */}
+              <div style={{
+                padding: '24px',
+                borderBottom: '1px solid rgba(255,255,255,0.1)'
+              }}>
+                <h2 style={{
+                  margin: '0 0 12px 0',
+                  fontSize: '1.8em',
+                  fontWeight: '600',
+                  color: '#fff',
+                  lineHeight: '1.3'
+                }}>
+                  {selectedArticle.title || 'Untitled'}
+                </h2>
+                <div style={{
+                  display: 'flex',
+                  gap: '16px',
+                  alignItems: 'center',
+                  fontSize: '0.9em',
+                  color: 'rgba(255,255,255,0.5)',
+                  marginBottom: '12px'
+                }}>
+                  {selectedArticle.author && <span>By {selectedArticle.author}</span>}
+                  {selectedArticle.published_date && (
+                    <span>{new Date(selectedArticle.published_date).toLocaleDateString()}</span>
+                  )}
+                </div>
+                <a
+                  href={selectedArticle.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#3b82f6',
+                    textDecoration: 'none',
+                    fontSize: '0.85em',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  View Original Article →
+                </a>
+              </div>
+
+              {/* Article Content */}
+              <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '24px'
+              }}>
+                {selectedArticle.image_url && (
+                  <img
+                    src={selectedArticle.image_url}
+                    alt={selectedArticle.title}
+                    style={{
+                      width: '100%',
+                      maxHeight: '400px',
+                      objectFit: 'cover',
+                      borderRadius: '8px',
+                      marginBottom: '24px'
+                    }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                )}
+                {selectedArticle.summary && (
+                  <div style={{
+                    padding: '16px',
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    borderRadius: '8px',
+                    marginBottom: '24px',
+                    fontSize: '0.95em',
+                    lineHeight: '1.6',
+                    color: 'rgba(255,255,255,0.8)'
+                  }}>
+                    <strong style={{ color: '#fff' }}>Summary:</strong> {selectedArticle.summary}
+                  </div>
+                )}
+                <div style={{
+                  fontSize: '1em',
+                  lineHeight: '1.8',
+                  color: 'rgba(255,255,255,0.9)',
+                  whiteSpace: 'pre-wrap',
+                  wordWrap: 'break-word'
+                }}>
+                  {selectedArticle.content || 'No content available'}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              height: '100%',
+              color: 'rgba(255,255,255,0.5)',
+              textAlign: 'center',
+              padding: '40px'
+            }}>
+              <div>
+                <p style={{ fontSize: '1.2em', marginBottom: '8px' }}>Select an article to read</p>
+                <p style={{ fontSize: '0.9em' }}>Click on any article from the list on the left</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
