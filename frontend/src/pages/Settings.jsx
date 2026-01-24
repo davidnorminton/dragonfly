@@ -352,6 +352,11 @@ export function SettingsPage({ onNavigate }) {
   const [tableLimit] = useState(15);
   const [editingCell, setEditingCell] = useState(null);
   const [editedRow, setEditedRow] = useState({});
+  const [scraperSources, setScraperSources] = useState([]);
+  const [scraperLoading, setScraperLoading] = useState(false);
+  const [scraperMessage, setScraperMessage] = useState('');
+  const [newSourceUrl, setNewSourceUrl] = useState('');
+  const [newSourceName, setNewSourceName] = useState('');
   const loadingTableRef = useRef(null);
   const {
     model,
@@ -448,6 +453,13 @@ export function SettingsPage({ onNavigate }) {
       loadingTableRef.current = null;
     }
   }, [selectedTable, tablePage, activeTab, loadTableData]);
+
+  // Load scraper sources when scraper tab is active
+  useEffect(() => {
+    if (activeTab === 'scraper') {
+      loadScraperSources();
+    }
+  }, [activeTab]);
 
   const loadPersonas = async () => {
     try {
@@ -624,6 +636,19 @@ export function SettingsPage({ onNavigate }) {
       setError('Failed to load database tables');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadScraperSources = async () => {
+    try {
+      const response = await fetch('/api/scraper/sources');
+      const result = await response.json();
+      if (result.success) {
+        setScraperSources(result.sources || []);
+      }
+    } catch (err) {
+      console.error('Error loading scraper sources:', err);
+      setScraperMessage('Failed to load sources');
     }
   };
 
@@ -1229,6 +1254,12 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
             onClick={() => setActiveTab('videos')}
           >
             Videos
+          </button>
+          <button
+            className={activeTab === 'scraper' ? 'active' : ''}
+            onClick={() => setActiveTab('scraper')}
+          >
+            Web Scraper
           </button>
           <button
             className={activeTab === 'router' ? 'active' : ''}
@@ -2515,6 +2546,217 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                   <p className="settings-help" style={{ marginTop: '12px' }}>
                     Supported formats: MP4, MKV, AVI, MOV, M4V, WMV, FLV, WebM, MPEG, MPG
                   </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'scraper' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>Web Scraper</h3>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={saveSystemConfig}
+                    disabled={saving}
+                    className="save-button"
+                  >
+                    {saving ? 'Saving...' : 'Save Config'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setScraperLoading(true);
+                      setScraperMessage('');
+                      try {
+                        const response = await fetch('/api/scraper/run', { method: 'POST' });
+                        const result = await response.json();
+                        if (result.success) {
+                          setScraperMessage(`✓ ${result.message}`);
+                          loadScraperSources();
+                        } else {
+                          setScraperMessage(`✗ ${result.error || 'Scraping failed'}`);
+                        }
+                      } catch (err) {
+                        setScraperMessage(`✗ Error: ${err.message}`);
+                      } finally {
+                        setScraperLoading(false);
+                      }
+                    }}
+                    disabled={scraperLoading}
+                    className="save-button"
+                  >
+                    {scraperLoading ? 'Scraping...' : 'Run Scraper'}
+                  </button>
+                </div>
+              </div>
+              {scraperMessage && <div className="settings-message info">{scraperMessage}</div>}
+              
+              <div className="config-form-container">
+                {/* Images Directory Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Images Directory</h4>
+                  <FolderPicker
+                    value={systemFields.paths?.scraper_images_directory || ''}
+                    onChange={(value) => updateSystemField('paths.scraper_images_directory', value)}
+                    placeholder="/Users/username/ScrapedImages"
+                    label="Scraper Images Directory"
+                    helpText="Path where scraped article images will be saved. Save config before running scraper."
+                  />
+                </div>
+
+                {/* Sources Management Section */}
+                <div className="config-section">
+                  <h4 className="config-section-title">Scraper Sources</h4>
+                  <p className="settings-help">
+                    Add URLs of category/archive pages to scrape. The scraper will find articles on these pages and extract their content and images.
+                  </p>
+                  
+                  {/* Add New Source Form */}
+                  <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                    <div className="form-group">
+                      <label>Source URL</label>
+                      <input
+                        type="text"
+                        value={newSourceUrl}
+                        onChange={(e) => setNewSourceUrl(e.target.value)}
+                        placeholder="https://example.com/news"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Name (Optional)</label>
+                      <input
+                        type="text"
+                        value={newSourceName}
+                        onChange={(e) => setNewSourceName(e.target.value)}
+                        placeholder="Example News"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (!newSourceUrl.trim()) {
+                          setScraperMessage('✗ Please enter a URL');
+                          return;
+                        }
+                        
+                        try {
+                          const response = await fetch('/api/scraper/sources', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              url: newSourceUrl.trim(),
+                              name: newSourceName.trim() || null
+                            })
+                          });
+                          const result = await response.json();
+                          
+                          if (result.success) {
+                            setScraperMessage('✓ Source added successfully');
+                            setNewSourceUrl('');
+                            setNewSourceName('');
+                            loadScraperSources();
+                          } else {
+                            setScraperMessage(`✗ ${result.error || 'Failed to add source'}`);
+                          }
+                        } catch (err) {
+                          setScraperMessage(`✗ Error: ${err.message}`);
+                        }
+                      }}
+                      className="save-button"
+                      style={{ marginTop: '8px' }}
+                    >
+                      Add Source
+                    </button>
+                  </div>
+                  
+                  {/* Sources List */}
+                  <div style={{ marginTop: '16px' }}>
+                    {scraperSources.length === 0 ? (
+                      <p style={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic' }}>
+                        No sources added yet. Add a source above to get started.
+                      </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {scraperSources.map((source) => (
+                          <div
+                            key={source.id}
+                            style={{
+                              padding: '12px',
+                              background: 'rgba(255,255,255,0.05)',
+                              borderRadius: '8px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: '500', marginBottom: '4px' }}>
+                                {source.name || 'Unnamed Source'}
+                              </div>
+                              <div style={{ fontSize: '0.85em', color: 'rgba(255,255,255,0.6)', marginBottom: '4px' }}>
+                                {source.url}
+                              </div>
+                              {source.last_scraped && (
+                                <div style={{ fontSize: '0.75em', color: 'rgba(255,255,255,0.4)' }}>
+                                  Last scraped: {new Date(source.last_scraped).toLocaleString()}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={source.is_active}
+                                  onChange={async (e) => {
+                                    try {
+                                      const response = await fetch(`/api/scraper/sources/${source.id}`, {
+                                        method: 'PUT',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ is_active: e.target.checked })
+                                      });
+                                      const result = await response.json();
+                                      if (result.success) {
+                                        loadScraperSources();
+                                      }
+                                    } catch (err) {
+                                      console.error('Error toggling source:', err);
+                                    }
+                                  }}
+                                />
+                                <span style={{ fontSize: '0.85em' }}>Active</span>
+                              </label>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm(`Delete source: ${source.name || source.url}?`)) return;
+                                  
+                                  try {
+                                    const response = await fetch(`/api/scraper/sources/${source.id}`, {
+                                      method: 'DELETE'
+                                    });
+                                    const result = await response.json();
+                                    
+                                    if (result.success) {
+                                      setScraperMessage('✓ Source deleted');
+                                      loadScraperSources();
+                                    } else {
+                                      setScraperMessage(`✗ ${result.error || 'Failed to delete source'}`);
+                                    }
+                                  } catch (err) {
+                                    setScraperMessage(`✗ Error: ${err.message}`);
+                                  }
+                                }}
+                                className="save-button secondary"
+                                style={{ padding: '4px 12px', fontSize: '0.85em' }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

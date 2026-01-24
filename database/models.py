@@ -855,3 +855,48 @@ class CourseQuestion(Base):
     def __repr__(self):
         return f"<CourseQuestion {self.id} for course {self.course_id}>"
 
+
+class ScraperSource(Base):
+    """Model for storing web scraper source URLs (category pages)."""
+    __tablename__ = "scraper_sources"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    url = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=True)  # Optional friendly name for the source
+    is_active = Column(Boolean, default=True)  # Enable/disable scraping for this source
+    last_scraped = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    articles = relationship("ScrapedArticle", back_populates="source", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<ScraperSource {self.id}: {self.url}>"
+
+
+class ScrapedArticle(Base):
+    """Model for storing scraped article content."""
+    __tablename__ = "scraped_articles"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    source_id = Column(Integer, ForeignKey("scraper_sources.id"), nullable=False, index=True)
+    url = Column(String, nullable=False, unique=True, index=True)
+    title = Column(String, nullable=True)
+    content = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    author = Column(String, nullable=True)
+    published_date = Column(DateTime(timezone=True), nullable=True)
+    image_path = Column(String, nullable=True)  # Local path to saved image
+    image_url = Column(String, nullable=True)  # Original image URL
+    metadata = Column(JSON, nullable=True)  # Store additional metadata
+    scraped_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    source = relationship("ScraperSource", back_populates="articles")
+    
+    def __repr__(self):
+        return f"<ScrapedArticle {self.id}: {self.title}>"
+

@@ -27,7 +27,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion, ScraperSource, ScrapedArticle
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -16067,6 +16067,295 @@ async def get_quick_stats():
             "ai_queries": 0,
             "connected_devices": 0
         }
+
+
+# ============================================================================
+# Web Scraper API Endpoints
+# ============================================================================
+
+@app.get("/api/scraper/sources")
+async def get_scraper_sources():
+    """Get all scraper sources."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ScraperSource).order_by(ScraperSource.created_at.desc()))
+            sources = result.scalars().all()
+            
+            return {
+                "success": True,
+                "sources": [
+                    {
+                        "id": source.id,
+                        "url": source.url,
+                        "name": source.name,
+                        "is_active": source.is_active,
+                        "last_scraped": source.last_scraped.isoformat() if source.last_scraped else None,
+                        "created_at": source.created_at.isoformat() if source.created_at else None,
+                    }
+                    for source in sources
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting scraper sources: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/scraper/sources")
+async def add_scraper_source(data: dict):
+    """Add a new scraper source."""
+    try:
+        url = data.get("url", "").strip()
+        name = data.get("name", "").strip() or None
+        
+        if not url:
+            return {"success": False, "error": "URL is required"}
+        
+        # Validate URL format
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return {"success": False, "error": "Invalid URL format"}
+        
+        async with AsyncSessionLocal() as session:
+            # Check if URL already exists
+            result = await session.execute(
+                select(ScraperSource).where(ScraperSource.url == url)
+            )
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                return {"success": False, "error": "This URL is already added"}
+            
+            # Create new source
+            source = ScraperSource(
+                url=url,
+                name=name,
+                is_active=True
+            )
+            
+            session.add(source)
+            await session.commit()
+            await session.refresh(source)
+            
+            return {
+                "success": True,
+                "source": {
+                    "id": source.id,
+                    "url": source.url,
+                    "name": source.name,
+                    "is_active": source.is_active,
+                    "created_at": source.created_at.isoformat() if source.created_at else None,
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error adding scraper source: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/api/scraper/sources/{source_id}")
+async def delete_scraper_source(source_id: int):
+    """Delete a scraper source."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ScraperSource).where(ScraperSource.id == source_id)
+            )
+            source = result.scalar_one_or_none()
+            
+            if not source:
+                return {"success": False, "error": "Source not found"}
+            
+            await session.delete(source)
+            await session.commit()
+            
+            return {"success": True}
+    except Exception as e:
+        logger.error(f"Error deleting scraper source: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.put("/api/scraper/sources/{source_id}")
+async def update_scraper_source(source_id: int, data: dict):
+    """Update a scraper source."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ScraperSource).where(ScraperSource.id == source_id)
+            )
+            source = result.scalar_one_or_none()
+            
+            if not source:
+                return {"success": False, "error": "Source not found"}
+            
+            # Update fields
+            if "name" in data:
+                source.name = data["name"].strip() or None
+            if "is_active" in data:
+                source.is_active = bool(data["is_active"])
+            
+            await session.commit()
+            await session.refresh(source)
+            
+            return {
+                "success": True,
+                "source": {
+                    "id": source.id,
+                    "url": source.url,
+                    "name": source.name,
+                    "is_active": source.is_active,
+                    "last_scraped": source.last_scraped.isoformat() if source.last_scraped else None,
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error updating scraper source: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/scraper/run")
+async def run_scraper():
+    """Run the web scraper on all active sources."""
+    try:
+        # Get scraper images directory from system config
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = result.scalar_one_or_none()
+            
+            images_dir = None
+            if config and config.config_value:
+                images_dir = config.config_value.get("scraper_images_directory")
+        
+        if not images_dir:
+            return {"success": False, "error": "Scraper images directory not configured. Please set it in Settings."}
+        
+        # Initialize scraper service
+        from services.web_scraper_service import WebScraperService
+        scraper = WebScraperService(images_directory=images_dir)
+        
+        # Run scraper
+        logger.info("Starting web scraper...")
+        results = await scraper.scrape_all_sources()
+        
+        return {
+            "success": results["success"],
+            "message": f"Scraped {results['sources_scraped']} sources, found {results['articles_found']} articles, saved {results['articles_saved']} new articles",
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error running scraper: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/scraper/articles")
+async def get_scraped_articles(limit: int = 100, offset: int = 0):
+    """Get scraped articles."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get total count
+            count_result = await session.execute(
+                select(func.count(ScrapedArticle.id))
+            )
+            total = count_result.scalar() or 0
+            
+            # Get articles with pagination
+            result = await session.execute(
+                select(ScrapedArticle)
+                .order_by(ScrapedArticle.scraped_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            articles = result.scalars().all()
+            
+            return {
+                "success": True,
+                "total": total,
+                "articles": [
+                    {
+                        "id": article.id,
+                        "source_id": article.source_id,
+                        "url": article.url,
+                        "title": article.title,
+                        "summary": article.summary,
+                        "author": article.author,
+                        "published_date": article.published_date.isoformat() if article.published_date else None,
+                        "image_path": article.image_path,
+                        "image_url": article.image_url,
+                        "scraped_at": article.scraped_at.isoformat() if article.scraped_at else None,
+                    }
+                    for article in articles
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting scraped articles: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/scraper/articles/{article_id}")
+async def get_scraped_article(article_id: int):
+    """Get a single scraped article with full content."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ScrapedArticle).where(ScrapedArticle.id == article_id)
+            )
+            article = result.scalar_one_or_none()
+            
+            if not article:
+                return {"success": False, "error": "Article not found"}
+            
+            return {
+                "success": True,
+                "article": {
+                    "id": article.id,
+                    "source_id": article.source_id,
+                    "url": article.url,
+                    "title": article.title,
+                    "content": article.content,
+                    "summary": article.summary,
+                    "author": article.author,
+                    "published_date": article.published_date.isoformat() if article.published_date else None,
+                    "image_path": article.image_path,
+                    "image_url": article.image_url,
+                    "metadata": article.metadata,
+                    "scraped_at": article.scraped_at.isoformat() if article.scraped_at else None,
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error getting scraped article: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/api/scraper/articles/{article_id}")
+async def delete_scraped_article(article_id: int):
+    """Delete a scraped article."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ScrapedArticle).where(ScrapedArticle.id == article_id)
+            )
+            article = result.scalar_one_or_none()
+            
+            if not article:
+                return {"success": False, "error": "Article not found"}
+            
+            # Delete image file if it exists
+            if article.image_path:
+                try:
+                    image_path = Path(article.image_path)
+                    if image_path.exists():
+                        image_path.unlink()
+                except Exception as e:
+                    logger.warning(f"Could not delete image file {article.image_path}: {e}")
+            
+            await session.delete(article)
+            await session.commit()
+            
+            return {"success": True}
+    except Exception as e:
+        logger.error(f"Error deleting scraped article: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
 
 
 @app.get("/")
