@@ -54,7 +54,7 @@ async def add_scraper_tables():
                     published_date TIMESTAMP WITH TIME ZONE,
                     image_path VARCHAR,
                     image_url VARCHAR,
-                    metadata JSONB,
+                    article_metadata JSONB,
                     scraped_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

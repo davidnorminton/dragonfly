@@ -168,7 +168,7 @@ class WebScraperService:
                             published_date=article_data.get('published_date'),
                             image_path=article_data.get('image_path'),
                             image_url=article_data.get('image_url'),
-                            metadata=article_data.get('metadata')
+                            article_metadata=article_data.get('metadata')
                         )
                         
                         session.add(article)

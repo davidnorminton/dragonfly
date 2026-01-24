@@ -889,7 +889,7 @@ class ScrapedArticle(Base):
     published_date = Column(DateTime(timezone=True), nullable=True)
     image_path = Column(String, nullable=True)  # Local path to saved image
     image_url = Column(String, nullable=True)  # Original image URL
-    metadata = Column(JSON, nullable=True)  # Store additional metadata
+    article_metadata = Column(JSON, nullable=True)  # Store additional metadata
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

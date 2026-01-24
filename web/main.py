@@ -16318,7 +16318,7 @@ async def get_scraped_article(article_id: int):
                     "published_date": article.published_date.isoformat() if article.published_date else None,
                     "image_path": article.image_path,
                     "image_url": article.image_url,
-                    "metadata": article.metadata,
+                    "metadata": article.article_metadata,
                     "scraped_at": article.scraped_at.isoformat() if article.scraped_at else None,
                 }
             }
