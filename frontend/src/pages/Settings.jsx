@@ -358,6 +358,7 @@ export function SettingsPage({ onNavigate }) {
   const [editedRow, setEditedRow] = useState({});
   const [scraperSources, setScraperSources] = useState([]);
   const [scraperLoading, setScraperLoading] = useState(false);
+  const [scraperClearing, setScraperClearing] = useState(false);
   const [scraperMessage, setScraperMessage] = useState('');
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceName, setNewSourceName] = useState('');
@@ -2591,10 +2592,54 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                         setScraperLoading(false);
                       }
                     }}
-                    disabled={scraperLoading}
+                    disabled={scraperLoading || scraperClearing}
                     className="save-button"
                   >
                     {scraperLoading ? 'Scraping...' : 'Run Scraper'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm('⚠️ This will permanently delete ALL scraped articles from the database. Are you sure?')) {
+                        return;
+                      }
+                      
+                      setScraperClearing(true);
+                      setScraperMessage('');
+                      
+                      try {
+                        const response = await fetch('/api/scraper/articles', {
+                          method: 'DELETE'
+                        });
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                          setScraperMessage(`✓ ${result.message}`);
+                        } else {
+                          setScraperMessage(`✗ ${result.error || 'Failed to clear articles'}`);
+                        }
+                      } catch (err) {
+                        setScraperMessage(`✗ Error: ${err.message}`);
+                      } finally {
+                        setScraperClearing(false);
+                      }
+                    }}
+                    disabled={scraperLoading || scraperClearing}
+                    className="save-button"
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.2)',
+                      border: '1px solid rgba(239, 68, 68, 0.5)',
+                      color: '#ef4444'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!scraperClearing && !scraperLoading) {
+                        e.target.style.background = 'rgba(239, 68, 68, 0.3)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.background = 'rgba(239, 68, 68, 0.2)';
+                    }}
+                  >
+                    {scraperClearing ? 'Clearing...' : '🗑️ Clear All Articles'}
                   </button>
                 </div>
               </div>

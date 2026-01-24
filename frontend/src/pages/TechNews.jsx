@@ -3,10 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 export default function TechNews({ searchQuery = '' }) {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [scraping, setScraping] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [message, setMessage] = useState('');
-  const [debugInfo, setDebugInfo] = useState(null);
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
@@ -215,11 +212,6 @@ export default function TechNews({ searchQuery = '' }) {
       const result = await response.json();
       if (result.success) {
         setArticles(result.articles || []);
-        setDebugInfo({
-          total: result.total,
-          loaded: result.articles?.length || 0,
-          timestamp: new Date().toISOString()
-        });
       } else {
         setMessage(`Error loading articles: ${result.error}`);
       }
@@ -279,34 +271,6 @@ export default function TechNews({ searchQuery = '' }) {
     }
   };
 
-  const clearAllArticles = async () => {
-    if (!window.confirm('⚠️ This will permanently delete ALL scraped articles from the database. Are you sure?')) {
-      return;
-    }
-    
-    setClearing(true);
-    setMessage('');
-    
-    try {
-      const response = await fetch('/api/scraper/articles', {
-        method: 'DELETE'
-      });
-      const result = await response.json();
-      
-      if (result.success) {
-        setMessage(`✓ ${result.message}`);
-        setArticles([]);
-        setSelectedArticle(null);
-        setDebugInfo(null);
-      } else {
-        setMessage(`✗ ${result.error || 'Failed to clear articles'}`);
-      }
-    } catch (err) {
-      setMessage(`✗ Error: ${err.message}`);
-    } finally {
-      setClearing(false);
-    }
-  };
 
   const getFaviconUrl = (url) => {
     try {
@@ -453,73 +417,8 @@ export default function TechNews({ searchQuery = '' }) {
     <div className="page-container">
       <div className="page-header">
         <h1>Tech News</h1>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button
-            onClick={runScraper}
-            disabled={scraping}
-            className="save-button"
-          >
-            {scraping ? 'Scraping...' : '▶ Run Scraper'}
-          </button>
-          <button
-            onClick={loadArticles}
-            disabled={loading}
-            className="save-button secondary"
-          >
-            {loading ? 'Loading...' : '↻ Refresh'}
-          </button>
-          <button
-            onClick={clearAllArticles}
-            disabled={clearing || loading || scraping}
-            className="save-button"
-            style={{
-              background: 'rgba(239, 68, 68, 0.2)',
-              border: '1px solid rgba(239, 68, 68, 0.5)',
-              color: '#ef4444'
-            }}
-            onMouseEnter={(e) => {
-              if (!clearing && !loading && !scraping) {
-                e.target.style.background = 'rgba(239, 68, 68, 0.3)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.background = 'rgba(239, 68, 68, 0.2)';
-            }}
-          >
-            {clearing ? 'Clearing...' : '🗑️ Clear All Articles'}
-          </button>
-        </div>
       </div>
 
-      {message && (
-        <div style={{
-          padding: '12px 16px',
-          marginBottom: '20px',
-          background: message.startsWith('✓') ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-          border: `1px solid ${message.startsWith('✓') ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-          borderRadius: '8px',
-          color: message.startsWith('✓') ? '#22c55e' : '#ef4444'
-        }}>
-          {message}
-        </div>
-      )}
-
-      {debugInfo && (
-        <div style={{
-          padding: '16px',
-          marginBottom: '20px',
-          background: 'rgba(59, 130, 246, 0.1)',
-          border: '1px solid rgba(59, 130, 246, 0.3)',
-          borderRadius: '8px',
-          fontFamily: 'monospace',
-          fontSize: '0.85em'
-        }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Debug Info:</div>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(debugInfo, null, 2)}
-          </pre>
-        </div>
-      )}
 
       {/* Header Controls */}
       <div style={{
