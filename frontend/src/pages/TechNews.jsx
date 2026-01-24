@@ -184,6 +184,22 @@ export default function TechNews({ searchQuery = '' }) {
 
   useEffect(() => {
     loadArticles();
+    
+    // Listen for article selection from SearchOverlay
+    const handleTechNewsSelect = (event) => {
+      const { articleId, article } = event.detail;
+      if (articleId) {
+        loadArticleDetails(articleId);
+      } else if (article) {
+        setSelectedArticle(article);
+      }
+    };
+    
+    window.addEventListener('techNewsSelectArticle', handleTechNewsSelect);
+    
+    return () => {
+      window.removeEventListener('techNewsSelectArticle', handleTechNewsSelect);
+    };
   }, []);
 
   // Reset visible count when articles, search query, or sort order change

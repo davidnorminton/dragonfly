@@ -12,6 +12,7 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
   const [sessionPresets, setSessionPresets] = useState({});
   const [promptPresets, setPromptPresets] = useState([]);
   const [messageSearchSessions, setMessageSearchSessions] = useState([]); // Array of {session_id, snippets}
+  const [techArticles, setTechArticles] = useState([]); // Tech news articles
   const inputRef = useRef(null);
   const { currentTitle } = usePersonas();
 
@@ -66,9 +67,15 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
           console.error('Error loading video library:', err);
         }
       } else if (activePage === 'tech-news') {
-        // For tech-news, we don't need to load anything here
-        // The search filtering is handled directly in the TechNews component
-        setResults([]);
+        try {
+          const response = await fetch('/api/scraper/articles?limit=200');
+          const result = await response.json();
+          if (result.success) {
+            setTechArticles(result.articles || []);
+          }
+        } catch (err) {
+          console.error('Error loading tech articles:', err);
+        }
       }
     };
 
@@ -128,6 +135,76 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
     return path.replace(/^[.\/\\]+/, '');
   };
 
+  // Strip HTML tags from text for search (for tech-news)
+  const stripHTML = (html) => {
+    if (!html) return '';
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    return temp.textContent || temp.innerText || '';
+  };
+
+  // Calculate relevance score for tech-news search results
+  const calculateTechRelevanceScore = (article, query) => {
+    if (!query || query.length < 1) return 0;
+    
+    const queryLower = query.toLowerCase();
+    let score = 0;
+    
+    // Title matches are most important (weight: 15)
+    const title = (article.title || '').toLowerCase();
+    if (title.includes(queryLower)) {
+      score += 15;
+      // Bonus for word boundary matches
+      const wordBoundaryRegex = new RegExp(`\\b${queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      if (wordBoundaryRegex.test(title)) {
+        score += 10; // Whole word match bonus
+      }
+      // Position bonuses
+      if (title === queryLower) score += 20; // Exact match
+      else if (title.startsWith(queryLower)) score += 15; // Starts with
+      else if (title.endsWith(queryLower)) score += 10; // Ends with
+    }
+    
+    // Summary matches (weight: 8)
+    const summary = (article.summary || '').toLowerCase();
+    if (summary.includes(queryLower)) {
+      score += 8;
+      const wordBoundaryRegex = new RegExp(`\\b${queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      if (wordBoundaryRegex.test(summary)) {
+        score += 5; // Whole word in summary
+      }
+    }
+    
+    // Content matches (weight: 3) - strip HTML first
+    const contentText = stripHTML(article.content || '').toLowerCase();
+    if (contentText.includes(queryLower)) {
+      score += 3;
+      // Count occurrences but be more generous
+      const matches = (contentText.match(new RegExp(queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      score += Math.min(matches, 8); // Up to 8 bonus points for multiple matches
+      
+      // Whole word bonus in content
+      const wordBoundaryRegex = new RegExp(`\\b${queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      if (wordBoundaryRegex.test(contentText)) {
+        score += 3;
+      }
+    }
+    
+    // Author matches (weight: 5)
+    const author = (article.author || '').toLowerCase();
+    if (author.includes(queryLower)) {
+      score += 5;
+    }
+    
+    // URL matches for site-specific searches (weight: 2)
+    const url = (article.url || '').toLowerCase();
+    if (url.includes(queryLower)) {
+      score += 2;
+    }
+    
+    return score;
+  };
+
   // Music search results
   const musicResults = useMemo(() => {
     if (activePage !== 'music' || !library || !Array.isArray(library) || !searchQuery.trim()) return [];
@@ -182,6 +259,69 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
     
     return results.slice(0, 20);
   }, [activePage, library, searchQuery, onClose]);
+
+  // Search tech news articles
+  const techResults = useMemo(() => {
+    if (activePage !== 'tech-news' || !searchQuery.trim()) {
+      return [];
+    }
+
+    const queryTerms = searchQuery.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+    
+    const filtered = techArticles
+      .map(article => {
+        let totalScore = 0;
+        let hasAnyMatch = false;
+        
+        // Check each search term
+        for (const term of queryTerms) {
+          const termScore = calculateTechRelevanceScore(article, term);
+          if (termScore > 0) {
+            hasAnyMatch = true;
+            totalScore += termScore;
+          }
+        }
+        
+        // Bonus for matching multiple terms
+        if (queryTerms.length > 1) {
+          const matchedTerms = queryTerms.filter(term => calculateTechRelevanceScore(article, term) > 0);
+          if (matchedTerms.length > 1) {
+            totalScore += matchedTerms.length * 2; // Bonus for multi-term matches
+          }
+        }
+        
+        return {
+          ...article,
+          _relevanceScore: totalScore,
+          _hasMatch: hasAnyMatch
+        };
+      })
+      .filter(article => article._hasMatch) // Show any article with at least one match
+      .sort((a, b) => {
+        // Primary sort: relevance score (higher first)
+        const scoreDiff = (b._relevanceScore || 0) - (a._relevanceScore || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        
+        // Secondary sort: newer articles first
+        const dateA = new Date(a.published_date || a.scraped_at);
+        const dateB = new Date(b.published_date || b.scraped_at);
+        return dateB - dateA;
+      })
+      .map(article => ({
+        title: article.title,
+        subtitle: `${article.author || 'Unknown'} • ${article.published_date ? new Date(article.published_date).toLocaleDateString() : new Date(article.scraped_at).toLocaleDateString()}`,
+        image: null, // Tech articles don't have cover images
+        onClick: () => {
+          // Navigate to tech news and open this article
+          window.dispatchEvent(new CustomEvent('techNewsSelectArticle', { 
+            detail: { articleId: article.id, article: article } 
+          }));
+          onClose();
+        }
+      }));
+
+    return filtered.slice(0, 20); // Limit to top 20 results
+  }, [activePage, techArticles, searchQuery]);
 
   // Chat search results - combines title search and message content search
   const chatResults = useMemo(() => {
@@ -331,10 +471,12 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
       setResults(chatResults);
     } else if (activePage === 'videos') {
       setResults(videoResults);
+    } else if (activePage === 'tech-news') {
+      setResults(techResults);
     } else {
       setResults([]);
     }
-  }, [activePage, musicResults, chatResults, videoResults]);
+  }, [activePage, musicResults, chatResults, videoResults, techResults]);
 
   const handleKeyDown = (e) => {
     // ESC key closing removed per user request
@@ -426,11 +568,7 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
           gap: '8px'
         }}>
           {searchQuery && (
-            <span>
-              {activePage === 'tech-news' 
-                ? 'Filtering articles...' 
-                : `${results.length} result${results.length !== 1 ? 's' : ''}`}
-            </span>
+            <span>{results.length} result{results.length !== 1 ? 's' : ''}</span>
           )}
         </div>
       </div>
@@ -449,20 +587,6 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
             marginTop: '100px'
           }}>
             Start typing to search...
-          </div>
-        ) : activePage === 'tech-news' ? (
-          <div style={{
-            textAlign: 'center',
-            color: '#9da7b8',
-            fontSize: '1.1rem',
-            marginTop: '100px',
-            padding: '20px'
-          }}>
-            <div style={{ marginBottom: '16px', fontSize: '1.2rem' }}>🔍</div>
-            <div style={{ marginBottom: '8px' }}>Search applied to Tech News articles</div>
-            <div style={{ fontSize: '0.9rem', opacity: 0.7 }}>
-              Close this overlay to see filtered results
-            </div>
           </div>
         ) : results.length === 0 ? (
           <div style={{
