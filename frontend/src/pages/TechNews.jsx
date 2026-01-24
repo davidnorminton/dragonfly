@@ -521,363 +521,488 @@ export default function TechNews({ searchQuery = '' }) {
         </div>
       )}
 
+      {/* Header Controls */}
       <div style={{
         display: 'flex',
-        gap: '20px',
-        height: 'calc(100vh - 200px)',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: '24px',
+        gap: '20px'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px'
+        }}>
+          <div style={{ fontWeight: '600', color: '#fff', fontSize: '1.1em' }}>
+            Articles ({filteredAndSortedArticles.length}{searchQuery ? ` of ${articles.length}` : ''})
+          </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{
+              padding: '8px 12px',
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '8px',
+              color: '#fff',
+              fontSize: '0.9em',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="latest" style={{ background: '#1a1a1a' }}>Latest First</option>
+            <option value="oldest" style={{ background: '#1a1a1a' }}>Oldest First</option>
+            <option value="title-asc" style={{ background: '#1a1a1a' }}>Title (A-Z)</option>
+            <option value="title-desc" style={{ background: '#1a1a1a' }}>Title (Z-A)</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div style={{ 
+        position: 'relative',
+        height: 'calc(100vh - 180px)',
         overflow: 'hidden'
       }}>
-        {/* Left Pane - Article List */}
+        {/* Article Cards Grid */}
         <div style={{
-          width: '400px',
-          flexShrink: 0,
-          background: 'rgba(255,255,255,0.03)',
-          borderRadius: '12px',
-          border: '1px solid rgba(255,255,255,0.1)',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column'
+          height: '100%',
+          overflowY: 'auto',
+          paddingRight: selectedArticle ? '70%' : '0',
+          transition: 'padding-right 0.5s ease'
         }}>
-          <div style={{
-            padding: '16px',
-            borderBottom: '1px solid rgba(255,255,255,0.1)'
-          }}>
+          {loading ? (
             <div style={{
               display: 'flex',
-              justifyContent: 'space-between',
               alignItems: 'center',
-              marginBottom: '12px'
+              justifyContent: 'center',
+              height: '60%',
+              color: 'rgba(255,255,255,0.5)'
             }}>
-              <div style={{ fontWeight: '600', color: '#fff' }}>
-                Articles ({filteredAndSortedArticles.length}{searchQuery ? ` of ${articles.length}` : ''})
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '3em', marginBottom: '16px' }}>📰</div>
+                <p style={{ fontSize: '1.2em' }}>Loading articles...</p>
               </div>
             </div>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '6px',
-                color: '#fff',
-                fontSize: '0.85em',
-                cursor: 'pointer'
-              }}
-            >
-              <option value="latest" style={{ background: '#1a1a1a' }}>Latest First</option>
-              <option value="oldest" style={{ background: '#1a1a1a' }}>Oldest First</option>
-              <option value="title-asc" style={{ background: '#1a1a1a' }}>Title (A-Z)</option>
-              <option value="title-desc" style={{ background: '#1a1a1a' }}>Title (Z-A)</option>
-            </select>
-          </div>
-          <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            overflowX: 'hidden',
-            padding: '8px 0'
-          }}>
-            {loading ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
-                Loading articles...
-              </div>
-            ) : articles.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
-                <p>No articles scraped yet.</p>
-                <p style={{ fontSize: '0.9em', marginTop: '8px' }}>
-                  Configure sources in Settings → Web Scraper, then click "Run Scraper" above.
+          ) : articles.length === 0 ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '60%',
+              color: 'rgba(255,255,255,0.5)'
+            }}>
+              <div style={{ textAlign: 'center', maxWidth: '400px' }}>
+                <div style={{ fontSize: '4em', marginBottom: '24px', opacity: 0.3 }}>📰</div>
+                <h3 style={{ fontSize: '1.5em', marginBottom: '16px', color: 'rgba(255,255,255,0.8)' }}>No articles scraped yet</h3>
+                <p style={{ fontSize: '1em', lineHeight: '1.6', marginBottom: '24px' }}>
+                  Configure sources in Settings → Web Scraper, then click "Run Scraper" above to start collecting articles.
                 </p>
               </div>
-            ) : filteredAndSortedArticles.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
-                <p>No articles match your search.</p>
-                <p style={{ fontSize: '0.9em', marginTop: '8px' }}>
-                  Try a different search term.
+            </div>
+          ) : filteredAndSortedArticles.length === 0 ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '60%',
+              color: 'rgba(255,255,255,0.5)'
+            }}>
+              <div style={{ textAlign: 'center', maxWidth: '400px' }}>
+                <div style={{ fontSize: '4em', marginBottom: '24px', opacity: 0.3 }}>🔍</div>
+                <h3 style={{ fontSize: '1.5em', marginBottom: '16px', color: 'rgba(255,255,255,0.8)' }}>No articles match your search</h3>
+                <p style={{ fontSize: '1em', lineHeight: '1.6' }}>
+                  Try a different search term or adjust your filters.
                 </p>
               </div>
-            ) : (
-              <>
-              {filteredAndSortedArticles.slice(0, visibleCount).map((article) => (
-                <div
-                  key={article.id}
-                  style={{
-                    padding: '24px 20px',
-                    marginBottom: '8px',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    cursor: 'pointer',
-                    background: selectedArticle?.id === article.id ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255,255,255,0.02)',
-                    transition: 'all 0.3s ease',
-                    boxShadow: selectedArticle?.id === article.id ? '0 4px 12px rgba(59, 130, 246, 0.25)' : 'none'
-                  }}
-                  onClick={() => loadArticleDetails(article.id)}
-                  onMouseEnter={(e) => {
-                    if (selectedArticle?.id !== article.id) {
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
-                      e.currentTarget.style.transform = 'translateY(-2px)';
-                      e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.3)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (selectedArticle?.id !== article.id) {
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
-                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }
-                  }}
-                >
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                    marginBottom: '16px'
-                  }}>
-                    {getFaviconUrl(article.url) && (
-                      <img
-                        src={getFaviconUrl(article.url)}
-                        alt=""
-                        style={{
-                          width: '16px',
-                          height: '16px',
-                          flexShrink: 0,
-                          marginTop: '2px',
-                          opacity: 0.7
-                        }}
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                        }}
-                      />
-                    )}
-                    <h4 style={{
-                      margin: '0 0 12px 0',
-                      fontSize: '1.1em',
-                      fontWeight: '600',
-                      color: '#fff',
-                      lineHeight: '1.5',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
+            </div>
+          ) : (
+            <>
+              {/* Articles Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
+                gap: '24px',
+                padding: '0 24px 24px 0'
+              }}>
+                {filteredAndSortedArticles.slice(0, visibleCount).map((article) => (
+                  <div
+                    key={article.id}
+                    style={{
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '16px',
                       overflow: 'hidden',
-                      flex: 1
-                    }}>
-                      {article.title || 'Untitled Article'}
-                    </h4>
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      boxShadow: selectedArticle?.id === article.id ? '0 8px 32px rgba(59, 130, 246, 0.3)' : '0 4px 16px rgba(0,0,0,0.1)'
+                    }}
+                    onClick={() => loadArticleDetails(article.id)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-4px)';
+                      e.currentTarget.style.boxShadow = '0 12px 40px rgba(0,0,0,0.2)';
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = selectedArticle?.id === article.id ? '0 8px 32px rgba(59, 130, 246, 0.3)' : '0 4px 16px rgba(0,0,0,0.1)';
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                    }}
+                  >
+                    {/* Article Image */}
+                    {article.image_url && (
+                      <div style={{
+                        height: '200px',
+                        background: `url(${article.image_url})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        position: 'relative'
+                      }}>
+                        <div style={{
+                          position: 'absolute',
+                          bottom: '12px',
+                          left: '12px',
+                          background: 'rgba(0,0,0,0.7)',
+                          backdropFilter: 'blur(8px)',
+                          padding: '6px 10px',
+                          borderRadius: '8px',
+                          fontSize: '0.8em',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          {getFaviconUrl(article.url) && (
+                            <img
+                              src={getFaviconUrl(article.url)}
+                              alt=""
+                              style={{ width: '14px', height: '14px' }}
+                              onError={(e) => e.target.style.display = 'none'}
+                            />
+                          )}
+                          {getDomainFromUrl(article.url)}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Article Content */}
+                    <div style={{ padding: '24px' }}>
+                      {!article.image_url && (
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          marginBottom: '12px'
+                        }}>
+                          {getFaviconUrl(article.url) && (
+                            <img
+                              src={getFaviconUrl(article.url)}
+                              alt=""
+                              style={{ width: '16px', height: '16px', opacity: 0.7 }}
+                              onError={(e) => e.target.style.display = 'none'}
+                            />
+                          )}
+                          <span style={{
+                            background: 'rgba(255,255,255,0.1)',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.8em',
+                            color: 'rgba(255,255,255,0.7)'
+                          }}>
+                            {getDomainFromUrl(article.url)}
+                          </span>
+                        </div>
+                      )}
+                      
+                      <h3 style={{
+                        margin: '0 0 12px 0',
+                        fontSize: '1.2em',
+                        fontWeight: '600',
+                        color: '#fff',
+                        lineHeight: '1.4',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden'
+                      }}>
+                        {article.title || 'Untitled Article'}
+                      </h3>
+                      
+                      {article.summary && (
+                        <p style={{
+                          margin: '0 0 16px 0',
+                          fontSize: '0.9em',
+                          color: 'rgba(255,255,255,0.7)',
+                          lineHeight: '1.6',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 3,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden'
+                        }}>
+                          {article.summary}
+                        </p>
+                      )}
+                      
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '0.8em',
+                        color: 'rgba(255,255,255,0.5)'
+                      }}>
+                        <span>
+                          {article.published_date
+                            ? new Date(article.published_date).toLocaleDateString()
+                            : new Date(article.scraped_at).toLocaleDateString()}
+                        </span>
+                        <span style={{
+                          background: 'rgba(59, 130, 246, 0.2)',
+                          color: '#60a5fa',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.85em'
+                        }}>
+                          Read more →
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  {article.summary && (
-                    <p style={{
-                      margin: '0 0 16px 0',
-                      fontSize: '0.9em',
-                      color: 'rgba(255,255,255,0.7)',
-                      lineHeight: '1.6',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 3,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden'
-                    }}>
-                      {article.summary}
-                    </p>
-                  )}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '0.85em',
-                    color: 'rgba(255,255,255,0.6)',
-                    marginTop: '8px'
-                  }}>
-                    <span style={{ 
-                      background: 'rgba(255,255,255,0.1)', 
-                      padding: '4px 8px', 
-                      borderRadius: '6px',
-                      fontSize: '0.9em'
-                    }}>
-                      {getDomainFromUrl(article.url)}
-                    </span>
-                    <span>
-                      {article.published_date
-                        ? new Date(article.published_date).toLocaleDateString()
-                        : new Date(article.scraped_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+              
+              {/* Load More Button */}
               {visibleCount < filteredAndSortedArticles.length && (
                 <div style={{
-                  padding: '24px 20px',
+                  padding: '40px 0',
                   textAlign: 'center'
                 }}>
                   <button
                     onClick={() => setVisibleCount(prev => prev + 30)}
                     style={{
-                      padding: '12px 24px',
+                      padding: '16px 32px',
                       background: 'rgba(59, 130, 246, 0.15)',
                       border: '1px solid rgba(59, 130, 246, 0.3)',
                       borderRadius: '12px',
                       color: '#60a5fa',
                       cursor: 'pointer',
-                      fontSize: '0.9em',
+                      fontSize: '1em',
                       fontWeight: '600',
                       transition: 'all 0.3s ease',
-                      boxShadow: '0 4px 12px rgba(59, 130, 246, 0.2)'
+                      boxShadow: '0 4px 16px rgba(59, 130, 246, 0.2)'
                     }}
                     onMouseEnter={(e) => {
                       e.target.style.background = 'rgba(59, 130, 246, 0.25)';
                       e.target.style.transform = 'translateY(-2px)';
-                      e.target.style.boxShadow = '0 8px 25px rgba(59, 130, 246, 0.3)';
+                      e.target.style.boxShadow = '0 8px 32px rgba(59, 130, 246, 0.3)';
                     }}
                     onMouseLeave={(e) => {
                       e.target.style.background = 'rgba(59, 130, 246, 0.15)';
                       e.target.style.transform = 'translateY(0)';
-                      e.target.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.2)';
+                      e.target.style.boxShadow = '0 4px 16px rgba(59, 130, 246, 0.2)';
                     }}
                   >
-                    📰 Load More ({filteredAndSortedArticles.length - visibleCount} remaining)
+                    📰 Load More Articles ({filteredAndSortedArticles.length - visibleCount} remaining)
                   </button>
                 </div>
               )}
-              </>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
-        {/* Right Pane - Article Content */}
-        <div style={{
-          flex: 1,
-          background: 'rgba(255,255,255,0.03)',
-          borderRadius: '12px',
-          border: '1px solid rgba(255,255,255,0.1)',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column'
-        }}>
-          {loadingArticle ? (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              height: '100%',
-              color: 'rgba(255,255,255,0.5)'
+        {/* Sliding Article Panel */}
+        {selectedArticle && (
+          <div style={{
+            position: 'fixed',
+            top: '0',
+            right: '0',
+            width: '70%',
+            height: '100vh',
+            background: 'rgba(10, 10, 15, 0.98)',
+            backdropFilter: 'blur(20px)',
+            borderLeft: '1px solid rgba(255,255,255,0.1)',
+            transform: selectedArticle ? 'translateX(0)' : 'translateX(100%)',
+            transition: 'transform 0.5s ease',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            {/* Panel Header */}
+            <div style={{
+              padding: '24px 32px',
+              borderBottom: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgba(255,255,255,0.02)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between'
             }}>
-              Loading article...
-            </div>
-          ) : selectedArticle ? (
-            <>
-              {/* Article Header */}
-              <div style={{
-                padding: '24px',
-                borderBottom: '1px solid rgba(255,255,255,0.1)'
-              }}>
-                <h2 style={{
-                  margin: '0 0 12px 0',
+              <div style={{ flex: 1, paddingRight: '20px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  marginBottom: '12px'
+                }}>
+                  {getFaviconUrl(selectedArticle.url) && (
+                    <img
+                      src={getFaviconUrl(selectedArticle.url)}
+                      alt=""
+                      style={{ width: '20px', height: '20px', opacity: 0.8 }}
+                    />
+                  )}
+                  <span style={{
+                    color: 'rgba(255,255,255,0.6)',
+                    fontSize: '0.9em'
+                  }}>
+                    {getDomainFromUrl(selectedArticle.url)}
+                  </span>
+                </div>
+                
+                <h1 style={{
+                  margin: '0 0 16px 0',
                   fontSize: '1.8em',
-                  fontWeight: '600',
+                  fontWeight: '700',
                   color: '#fff',
                   lineHeight: '1.3'
                 }}>
-                  {selectedArticle.title || 'Untitled'}
-                </h2>
+                  {selectedArticle.title}
+                </h1>
+                
                 <div style={{
                   display: 'flex',
-                  gap: '16px',
+                  gap: '20px',
                   alignItems: 'center',
                   fontSize: '0.9em',
                   color: 'rgba(255,255,255,0.5)',
-                  marginBottom: '12px'
+                  marginBottom: '16px'
                 }}>
                   <span>By {selectedArticle.author || getDomainFromUrl(selectedArticle.url)}</span>
                   {selectedArticle.published_date && (
                     <span>{new Date(selectedArticle.published_date).toLocaleDateString()}</span>
                   )}
                 </div>
+                
                 <a
                   href={selectedArticle.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
-                    color: '#3b82f6',
+                    color: '#60a5fa',
                     textDecoration: 'none',
-                    fontSize: '0.85em',
+                    fontSize: '0.9em',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '4px'
+                    gap: '6px'
                   }}
                 >
-                  View Original Article →
+                  Read original article →
                 </a>
               </div>
+              
+              <button
+                onClick={() => setSelectedArticle(null)}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '40px',
+                  height: '40px',
+                  cursor: 'pointer',
+                  color: 'rgba(255,255,255,0.7)',
+                  fontSize: '1.2em',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = 'rgba(255,255,255,0.15)';
+                  e.target.style.color = '#fff';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = 'rgba(255,255,255,0.1)';
+                  e.target.style.color = 'rgba(255,255,255,0.7)';
+                }}
+              >
+                ✕
+              </button>
+            </div>
 
-              {/* Article Content */}
-              <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '24px'
-              }}>
-                {selectedArticle.image_url && (
-                  <img
-                    src={selectedArticle.image_url}
-                    alt={selectedArticle.title}
-                    style={{
-                      width: '100%',
-                      maxHeight: '400px',
-                      objectFit: 'cover',
-                      borderRadius: '8px',
-                      marginBottom: '24px'
-                    }}
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                    }}
-                  />
-                )}
-                {selectedArticle.summary && (
-                  <div style={{
-                    padding: '16px',
-                    background: 'rgba(59, 130, 246, 0.1)',
-                    border: '1px solid rgba(59, 130, 246, 0.3)',
-                    borderRadius: '8px',
-                    marginBottom: '24px',
-                    fontSize: '0.95em',
-                    lineHeight: '1.6',
-                    color: 'rgba(255,255,255,0.8)'
-                  }}>
-                    <strong style={{ color: '#fff' }}>Summary:</strong> {selectedArticle.summary}
-                  </div>
-                )}
-                <div 
-                  className="tech-news-content"
-                  style={{
-                    fontSize: '1em',
-                    lineHeight: '1.8',
-                    color: 'rgba(255,255,255,0.9)',
-                    wordWrap: 'break-word',
-                    maxWidth: 'none',
-                    textAlign: 'left'
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: formatArticleContent(selectedArticle.content)
-                  }}
-                />
-              </div>
-            </>
-          ) : (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              height: '100%',
-              color: 'rgba(255,255,255,0.5)',
-              textAlign: 'center',
-              padding: '40px'
+            {/* Panel Content */}
+            <div style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '0'
             }}>
-              <div>
-                <p style={{ fontSize: '1.2em', marginBottom: '8px' }}>Select an article to read</p>
-                <p style={{ fontSize: '0.9em' }}>Click on any article from the list on the left</p>
+              <div style={{
+                maxWidth: '800px',
+                margin: '0 auto',
+                padding: '32px'
+              }}>
+                {loadingArticle ? (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '200px',
+                    color: 'rgba(255,255,255,0.5)'
+                  }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '2em', marginBottom: '16px', opacity: 0.5 }}>📰</div>
+                      <p>Loading article...</p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {selectedArticle.image_url && (
+                      <img
+                        src={selectedArticle.image_url}
+                        alt={selectedArticle.title}
+                        style={{
+                          width: '100%',
+                          maxHeight: '400px',
+                          objectFit: 'cover',
+                          borderRadius: '16px',
+                          marginBottom: '32px',
+                          boxShadow: '0 12px 48px rgba(0,0,0,0.4)'
+                        }}
+                      />
+                    )}
+                    
+                    {selectedArticle.summary && (
+                      <div style={{
+                        padding: '24px',
+                        background: 'rgba(59, 130, 246, 0.08)',
+                        borderRadius: '16px',
+                        marginBottom: '32px',
+                        border: '1px solid rgba(59, 130, 246, 0.2)',
+                        fontSize: '1.1em',
+                        lineHeight: '1.7',
+                        color: 'rgba(255,255,255,0.9)'
+                      }}>
+                        <strong style={{ color: '#fff', fontSize: '1em' }}>Summary:</strong>
+                        <br /><br />
+                        {selectedArticle.summary}
+                      </div>
+                    )}
+                    
+                    <div 
+                      className="tech-news-content"
+                      style={{
+                        fontSize: '1.1em',
+                        lineHeight: '1.8',
+                        color: 'rgba(255,255,255,0.9)'
+                      }}
+                      dangerouslySetInnerHTML={{
+                        __html: formatArticleContent(selectedArticle.content)
+                      }}
+                    />
+                  </>
+                )}
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
