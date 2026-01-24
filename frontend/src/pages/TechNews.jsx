@@ -4,6 +4,7 @@ export default function TechNews({ searchQuery = '' }) {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [scraping, setScraping] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [message, setMessage] = useState('');
   const [debugInfo, setDebugInfo] = useState(null);
   const [selectedArticle, setSelectedArticle] = useState(null);
@@ -278,6 +279,35 @@ export default function TechNews({ searchQuery = '' }) {
     }
   };
 
+  const clearAllArticles = async () => {
+    if (!window.confirm('⚠️ This will permanently delete ALL scraped articles from the database. Are you sure?')) {
+      return;
+    }
+    
+    setClearing(true);
+    setMessage('');
+    
+    try {
+      const response = await fetch('/api/scraper/articles', {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+      
+      if (result.success) {
+        setMessage(`✓ ${result.message}`);
+        setArticles([]);
+        setSelectedArticle(null);
+        setDebugInfo(null);
+      } else {
+        setMessage(`✗ ${result.error || 'Failed to clear articles'}`);
+      }
+    } catch (err) {
+      setMessage(`✗ Error: ${err.message}`);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const getFaviconUrl = (url) => {
     try {
       const domain = new URL(url).hostname;
@@ -370,6 +400,26 @@ export default function TechNews({ searchQuery = '' }) {
             className="save-button secondary"
           >
             {loading ? 'Loading...' : '↻ Refresh'}
+          </button>
+          <button
+            onClick={clearAllArticles}
+            disabled={clearing || loading || scraping}
+            className="save-button"
+            style={{
+              background: 'rgba(239, 68, 68, 0.2)',
+              border: '1px solid rgba(239, 68, 68, 0.5)',
+              color: '#ef4444'
+            }}
+            onMouseEnter={(e) => {
+              if (!clearing && !loading && !scraping) {
+                e.target.style.background = 'rgba(239, 68, 68, 0.3)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'rgba(239, 68, 68, 0.2)';
+            }}
+          >
+            {clearing ? 'Clearing...' : '🗑️ Clear All Articles'}
           </button>
         </div>
       </div>

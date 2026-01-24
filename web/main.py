@@ -16422,6 +16422,52 @@ async def delete_scraped_article(article_id: int):
         return {"success": False, "error": str(e)}
 
 
+@app.delete("/api/scraper/articles")  
+async def clear_all_scraped_articles():
+    """Clear all scraped articles from the database."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get count before deletion for response
+            count_result = await session.execute(select(func.count(ScrapedArticle.id)))
+            article_count = count_result.scalar()
+            
+            if article_count == 0:
+                return {"success": True, "message": "No articles to delete", "deleted_count": 0}
+            
+            # Get all articles to clean up image files
+            result = await session.execute(select(ScrapedArticle))
+            articles = result.scalars().all()
+            
+            deleted_images = 0
+            # Clean up image files
+            for article in articles:
+                if article.image_path:
+                    try:
+                        image_path = Path(article.image_path)
+                        if image_path.exists():
+                            image_path.unlink()
+                            deleted_images += 1
+                    except Exception as e:
+                        logger.warning(f"Could not delete image file {article.image_path}: {e}")
+            
+            # Delete all articles  
+            await session.execute(delete(ScrapedArticle))
+            await session.commit()
+            
+            logger.info(f"Cleared {article_count} scraped articles from database (and {deleted_images} image files)")
+            
+            return {
+                "success": True, 
+                "message": f"Successfully cleared {article_count} articles from database",
+                "deleted_count": article_count,
+                "deleted_images": deleted_images
+            }
+            
+    except Exception as e:
+        logger.error(f"Error clearing all articles: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/")
 async def get_index(request: Request):
     """Serve the React app."""
