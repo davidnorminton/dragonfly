@@ -99,8 +99,17 @@ export default function TechNews({ searchQuery = '' }) {
     if (selectedDomain) {
       filtered = filtered.filter(article => {
         const articleDomain = getDomainFromUrl(article.url || '');
+        // Debug logging
+        if (filtered.length < 5) {
+          console.log(`Article: ${article.title?.substring(0, 30)}...`);
+          console.log(`  URL: ${article.url}`);
+          console.log(`  Extracted domain: "${articleDomain}"`);
+          console.log(`  Selected domain: "${selectedDomain}"`);
+          console.log(`  Match: ${articleDomain === selectedDomain}`);
+        }
         return articleDomain === selectedDomain;
       });
+      console.log(`Domain filter: ${filtered.length} articles match "${selectedDomain}"`);
     }
     
     // Filter and calculate relevance if searching
@@ -236,11 +245,14 @@ export default function TechNews({ searchQuery = '' }) {
               // Remove www. prefix for cleaner display
               const domain = url.hostname.replace(/^www\./, '');
               domains.add(domain);
+              console.log(`Source: ${source.name} -> Domain: ${domain}`);
             } catch (e) {
               // Skip invalid URLs
             }
           });
-          setAvailableDomains(Array.from(domains).sort());
+          const sortedDomains = Array.from(domains).sort();
+          console.log('Available domains:', sortedDomains);
+          setAvailableDomains(sortedDomains);
         }
       } catch (err) {
         console.error('Failed to load domains:', err);
