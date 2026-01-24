@@ -380,7 +380,7 @@ export function SideNav({ activePage, onNavigate, onSwitchAI, onSettingsClick, s
       <div style={{ flex: 1 }} />
 
       {/* Search - absolutely positioned in the center with separators */}
-      {(activePage === 'chat' || activePage === 'music' || activePage === 'videos') && (
+      {(activePage === 'chat' || activePage === 'music' || activePage === 'videos' || activePage === 'tech-news') && (
         <>
           {/* Separator bar above */}
           <div className="side-nav-separator top" />
