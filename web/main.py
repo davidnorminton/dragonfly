@@ -9410,6 +9410,70 @@ async def convert_video_files():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/video/scan-conversion")
+async def scan_video_conversion(data: dict):
+    """Scan video directory and return list of files that need conversion."""
+    try:
+        from services.video_converter import VideoConverter
+        
+        video_directory = data.get('video_directory')
+        if not video_directory:
+            raise HTTPException(status_code=400, detail="video_directory is required")
+        
+        # Scan for files to convert
+        converter = VideoConverter(video_directory)
+        scan_results = converter.scan_for_conversion()
+        
+        return scan_results
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Video conversion scan error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/video/convert-to-mp4-stream")
+async def convert_videos_streaming(data: dict):
+    """Convert videos to MP4 with streaming progress updates."""
+    try:
+        from services.video_converter import VideoConverter
+        from fastapi.responses import StreamingResponse
+        import json
+        
+        video_directory = data.get('video_directory')
+        if not video_directory:
+            raise HTTPException(status_code=400, detail="video_directory is required")
+        
+        converter = VideoConverter(video_directory)
+        
+        async def event_stream():
+            """Generate Server-Sent Events for conversion progress."""
+            try:
+                async for event in converter.convert_all_streaming():
+                    # Format as SSE
+                    yield f"data: {json.dumps(event)}\n\n"
+            except Exception as e:
+                logger.error(f"Streaming conversion error: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+        
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Video conversion stream error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/video/library/count")
 async def get_video_library_count():
     """Get counts of movies and TV shows in the library."""

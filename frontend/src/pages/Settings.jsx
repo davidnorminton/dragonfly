@@ -4,6 +4,7 @@ import { useRouterConfig } from '../hooks/useRouterConfig';
 import { useAIModels } from '../hooks/useAIModels';
 import { FolderPicker, FilePicker } from '../components/FolderPicker';
 import { ConversionProgressModal } from '../components/ConversionProgressModal';
+import { VideoConversionModal } from '../components/VideoConversionModal';
 import { CoverArtModal } from '../components/CoverArtModal';
 import { PersonaImageUpload } from '../components/PersonaImageUpload';
 
@@ -319,6 +320,9 @@ export function SettingsPage({ onNavigate }) {
   const [musicMessage, setMusicMessage] = useState('');
   const [videoLoading, setVideoLoading] = useState(false);
   const [videoMessage, setVideoMessage] = useState('');
+  const [videoConversionScanning, setVideoConversionScanning] = useState(false);
+  const [showVideoConversionModal, setShowVideoConversionModal] = useState(false);
+  const [videoConversionScanData, setVideoConversionScanData] = useState(null);
   const [systemConfig, setSystemConfig] = useState('');
   const [systemFields, setSystemFields] = useState({});
   const [expandedSections, setExpandedSections] = useState({});
@@ -2457,33 +2461,38 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                   </button>
                   <button
                     onClick={async () => {
-                      if (!confirm('This will convert all MKV and AVI files to MP4, then delete the original files. This may take a while. Continue?')) {
+                      if (!systemFields.paths?.video_directory) {
+                        setVideoMessage('Please set video directory first.');
                         return;
                       }
-                      setVideoLoading(true);
-                      setVideoMessage('Converting videos... This may take several minutes depending on your library size.');
+                      
+                      setVideoConversionScanning(true);
+                      setVideoMessage('');
+                      
                       try {
-                        const res = await videoAPI.convertVideos();
-                        if (res?.success) {
-                          const results = res.results || {};
-                          setVideoMessage(`✅ Conversion complete! Converted: ${results.converted || 0}, Failed: ${results.failed || 0}, Total: ${results.total_files || 0}. Run a scan to update the database.`);
+                        // First, scan the directory to get the list of files
+                        const scanRes = await videoAPI.scanVideoConversion(systemFields.paths.video_directory);
+                        if (scanRes?.success) {
+                          setVideoConversionScanData(scanRes);
+                          setShowVideoConversionModal(true);
                         } else {
-                          setVideoMessage(res?.error || 'Conversion failed.');
+                          setVideoMessage(`Error scanning videos: ${scanRes?.error || 'Unknown error'}`);
                         }
                       } catch (err) {
-                        setVideoMessage(err?.message || 'Conversion failed.');
+                        console.error('Video scan error:', err);
+                        setVideoMessage(`Error: ${err.message || 'Failed to scan videos'}`);
                       } finally {
-                        setVideoLoading(false);
+                        setVideoConversionScanning(false);
                       }
                     }}
-                    disabled={videoLoading || !systemFields.paths?.video_directory}
+                    disabled={videoConversionScanning || !systemFields.paths?.video_directory}
                     className="save-button"
                     style={{ 
-                      background: (videoLoading || !systemFields.paths?.video_directory) ? '#666' : '#f59e0b',
+                      background: (videoConversionScanning || !systemFields.paths?.video_directory) ? '#666' : '#f59e0b',
                       marginLeft: '10px'
                     }}
                   >
-                    {videoLoading ? 'Converting…' : '🔄 Convert to MP4'}
+                    {videoConversionScanning ? 'Scanning…' : '🔄 Convert to MP4'}
                   </button>
                   <button
                     onClick={async () => {
@@ -3544,6 +3553,16 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
         }}
         directoryPath={conversionDirectory}
         scanData={conversionScanData}
+      />
+
+      <VideoConversionModal
+        isOpen={showVideoConversionModal}
+        onClose={() => {
+          setShowVideoConversionModal(false);
+          setVideoConversionScanData(null);
+        }}
+        videoDirectory={systemFields.paths?.video_directory}
+        scanData={videoConversionScanData}
       />
 
       <CoverArtModal

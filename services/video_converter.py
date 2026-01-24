@@ -274,3 +274,199 @@ class VideoConverter:
             "percentage": int((self.converted_files + self.failed_files) / self.total_files * 100) if self.total_files > 0 else 0,
             "max_concurrent": self.max_concurrent
         }
+    
+    def scan_for_conversion(self) -> Dict[str, Any]:
+        """
+        Scan video directories and return list of files that need conversion.
+        
+        Returns:
+            Dictionary with scan results including files to convert and delete.
+        """
+        logger.info("🔍 Scanning for videos to convert...")
+        
+        files_to_convert = []
+        files_to_delete = []
+        
+        # Scan Movies directory
+        if self.movies_dir.exists():
+            logger.info(f"  📁 Scanning: {self.movies_dir}")
+            movie_files = self._scan_directory(self.movies_dir)
+            files_to_convert.extend(movie_files)
+        
+        # Scan TV directory
+        if self.tv_dir.exists():
+            logger.info(f"  📁 Scanning: {self.tv_dir}")
+            tv_files = self._scan_directory(self.tv_dir, recursive=True)
+            files_to_convert.extend(tv_files)
+        
+        # Build file lists for frontend
+        convert_list = []
+        delete_list = []
+        total_source_size = 0
+        
+        for file_path in files_to_convert:
+            file_info = {
+                "name": file_path.name,
+                "path": str(file_path),
+                "format": file_path.suffix.upper(),
+                "size": file_path.stat().st_size,
+                "size_mb": round(file_path.stat().st_size / (1024 * 1024), 2)
+            }
+            convert_list.append(file_info)
+            total_source_size += file_path.stat().st_size
+            
+            # This file will be deleted after conversion
+            delete_list.append({
+                "name": file_path.name,
+                "path": str(file_path),
+                "format": file_path.suffix.upper(),
+                "size_mb": file_info["size_mb"]
+            })
+        
+        logger.info(f"  ✓ Found {len(convert_list)} files to convert")
+        logger.info(f"  ✓ Total size: {total_source_size / (1024**3):.2f} GB")
+        
+        return {
+            "success": True,
+            "files_to_convert": convert_list,
+            "files_to_delete": delete_list,
+            "summary": {
+                "total_to_convert": len(convert_list),
+                "total_to_delete": len(delete_list),
+                "space_to_free": f"{total_source_size / (1024**3):.2f} GB"
+            }
+        }
+    
+    async def convert_all_streaming(self):
+        """
+        Convert all videos with real-time progress updates (async generator).
+        Yields progress events for streaming to frontend.
+        """
+        # Scan for files
+        files_to_convert = []
+        
+        if self.movies_dir.exists():
+            movie_files = self._scan_directory(self.movies_dir)
+            files_to_convert.extend(movie_files)
+        
+        if self.tv_dir.exists():
+            tv_files = self._scan_directory(self.tv_dir, recursive=True)
+            files_to_convert.extend(tv_files)
+        
+        total_files = len(files_to_convert)
+        self.total_files = total_files
+        self.converted_files = 0
+        self.failed_files = 0
+        
+        # Start event
+        yield {
+            "type": "start",
+            "total_files": total_files
+        }
+        
+        if total_files == 0:
+            yield {
+                "type": "complete",
+                "converted": 0,
+                "deleted": 0,
+                "errors": 0
+            }
+            return
+        
+        # Convert files sequentially for progress tracking
+        converted_count = 0
+        deleted_count = 0
+        error_count = 0
+        
+        for idx, file_path in enumerate(files_to_convert, 1):
+            # Converting event
+            yield {
+                "type": "converting",
+                "file": file_path.name,
+                "current": idx,
+                "total": total_files
+            }
+            
+            try:
+                output_path = file_path.with_suffix(TARGET_FORMAT)
+                
+                # Skip if already exists
+                if output_path.exists():
+                    logger.info(f"  [{idx}/{total_files}] ⚠️  {file_path.name}: MP4 already exists, skipping")
+                    yield {
+                        "type": "converted",
+                        "file": file_path.name
+                    }
+                    converted_count += 1
+                    continue
+                
+                # Run conversion
+                cmd = [
+                    'ffmpeg',
+                    '-i', str(file_path),
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-b:a', '192k',
+                    '-movflags', '+faststart',
+                    '-threads', '0',
+                    '-preset', 'ultrafast',
+                    '-loglevel', 'error',
+                    '-stats',
+                    '-y',
+                    str(output_path)
+                ]
+                
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+                    # Success
+                    yield {
+                        "type": "converted",
+                        "file": file_path.name
+                    }
+                    converted_count += 1
+                    
+                    # Delete original
+                    file_path.unlink()
+                    yield {
+                        "type": "deleted",
+                        "file": file_path.name,
+                        "reason": "Original file after conversion",
+                        "count": deleted_count + 1
+                    }
+                    deleted_count += 1
+                else:
+                    # Failed
+                    error_msg = stderr.decode('utf-8', errors='ignore')[:200] if stderr else "Unknown error"
+                    yield {
+                        "type": "error",
+                        "file": file_path.name,
+                        "error": error_msg
+                    }
+                    error_count += 1
+                    
+                    # Clean up failed output
+                    if output_path.exists():
+                        output_path.unlink()
+            
+            except Exception as e:
+                yield {
+                    "type": "error",
+                    "file": file_path.name,
+                    "error": str(e)
+                }
+                error_count += 1
+        
+        # Complete event
+        yield {
+            "type": "complete",
+            "converted": converted_count,
+            "deleted": deleted_count,
+            "errors": error_count
+        }

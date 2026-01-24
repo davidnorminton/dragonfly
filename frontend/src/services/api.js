@@ -464,6 +464,7 @@ export const videoAPI = {
   scanVideos: () => api.get('/video/scan').then(res => res.data),
   clearVideos: () => api.post('/video/clear').then(res => res.data),
   convertVideos: () => api.post('/video/convert').then(res => res.data),
+  scanVideoConversion: (videoDirectory) => api.post('/video/scan-conversion', { video_directory: videoDirectory }).then(res => res.data),
   
   async getCastCrew(title, year) {
     const response = await fetch('/api/video/cast-crew', {
