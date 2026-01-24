@@ -382,6 +382,73 @@ export default function TechNews({ searchQuery = '' }) {
     return temp.innerHTML;
   };
 
+  // Enhanced content formatter for better readability
+  const formatArticleContent = (content) => {
+    if (!content) return '<p style="color: rgba(255,255,255,0.5); font-style: italic; text-align: center; padding: 40px;">No content available for this article.</p>';
+    
+    let formatted = content.trim();
+    
+    // If content looks like plain text (no HTML tags), convert it to proper HTML
+    if (!/<[^>]+>/.test(formatted)) {
+      // Split by double line breaks to create paragraphs
+      const paragraphs = formatted
+        .split(/\n\s*\n/)
+        .map(paragraph => paragraph.trim())
+        .filter(paragraph => paragraph.length > 0)
+        .map(paragraph => `<p>${paragraph.replace(/\n/g, '<br>')}</p>`);
+      
+      formatted = paragraphs.join('');
+    }
+    
+    // Use the existing sanitizeHTML function for security
+    const sanitized = sanitizeHTML(formatted);
+    
+    // Add additional styling to the sanitized content
+    const temp = document.createElement('div');
+    temp.innerHTML = sanitized;
+    
+    // Enhanced paragraph styling
+    const paragraphs = temp.querySelectorAll('p');
+    paragraphs.forEach((p, index) => {
+      p.style.marginBottom = '20px';
+      p.style.lineHeight = '1.8';
+      p.style.color = 'rgba(255,255,255,0.95)';
+      if (index === 0) {
+        p.style.fontSize = '1.05em'; // Make first paragraph slightly larger
+      }
+    });
+    
+    // Enhanced heading styling  
+    const headings = temp.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    headings.forEach(heading => {
+      heading.style.color = '#fff';
+      heading.style.marginTop = '32px';
+      heading.style.marginBottom = '16px';
+      heading.style.fontWeight = '700';
+      heading.style.lineHeight = '1.3';
+      
+      // Different sizes for different heading levels
+      const sizes = { 'H1': '1.8em', 'H2': '1.5em', 'H3': '1.3em', 'H4': '1.2em', 'H5': '1.1em', 'H6': '1em' };
+      heading.style.fontSize = sizes[heading.tagName] || '1.2em';
+    });
+    
+    // Enhanced blockquote styling
+    const blockquotes = temp.querySelectorAll('blockquote');
+    blockquotes.forEach(quote => {
+      quote.style.borderLeft = '4px solid #3b82f6';
+      quote.style.paddingLeft = '20px';
+      quote.style.margin = '24px 0';
+      quote.style.fontStyle = 'italic';
+      quote.style.color = 'rgba(255,255,255,0.85)';
+      quote.style.background = 'rgba(59, 130, 246, 0.08)';
+      quote.style.padding = '20px 20px 20px 24px';
+      quote.style.borderRadius = '8px';
+      quote.style.fontSize = '1.05em';
+    });
+    
+    return temp.innerHTML;
+  };
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -784,10 +851,12 @@ export default function TechNews({ searchQuery = '' }) {
                     fontSize: '1em',
                     lineHeight: '1.8',
                     color: 'rgba(255,255,255,0.9)',
-                    wordWrap: 'break-word'
+                    wordWrap: 'break-word',
+                    maxWidth: 'none',
+                    textAlign: 'left'
                   }}
                   dangerouslySetInnerHTML={{
-                    __html: sanitizeHTML(selectedArticle.content) || '<p style="color: rgba(255,255,255,0.5);">No content available</p>'
+                    __html: formatArticleContent(selectedArticle.content)
                   }}
                 />
               </div>
