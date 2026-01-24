@@ -1945,6 +1945,11 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                         {renderCarousel(getItemsByGenre('science fiction'), 'Sci-Fi', 'sci-fi')}
                         {renderCarousel(getItemsByGenre('animation'), 'Animation', 'animation')}
                         {renderCarousel(getItemsByGenre('documentary'), 'Documentary', 'documentary')}
+                        {renderCarousel(getItemsByGenre('fantasy'), 'Fantasy', 'fantasy')}
+                        {renderCarousel(getItemsByGenre('family'), 'Family', 'family')}
+                        {renderCarousel(getItemsByGenre('adventure'), 'Adventure', 'adventure')}
+                        {renderCarousel(getItemsByGenre('action'), 'Action', 'action')}
+                        {renderCarousel(getItemsByGenre('thriller'), 'Thriller', 'thriller')}
                       </>
                     );
                   })()}
