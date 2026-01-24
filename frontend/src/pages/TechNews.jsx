@@ -11,6 +11,14 @@ export default function TechNews({ searchQuery = '' }) {
   const [visibleCount, setVisibleCount] = useState(30);
   const [sortBy, setSortBy] = useState('latest'); // latest, oldest, title-asc, title-desc
 
+  // Strip HTML tags from text for search
+  const stripHTML = (html) => {
+    if (!html) return '';
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    return temp.textContent || temp.innerText || '';
+  };
+
   // Calculate relevance score for search results
   const calculateRelevanceScore = (article, query) => {
     if (!query) return 0;
@@ -34,12 +42,12 @@ export default function TechNews({ searchQuery = '' }) {
       score += 5;
     }
     
-    // Content matches (weight: 2)
-    const content = (article.content || '').toLowerCase();
-    if (content.includes(queryLower)) {
+    // Content matches (weight: 2) - strip HTML first
+    const contentText = stripHTML(article.content || '').toLowerCase();
+    if (contentText.includes(queryLower)) {
       score += 2;
       // Count multiple occurrences in content
-      const matches = (content.match(new RegExp(queryLower, 'g')) || []).length;
+      const matches = (contentText.match(new RegExp(queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
       score += Math.min(matches - 1, 5); // Max 5 bonus points for multiple matches
     }
     
