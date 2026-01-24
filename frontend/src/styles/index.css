@@ -13829,14 +13829,31 @@ body {
   padding: 0;
 }
 
-.tech-news-content .language-json,
-.tech-news-content .language-javascript,
-.tech-news-content .language-python,
-.tech-news-content .language-bash {
+.tech-news-content code.language-json,
+.tech-news-content code.language-javascript,
+.tech-news-content code.language-python,
+.tech-news-content code.language-bash,
+.tech-news-content code[class*="language-"],
+.tech-news-content pre code.language-json,
+.tech-news-content pre code.language-javascript,
+.tech-news-content pre code.language-python,
+.tech-news-content pre code.language-bash,
+.tech-news-content pre code[class*="language-"],
+.tech-news-code-block code.language-json,
+.tech-news-code-block code.language-javascript,
+.tech-news-code-block code.language-python,
+.tech-news-code-block code.language-bash,
+.tech-news-code-block code[class*="language-"] {
   position: relative;
+  display: block;
+  white-space: pre;
+  overflow-x: auto;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 
-.tech-news-content .language-json::before {
+.tech-news-content code.language-json::before,
+.tech-news-content pre code.language-json::before,
+.tech-news-code-block code.language-json::before {
   content: 'JSON';
   position: absolute;
   top: 8px;
@@ -13847,9 +13864,12 @@ body {
   border-radius: 4px;
   font-size: 0.75em;
   font-weight: 600;
+  z-index: 1;
 }
 
-.tech-news-content .language-javascript::before {
+.tech-news-content code.language-javascript::before,
+.tech-news-content pre code.language-javascript::before,
+.tech-news-code-block code.language-javascript::before {
   content: 'JavaScript';
   position: absolute;
   top: 8px;
@@ -13860,9 +13880,12 @@ body {
   border-radius: 4px;
   font-size: 0.75em;
   font-weight: 600;
+  z-index: 1;
 }
 
-.tech-news-content .language-python::before {
+.tech-news-content code.language-python::before,
+.tech-news-content pre code.language-python::before,
+.tech-news-code-block code.language-python::before {
   content: 'Python';
   position: absolute;
   top: 8px;
@@ -13873,6 +13896,33 @@ body {
   border-radius: 4px;
   font-size: 0.75em;
   font-weight: 600;
+  z-index: 1;
+}
+
+.tech-news-content code.language-bash::before,
+.tech-news-content pre code.language-bash::before,
+.tech-news-code-block code.language-bash::before {
+  content: 'Bash';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(139, 92, 246, 0.3);
+  color: #8b5cf6;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75em;
+  font-weight: 600;
+  z-index: 1;
+}
+
+/* Ensure all code blocks with language classes are visible */
+.tech-news-content code[class*="language-"],
+.tech-news-content pre code[class*="language-"],
+.tech-news-code-block code[class*="language-"] {
+  display: block !important;
+  white-space: pre !important;
+  overflow-x: auto !important;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
 }
 
 .tech-news-content img {
