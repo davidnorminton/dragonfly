@@ -390,6 +390,11 @@ class WebScraperService:
                     output_format='html',
                     target_language='en'
                 )
+                
+                # Post-process content to ensure images are in correct positions with absolute URLs
+                if content:
+                    content = self._fix_image_urls(content, url)
+                    
             except Exception as e:
                 logger.warning(f"Trafilatura extraction failed for {url}: {e}")
                 # Fallback to simple text extraction
@@ -457,6 +462,45 @@ class WebScraperService:
         except Exception as e:
             logger.error(f"Error scraping article {url}: {e}", exc_info=True)
             return None
+    
+    def _fix_image_urls(self, html_content: str, base_url: str) -> str:
+        """
+        Fix image URLs in HTML content to be absolute and ensure they're properly positioned.
+        
+        Args:
+            html_content: HTML content with potentially relative image URLs
+            base_url: Base URL of the article for converting relative URLs
+            
+        Returns:
+            HTML content with absolute image URLs
+        """
+        if not html_content:
+            return html_content
+            
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Find all images and convert relative URLs to absolute
+            for img in soup.find_all('img'):
+                src = img.get('src')
+                if src:
+                    # Convert relative URLs to absolute
+                    absolute_url = urljoin(base_url, src)
+                    img['src'] = absolute_url
+                    
+                    # Ensure images have proper attributes for display
+                    if not img.get('alt'):
+                        img['alt'] = 'Article image'
+                    if not img.get('loading'):
+                        img['loading'] = 'lazy'
+                    if not img.get('style'):
+                        img['style'] = 'max-width: 100%; height: auto;'
+            
+            return str(soup)
+            
+        except Exception as e:
+            logger.warning(f"Error fixing image URLs: {e}")
+            return html_content
     
     # Old extraction methods removed - now using Trafilatura for better accuracy
     # Keeping _extract_main_image as fallback for images
