@@ -84,6 +84,15 @@ export default function TechNews() {
     }
   };
 
+  const getFaviconUrl = (url) => {
+    try {
+      const domain = new URL(url).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+    } catch {
+      return null;
+    }
+  };
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -200,19 +209,43 @@ export default function TechNews() {
                     }
                   }}
                 >
-                  <h4 style={{
-                    margin: '0 0 8px 0',
-                    fontSize: '0.95em',
-                    fontWeight: '600',
-                    color: '#fff',
-                    lineHeight: '1.4',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden'
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    marginBottom: '8px'
                   }}>
-                    {article.title || 'Untitled Article'}
-                  </h4>
+                    {getFaviconUrl(article.url) && (
+                      <img
+                        src={getFaviconUrl(article.url)}
+                        alt=""
+                        style={{
+                          width: '16px',
+                          height: '16px',
+                          flexShrink: 0,
+                          marginTop: '2px',
+                          opacity: 0.7
+                        }}
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <h4 style={{
+                      margin: 0,
+                      fontSize: '0.95em',
+                      fontWeight: '600',
+                      color: '#fff',
+                      lineHeight: '1.4',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      flex: 1
+                    }}>
+                      {article.title || 'Untitled Article'}
+                    </h4>
+                  </div>
                   {article.summary && (
                     <p style={{
                       margin: '0 0 8px 0',
