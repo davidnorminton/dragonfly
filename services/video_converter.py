@@ -163,13 +163,23 @@ class VideoConverter:
         if recursive:
             # Recursively scan subdirectories for TV shows
             for item in directory.rglob('*'):
-                if item.is_file() and item.suffix.lower() in SOURCE_FORMATS:
-                    files.append(item)
+                try:
+                    # Skip if we can't access the file (I/O errors, broken symlinks, etc.)
+                    if item.is_file() and item.suffix.lower() in SOURCE_FORMATS:
+                        files.append(item)
+                except (OSError, PermissionError) as e:
+                    logger.warning(f"  ⚠️  Skipping inaccessible file: {item} - {e}")
+                    continue
         else:
             # Only scan top level for movies
             for item in directory.iterdir():
-                if item.is_file() and item.suffix.lower() in SOURCE_FORMATS:
-                    files.append(item)
+                try:
+                    # Skip if we can't access the file (I/O errors, broken symlinks, etc.)
+                    if item.is_file() and item.suffix.lower() in SOURCE_FORMATS:
+                        files.append(item)
+                except (OSError, PermissionError) as e:
+                    logger.warning(f"  ⚠️  Skipping inaccessible file: {item} - {e}")
+                    continue
         
         return files
     
@@ -310,23 +320,29 @@ class VideoConverter:
         total_source_size = 0
         
         for file_path in files_to_convert:
-            file_info = {
-                "name": file_path.name,
-                "path": str(file_path),
-                "format": file_path.suffix.upper(),
-                "size": file_path.stat().st_size,
-                "size_mb": round(file_path.stat().st_size / (1024 * 1024), 2)
-            }
-            convert_list.append(file_info)
-            total_source_size += file_path.stat().st_size
-            
-            # This file will be deleted after conversion
-            delete_list.append({
-                "name": file_path.name,
-                "path": str(file_path),
-                "format": file_path.suffix.upper(),
-                "size_mb": file_info["size_mb"]
-            })
+            try:
+                # Get file size, skip if we can't access it
+                file_size = file_path.stat().st_size
+                file_info = {
+                    "name": file_path.name,
+                    "path": str(file_path),
+                    "format": file_path.suffix.upper(),
+                    "size": file_size,
+                    "size_mb": round(file_size / (1024 * 1024), 2)
+                }
+                convert_list.append(file_info)
+                total_source_size += file_size
+                
+                # This file will be deleted after conversion
+                delete_list.append({
+                    "name": file_path.name,
+                    "path": str(file_path),
+                    "format": file_path.suffix.upper(),
+                    "size_mb": file_info["size_mb"]
+                })
+            except (OSError, PermissionError) as e:
+                logger.warning(f"  ⚠️  Skipping file (cannot access): {file_path} - {e}")
+                continue
         
         logger.info(f"  ✓ Found {len(convert_list)} files to convert")
         logger.info(f"  ✓ Total size: {total_source_size / (1024**3):.2f} GB")
