@@ -199,7 +199,7 @@ export default function TechNews({ searchQuery = '' }) {
     }
 
     return sorted;
-  }, [articles, searchQuery, sortBy]);
+  }, [articles, searchQuery, sortBy, selectedDomain]);
 
   useEffect(() => {
     loadArticles();
