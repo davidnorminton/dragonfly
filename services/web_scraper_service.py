@@ -365,21 +365,44 @@ class WebScraperService:
             
             html_content = response.text
             
-            # Use Trafilatura to extract content and metadata
-            # Extract metadata first
-            metadata = trafilatura.extract_metadata(html_content)
+            # Use Trafilatura to extract content and metadata with error handling
+            metadata = None
+            content = None
             
-            # Extract main content as HTML to preserve formatting
-            content = trafilatura.extract(
-                html_content,
-                include_comments=False,
-                include_tables=True,
-                include_images=True,
-                include_formatting=True,
-                no_fallback=False,
-                output_format='html',
-                target_language='en'
-            )
+            try:
+                # Extract metadata first
+                metadata = trafilatura.extract_metadata(html_content)
+            except Exception as e:
+                logger.warning(f"Failed to extract metadata from {url}: {e}")
+            
+            try:
+                # Extract main content as HTML to preserve formatting
+                content = trafilatura.extract(
+                    html_content,
+                    include_comments=False,
+                    include_tables=True,
+                    include_images=True,
+                    include_formatting=True,
+                    no_fallback=False,
+                    output_format='html',
+                    target_language='en'
+                )
+            except Exception as e:
+                logger.warning(f"Trafilatura extraction failed for {url}: {e}")
+                # Fallback to simple text extraction
+                try:
+                    content = trafilatura.extract(
+                        html_content,
+                        include_formatting=False,
+                        no_fallback=False,
+                        output_format='txt'
+                    )
+                    if content:
+                        # Wrap plain text in basic HTML
+                        content = f"<p>{content.replace(chr(10), '</p><p>')}</p>"
+                except Exception as e2:
+                    logger.warning(f"Fallback extraction also failed for {url}: {e2}")
+                    content = None
             
             # Build article data from Trafilatura extraction
             article_data = {
@@ -401,8 +424,12 @@ class WebScraperService:
             
             # Fallback to BeautifulSoup for image if Trafilatura didn't find one
             if not article_data['image_url']:
-                soup = BeautifulSoup(html_content, 'html.parser')
-                article_data['image_url'] = self._extract_main_image(soup, url)
+                try:
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    article_data['image_url'] = self._extract_main_image(soup, url)
+                except Exception as e:
+                    logger.warning(f"Failed to extract image from {url}: {e}")
+                    article_data['image_url'] = None
             
             # Download and save the main image
             if article_data['image_url'] and self.images_directory:
@@ -415,6 +442,11 @@ class WebScraperService:
             # Validate we got meaningful content
             if not content or len(content.strip()) < 100:
                 logger.warning(f"Article content too short or empty: {url}")
+                return None
+            
+            # Also ensure we have at least a title or summary
+            if not article_data.get('title') and not article_data.get('summary'):
+                logger.warning(f"Article missing both title and summary: {url}")
                 return None
             
             return article_data
