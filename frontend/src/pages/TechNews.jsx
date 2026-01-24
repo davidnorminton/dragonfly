@@ -9,30 +9,70 @@ export default function TechNews({ searchQuery = '' }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
+  const [sortBy, setSortBy] = useState('latest'); // latest, oldest, title-asc, title-desc
 
-  // Filter articles based on search query
-  const filteredArticles = useMemo(() => {
-    if (!searchQuery.trim()) return articles;
-    
-    const query = searchQuery.toLowerCase();
-    return articles.filter(article => {
-      const titleMatch = article.title?.toLowerCase().includes(query);
-      const summaryMatch = article.summary?.toLowerCase().includes(query);
-      const contentMatch = article.content?.toLowerCase().includes(query);
-      const authorMatch = article.author?.toLowerCase().includes(query);
-      
-      return titleMatch || summaryMatch || contentMatch || authorMatch;
-    });
-  }, [articles, searchQuery]);
+  // Filter and sort articles
+  const filteredAndSortedArticles = useMemo(() => {
+    // First filter
+    let filtered = articles;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = articles.filter(article => {
+        const titleMatch = article.title?.toLowerCase().includes(query);
+        const summaryMatch = article.summary?.toLowerCase().includes(query);
+        const contentMatch = article.content?.toLowerCase().includes(query);
+        const authorMatch = article.author?.toLowerCase().includes(query);
+        
+        return titleMatch || summaryMatch || contentMatch || authorMatch;
+      });
+    }
+
+    // Then sort
+    const sorted = [...filtered];
+    switch (sortBy) {
+      case 'latest':
+        sorted.sort((a, b) => {
+          const dateA = new Date(a.published_date || a.scraped_at);
+          const dateB = new Date(b.published_date || b.scraped_at);
+          return dateB - dateA; // Newest first
+        });
+        break;
+      case 'oldest':
+        sorted.sort((a, b) => {
+          const dateA = new Date(a.published_date || a.scraped_at);
+          const dateB = new Date(b.published_date || b.scraped_at);
+          return dateA - dateB; // Oldest first
+        });
+        break;
+      case 'title-asc':
+        sorted.sort((a, b) => {
+          const titleA = (a.title || '').toLowerCase();
+          const titleB = (b.title || '').toLowerCase();
+          return titleA.localeCompare(titleB);
+        });
+        break;
+      case 'title-desc':
+        sorted.sort((a, b) => {
+          const titleA = (a.title || '').toLowerCase();
+          const titleB = (b.title || '').toLowerCase();
+          return titleB.localeCompare(titleA);
+        });
+        break;
+      default:
+        break;
+    }
+
+    return sorted;
+  }, [articles, searchQuery, sortBy]);
 
   useEffect(() => {
     loadArticles();
   }, []);
 
-  // Reset visible count when articles or search query change
+  // Reset visible count when articles, search query, or sort order change
   useEffect(() => {
     setVisibleCount(30);
-  }, [articles.length, searchQuery]);
+  }, [articles.length, searchQuery, sortBy]);
 
   const loadArticles = async () => {
     setLoading(true);
@@ -185,11 +225,37 @@ export default function TechNews({ searchQuery = '' }) {
         }}>
           <div style={{
             padding: '16px',
-            borderBottom: '1px solid rgba(255,255,255,0.1)',
-            fontWeight: '600',
-            color: '#fff'
+            borderBottom: '1px solid rgba(255,255,255,0.1)'
           }}>
-            Articles ({filteredArticles.length}{searchQuery ? ` of ${articles.length}` : ''})
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '12px'
+            }}>
+              <div style={{ fontWeight: '600', color: '#fff' }}>
+                Articles ({filteredAndSortedArticles.length}{searchQuery ? ` of ${articles.length}` : ''})
+              </div>
+            </div>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '6px',
+                color: '#fff',
+                fontSize: '0.85em',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="latest" style={{ background: '#1a1a1a' }}>Latest First</option>
+              <option value="oldest" style={{ background: '#1a1a1a' }}>Oldest First</option>
+              <option value="title-asc" style={{ background: '#1a1a1a' }}>Title (A-Z)</option>
+              <option value="title-desc" style={{ background: '#1a1a1a' }}>Title (Z-A)</option>
+            </select>
           </div>
           <div style={{
             flex: 1,
@@ -207,7 +273,7 @@ export default function TechNews({ searchQuery = '' }) {
                   Configure sources in Settings → Web Scraper, then click "Run Scraper" above.
                 </p>
               </div>
-            ) : filteredArticles.length === 0 ? (
+            ) : filteredAndSortedArticles.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
                 <p>No articles match your search.</p>
                 <p style={{ fontSize: '0.9em', marginTop: '8px' }}>
@@ -216,7 +282,7 @@ export default function TechNews({ searchQuery = '' }) {
               </div>
             ) : (
               <>
-              {filteredArticles.slice(0, visibleCount).map((article) => (
+              {filteredAndSortedArticles.slice(0, visibleCount).map((article) => (
                 <div
                   key={article.id}
                   style={{
@@ -324,7 +390,7 @@ export default function TechNews({ searchQuery = '' }) {
                       e.target.style.background = 'rgba(59, 130, 246, 0.2)';
                     }}
                   >
-                    Load More ({filteredArticles.length - visibleCount} remaining)
+                    Load More ({filteredAndSortedArticles.length - visibleCount} remaining)
                   </button>
                 </div>
               )}

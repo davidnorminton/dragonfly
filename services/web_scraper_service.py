@@ -144,16 +144,29 @@ class WebScraperService:
             results["articles_found"] = len(article_urls)
             logger.info(f"Found {len(article_urls)} article URLs on {source.url}")
             
-            # Scrape each article
-            for article_url in article_urls:
+            # Batch check for existing articles to reduce database queries
+            existing_urls_result = await session.execute(
+                select(ScrapedArticle.url).where(ScrapedArticle.url.in_(article_urls))
+            )
+            existing_urls = set(row[0] for row in existing_urls_result.fetchall())
+            
+            # Filter out existing articles
+            new_article_urls = [url for url in article_urls if url not in existing_urls]
+            skipped_count = len(article_urls) - len(new_article_urls)
+            
+            if skipped_count > 0:
+                logger.info(f"⏭️  Skipping {skipped_count} already scraped articles")
+            
+            if not new_article_urls:
+                logger.info(f"✓ All articles from {source.url} already scraped")
+                return results
+            
+            logger.info(f"📥 Scraping {len(new_article_urls)} new articles from {source.url}")
+            
+            # Scrape each new article
+            for idx, article_url in enumerate(new_article_urls, 1):
                 try:
-                    # Check if article already exists
-                    existing = await session.execute(
-                        select(ScrapedArticle).where(ScrapedArticle.url == article_url)
-                    )
-                    if existing.scalar_one_or_none():
-                        logger.debug(f"Article already scraped: {article_url}")
-                        continue
+                    logger.info(f"  [{idx}/{len(new_article_urls)}] Scraping: {article_url}")
                     
                     # Scrape the article
                     article_data = await self.scrape_article(article_url)
@@ -176,10 +189,12 @@ class WebScraperService:
                         session.add(article)
                         await session.commit()
                         results["articles_saved"] += 1
-                        logger.info(f"Saved article: {article_data.get('title', article_url)}")
+                        logger.info(f"  ✓ Saved: {article_data.get('title', article_url)[:80]}")
+                    else:
+                        logger.warning(f"  ⚠️  Failed to extract content: {article_url}")
                     
                 except Exception as e:
-                    logger.error(f"Error scraping article {article_url}: {e}")
+                    logger.error(f"  ❌ Error scraping {article_url}: {e}")
                     await session.rollback()
             
         except Exception as e:
