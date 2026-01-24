@@ -13,6 +13,10 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
   const [promptPresets, setPromptPresets] = useState([]);
   const [messageSearchSessions, setMessageSearchSessions] = useState([]); // Array of {session_id, snippets}
   const [techArticles, setTechArticles] = useState([]); // Tech news articles
+  const [techResultsVisible, setTechResultsVisible] = useState(20); // Number of tech results to show
+  const [musicResultsVisible, setMusicResultsVisible] = useState(20); // Number of music results to show
+  const [videoResultsVisible, setVideoResultsVisible] = useState(20); // Number of video results to show
+  const [chatResultsVisible, setChatResultsVisible] = useState(20); // Number of chat results to show
   const inputRef = useRef(null);
   const { currentTitle } = usePersonas();
 
@@ -95,6 +99,14 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
       onSearchChange(searchQuery);
     }
   }, [searchQuery, onSearchChange]);
+
+  // Reset visible counts when search query changes
+  useEffect(() => {
+    setTechResultsVisible(20);
+    setMusicResultsVisible(20);
+    setVideoResultsVisible(20);
+    setChatResultsVisible(20);
+  }, [searchQuery, activePage]);
 
   // Search messages when on chat page and query changes
   useEffect(() => {
@@ -269,7 +281,7 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
       });
     });
     
-    return results.slice(0, 20);
+    return results; // Return all results (no limit)
   }, [activePage, library, searchQuery, onClose]);
 
   // Search tech news articles
@@ -333,7 +345,7 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
         }
       }));
 
-    return filtered.slice(0, 20); // Limit to top 20 results
+    return filtered; // Return all results (no limit)
   }, [activePage, techArticles, searchQuery]);
 
   // Chat search results - combines title search and message content search
@@ -473,23 +485,23 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
       });
     }
     
-    return results.slice(0, 20);
+    return results; // Return all results (no limit)
   }, [activePage, library, searchQuery, onClose]);
 
-  // Combine results based on active page
+  // Combine results based on active page with lazy loading
   useEffect(() => {
     if (activePage === 'music') {
-      setResults(musicResults);
+      setResults(musicResults.slice(0, musicResultsVisible));
     } else if (activePage === 'chat') {
-      setResults(chatResults);
+      setResults(chatResults.slice(0, chatResultsVisible));
     } else if (activePage === 'videos') {
-      setResults(videoResults);
+      setResults(videoResults.slice(0, videoResultsVisible));
     } else if (activePage === 'tech-news') {
-      setResults(techResults);
+      setResults(techResults.slice(0, techResultsVisible));
     } else {
       setResults([]);
     }
-  }, [activePage, musicResults, chatResults, videoResults, techResults]);
+  }, [activePage, musicResults, chatResults, videoResults, techResults, techResultsVisible, musicResultsVisible, chatResultsVisible, videoResultsVisible]);
 
   const handleKeyDown = (e) => {
     // ESC key closing removed per user request
@@ -581,7 +593,32 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
           gap: '8px'
         }}>
           {searchQuery && (
-            <span>{results.length} result{results.length !== 1 ? 's' : ''}</span>
+            <span>
+              {(() => {
+                let totalResults = 0;
+                let visibleResults = 0;
+                
+                if (activePage === 'tech-news') {
+                  totalResults = techResults.length;
+                  visibleResults = techResultsVisible;
+                } else if (activePage === 'music') {
+                  totalResults = musicResults.length;
+                  visibleResults = musicResultsVisible;
+                } else if (activePage === 'videos') {
+                  totalResults = videoResults.length;
+                  visibleResults = videoResultsVisible;
+                } else if (activePage === 'chat') {
+                  totalResults = chatResults.length;
+                  visibleResults = chatResultsVisible;
+                } else {
+                  totalResults = results.length;
+                  visibleResults = results.length;
+                }
+                
+                const showingText = totalResults > visibleResults ? ` (showing ${visibleResults})` : '';
+                return `${totalResults} result${totalResults !== 1 ? 's' : ''}${showingText}`;
+              })()}
+            </span>
           )}
         </div>
       </div>
@@ -741,6 +778,80 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
                 </div>
               </div>
             ))}
+            
+            {/* Load More Buttons for All Page Types */}
+            {(() => {
+              let shouldShowButton = false;
+              let totalResults = 0;
+              let visibleResults = 0;
+              let icon = '📄';
+              let onLoadMore = () => {};
+              
+              if (activePage === 'tech-news' && techResults.length > techResultsVisible) {
+                shouldShowButton = true;
+                totalResults = techResults.length;
+                visibleResults = techResultsVisible;
+                icon = '📰';
+                onLoadMore = () => setTechResultsVisible(prev => Math.min(prev + 20, techResults.length));
+              } else if (activePage === 'music' && musicResults.length > musicResultsVisible) {
+                shouldShowButton = true;
+                totalResults = musicResults.length;
+                visibleResults = musicResultsVisible;
+                icon = '🎵';
+                onLoadMore = () => setMusicResultsVisible(prev => Math.min(prev + 20, musicResults.length));
+              } else if (activePage === 'videos' && videoResults.length > videoResultsVisible) {
+                shouldShowButton = true;
+                totalResults = videoResults.length;
+                visibleResults = videoResultsVisible;
+                icon = '🎬';
+                onLoadMore = () => setVideoResultsVisible(prev => Math.min(prev + 20, videoResults.length));
+              } else if (activePage === 'chat' && chatResults.length > chatResultsVisible) {
+                shouldShowButton = true;
+                totalResults = chatResults.length;
+                visibleResults = chatResultsVisible;
+                icon = '💬';
+                onLoadMore = () => setChatResultsVisible(prev => Math.min(prev + 20, chatResults.length));
+              }
+              
+              if (!shouldShowButton) return null;
+              
+              return (
+                <div style={{
+                  padding: '16px 20px',
+                  textAlign: 'center'
+                }}>
+                  <button
+                    onClick={onLoadMore}
+                    style={{
+                      padding: '12px 24px',
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      borderRadius: '8px',
+                      color: '#60a5fa',
+                      cursor: 'pointer',
+                      fontSize: '0.9em',
+                      fontWeight: '500',
+                      transition: 'all 0.2s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      margin: '0 auto'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.background = 'rgba(59, 130, 246, 0.25)';
+                      e.target.style.borderColor = 'rgba(59, 130, 246, 0.5)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.background = 'rgba(59, 130, 246, 0.15)';
+                      e.target.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+                    }}
+                  >
+                    <span>{icon}</span>
+                    Load More ({totalResults - visibleResults} remaining)
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
