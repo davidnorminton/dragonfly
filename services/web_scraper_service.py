@@ -188,13 +188,16 @@ class WebScraperService:
                         session.add(article)
                         await session.flush()  # Get article.id before creating content
                         
+                        # Get the article ID after flush to avoid repeated access
+                        article_id = article.id
+                        
                         # Create separate content records if content exists
                         content = article_data.get('content')
                         if content:
                             # Create HTML content record
                             html_content = ArticleHtmlContent(
-                                article_id=article.id,
-                                raw_html=content,
+                                article_id=article_id,
+                                content=content,
                                 sanitized_content=content,  # Could add sanitization here
                                 content_type='text/html',
                                 content_hash=hashlib.md5(content.encode()).hexdigest()
@@ -207,8 +210,8 @@ class WebScraperService:
                             
                             if plain_text:
                                 text_content = ArticleTextContent(
-                                    article_id=article.id,
-                                    plain_text=plain_text,
+                                    article_id=article_id,
+                                    content=plain_text,
                                     word_count=len(plain_text.split()),
                                     character_count=len(plain_text),
                                     content_hash=hashlib.md5(plain_text.encode()).hexdigest()
