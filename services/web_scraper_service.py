@@ -341,14 +341,15 @@ class WebScraperService:
             # Extract metadata first
             metadata = trafilatura.extract_metadata(html_content)
             
-            # Extract main content
+            # Extract main content as HTML to preserve formatting
             content = trafilatura.extract(
                 html_content,
                 include_comments=False,
                 include_tables=True,
-                include_images=False,
+                include_images=True,
+                include_formatting=True,
                 no_fallback=False,
-                output_format='txt',
+                output_format='html',
                 target_language='en'
             )
             

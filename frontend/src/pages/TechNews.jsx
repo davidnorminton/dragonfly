@@ -154,6 +154,59 @@ export default function TechNews({ searchQuery = '' }) {
     }
   };
 
+  // Basic HTML sanitizer to allow safe tags
+  const sanitizeHTML = (html) => {
+    if (!html) return '';
+    
+    // Create a temporary div to parse HTML
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    
+    // Allow specific safe tags
+    const allowedTags = ['p', 'br', 'strong', 'em', 'b', 'i', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 
+                        'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'img', 'a', 'table', 'tr', 'td', 'th'];
+    
+    // Remove scripts and dangerous elements
+    const scripts = temp.querySelectorAll('script, iframe, object, embed');
+    scripts.forEach(el => el.remove());
+    
+    // Add target="_blank" to links
+    const links = temp.querySelectorAll('a[href]');
+    links.forEach(link => {
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
+    });
+    
+    // Ensure images have proper styling
+    const images = temp.querySelectorAll('img');
+    images.forEach(img => {
+      img.style.maxWidth = '100%';
+      img.style.height = 'auto';
+      img.style.borderRadius = '8px';
+      img.style.margin = '16px 0';
+    });
+    
+    // Style code blocks
+    const codeBlocks = temp.querySelectorAll('pre, code');
+    codeBlocks.forEach(code => {
+      if (code.tagName === 'PRE') {
+        code.style.background = 'rgba(255,255,255,0.05)';
+        code.style.padding = '16px';
+        code.style.borderRadius = '8px';
+        code.style.overflow = 'auto';
+        code.style.fontSize = '0.9em';
+        code.style.lineHeight = '1.5';
+      } else if (code.tagName === 'CODE') {
+        code.style.background = 'rgba(255,255,255,0.1)';
+        code.style.padding = '2px 6px';
+        code.style.borderRadius = '4px';
+        code.style.fontSize = '0.9em';
+      }
+    });
+    
+    return temp.innerHTML;
+  };
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -501,15 +554,18 @@ export default function TechNews({ searchQuery = '' }) {
                     <strong style={{ color: '#fff' }}>Summary:</strong> {selectedArticle.summary}
                   </div>
                 )}
-                <div style={{
-                  fontSize: '1em',
-                  lineHeight: '1.8',
-                  color: 'rgba(255,255,255,0.9)',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word'
-                }}>
-                  {selectedArticle.content || 'No content available'}
-                </div>
+                <div 
+                  className="tech-news-content"
+                  style={{
+                    fontSize: '1em',
+                    lineHeight: '1.8',
+                    color: 'rgba(255,255,255,0.9)',
+                    wordWrap: 'break-word'
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeHTML(selectedArticle.content) || '<p style="color: rgba(255,255,255,0.5);">No content available</p>'
+                  }}
+                />
               </div>
             </>
           ) : (
