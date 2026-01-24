@@ -11,55 +11,109 @@ export default function TechNews({ searchQuery = '' }) {
   const [visibleCount, setVisibleCount] = useState(30);
   const [sortBy, setSortBy] = useState('latest'); // latest, oldest, title-asc, title-desc
 
-  // Filter and sort articles
+  // Calculate relevance score for search results
+  const calculateRelevanceScore = (article, query) => {
+    if (!query) return 0;
+    
+    const queryLower = query.toLowerCase();
+    let score = 0;
+    
+    // Title matches are most important (weight: 10)
+    const title = (article.title || '').toLowerCase();
+    if (title.includes(queryLower)) {
+      score += 10;
+      // Bonus for exact match or match at beginning
+      if (title === queryLower) score += 15;
+      else if (title.startsWith(queryLower)) score += 10;
+      else if (title.endsWith(queryLower)) score += 5;
+    }
+    
+    // Summary matches (weight: 5)
+    const summary = (article.summary || '').toLowerCase();
+    if (summary.includes(queryLower)) {
+      score += 5;
+    }
+    
+    // Content matches (weight: 2)
+    const content = (article.content || '').toLowerCase();
+    if (content.includes(queryLower)) {
+      score += 2;
+      // Count multiple occurrences in content
+      const matches = (content.match(new RegExp(queryLower, 'g')) || []).length;
+      score += Math.min(matches - 1, 5); // Max 5 bonus points for multiple matches
+    }
+    
+    // Author matches (weight: 3)
+    const author = (article.author || '').toLowerCase();
+    if (author.includes(queryLower)) {
+      score += 3;
+    }
+    
+    return score;
+  };
+
+  // Filter and sort articles with relevance scoring
   const filteredAndSortedArticles = useMemo(() => {
-    // First filter
     let filtered = articles;
+    
+    // Filter and calculate relevance if searching
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = articles.filter(article => {
-        const titleMatch = article.title?.toLowerCase().includes(query);
-        const summaryMatch = article.summary?.toLowerCase().includes(query);
-        const contentMatch = article.content?.toLowerCase().includes(query);
-        const authorMatch = article.author?.toLowerCase().includes(query);
-        
-        return titleMatch || summaryMatch || contentMatch || authorMatch;
-      });
+      filtered = articles
+        .map(article => ({
+          ...article,
+          _relevanceScore: calculateRelevanceScore(article, query)
+        }))
+        .filter(article => article._relevanceScore > 0);
     }
 
-    // Then sort
+    // Sort based on current sort option or search relevance
     const sorted = [...filtered];
-    switch (sortBy) {
-      case 'latest':
-        sorted.sort((a, b) => {
-          const dateA = new Date(a.published_date || a.scraped_at);
-          const dateB = new Date(b.published_date || b.scraped_at);
-          return dateB - dateA; // Newest first
-        });
-        break;
-      case 'oldest':
-        sorted.sort((a, b) => {
-          const dateA = new Date(a.published_date || a.scraped_at);
-          const dateB = new Date(b.published_date || b.scraped_at);
-          return dateA - dateB; // Oldest first
-        });
-        break;
-      case 'title-asc':
-        sorted.sort((a, b) => {
-          const titleA = (a.title || '').toLowerCase();
-          const titleB = (b.title || '').toLowerCase();
-          return titleA.localeCompare(titleB);
-        });
-        break;
-      case 'title-desc':
-        sorted.sort((a, b) => {
-          const titleA = (a.title || '').toLowerCase();
-          const titleB = (b.title || '').toLowerCase();
-          return titleB.localeCompare(titleA);
-        });
-        break;
-      default:
-        break;
+    if (searchQuery.trim()) {
+      // When searching, primary sort by relevance, secondary by date
+      sorted.sort((a, b) => {
+        const relevanceDiff = (b._relevanceScore || 0) - (a._relevanceScore || 0);
+        if (relevanceDiff !== 0) return relevanceDiff;
+        
+        // If relevance is equal, sort by date (newest first)
+        const dateA = new Date(a.published_date || a.scraped_at);
+        const dateB = new Date(b.published_date || b.scraped_at);
+        return dateB - dateA;
+      });
+    } else {
+      // When not searching, use selected sort option
+      switch (sortBy) {
+        case 'latest':
+          sorted.sort((a, b) => {
+            const dateA = new Date(a.published_date || a.scraped_at);
+            const dateB = new Date(b.published_date || b.scraped_at);
+            return dateB - dateA; // Newest first
+          });
+          break;
+        case 'oldest':
+          sorted.sort((a, b) => {
+            const dateA = new Date(a.published_date || a.scraped_at);
+            const dateB = new Date(b.published_date || b.scraped_at);
+            return dateA - dateB; // Oldest first
+          });
+          break;
+        case 'title-asc':
+          sorted.sort((a, b) => {
+            const titleA = (a.title || '').toLowerCase();
+            const titleB = (b.title || '').toLowerCase();
+            return titleA.localeCompare(titleB);
+          });
+          break;
+        case 'title-desc':
+          sorted.sort((a, b) => {
+            const titleA = (a.title || '').toLowerCase();
+            const titleB = (b.title || '').toLowerCase();
+            return titleB.localeCompare(titleA);
+          });
+          break;
+        default:
+          break;
+      }
     }
 
     return sorted;
