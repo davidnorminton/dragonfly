@@ -122,6 +122,7 @@ function App() {
   const [musicSearchQuery, setMusicSearchQuery] = useState('');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [videoSearchQuery, setVideoSearchQuery] = useState('');
+  const [techNewsSearchQuery, setTechNewsSearchQuery] = useState('');
   const [musicSearchResults, setMusicSearchResults] = useState([]);
   const [chatSearchResults, setChatSearchResults] = useState([]);
   const [videoSearchResults, setVideoSearchResults] = useState([]);
@@ -206,7 +207,9 @@ function App() {
       ) : activePage === 'news' ? (
         <NewsPage />
       ) : activePage === 'tech-news' ? (
-        <TechNews />
+        <TechNews 
+          searchQuery={techNewsSearchQuery}
+        />
       ) : activePage === 'stories' ? (
         <StoriesPage
           onNavigate={(page, data) => {
@@ -513,7 +516,7 @@ function App() {
         </div>
       )}
       {/* Search Overlay */}
-      {searchOverlayOpen && (activePage === 'chat' || activePage === 'music' || activePage === 'videos') && (
+      {searchOverlayOpen && (activePage === 'chat' || activePage === 'music' || activePage === 'videos' || activePage === 'tech-news') && (
         <SearchOverlay
           activePage={activePage}
           onClose={() => {
@@ -522,16 +525,19 @@ function App() {
             if (activePage === 'music') setMusicSearchQuery('');
             if (activePage === 'chat') setChatSearchQuery('');
             if (activePage === 'videos') setVideoSearchQuery('');
+            if (activePage === 'tech-news') setTechNewsSearchQuery('');
           }}
           searchQuery={
             activePage === 'music' ? musicSearchQuery :
             activePage === 'chat' ? chatSearchQuery :
-            activePage === 'videos' ? videoSearchQuery : ''
+            activePage === 'videos' ? videoSearchQuery :
+            activePage === 'tech-news' ? techNewsSearchQuery : ''
           }
           onSearchChange={(query) => {
             if (activePage === 'music') setMusicSearchQuery(query);
             if (activePage === 'chat') setChatSearchQuery(query);
             if (activePage === 'videos') setVideoSearchQuery(query);
+            if (activePage === 'tech-news') setTechNewsSearchQuery(query);
           }}
           selectedUser={selectedUser}
         />

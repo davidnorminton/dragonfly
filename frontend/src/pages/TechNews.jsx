@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
-export default function TechNews() {
+export default function TechNews({ searchQuery = '' }) {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [scraping, setScraping] = useState(false);
@@ -10,14 +10,29 @@ export default function TechNews() {
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
 
+  // Filter articles based on search query
+  const filteredArticles = useMemo(() => {
+    if (!searchQuery.trim()) return articles;
+    
+    const query = searchQuery.toLowerCase();
+    return articles.filter(article => {
+      const titleMatch = article.title?.toLowerCase().includes(query);
+      const summaryMatch = article.summary?.toLowerCase().includes(query);
+      const contentMatch = article.content?.toLowerCase().includes(query);
+      const authorMatch = article.author?.toLowerCase().includes(query);
+      
+      return titleMatch || summaryMatch || contentMatch || authorMatch;
+    });
+  }, [articles, searchQuery]);
+
   useEffect(() => {
     loadArticles();
   }, []);
 
-  // Reset visible count when articles change
+  // Reset visible count when articles or search query change
   useEffect(() => {
     setVisibleCount(30);
-  }, [articles.length]);
+  }, [articles.length, searchQuery]);
 
   const loadArticles = async () => {
     setLoading(true);
@@ -174,7 +189,7 @@ export default function TechNews() {
             fontWeight: '600',
             color: '#fff'
           }}>
-            Articles ({articles.length})
+            Articles ({filteredArticles.length}{searchQuery ? ` of ${articles.length}` : ''})
           </div>
           <div style={{
             flex: 1,
@@ -192,9 +207,16 @@ export default function TechNews() {
                   Configure sources in Settings → Web Scraper, then click "Run Scraper" above.
                 </p>
               </div>
+            ) : filteredArticles.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
+                <p>No articles match your search.</p>
+                <p style={{ fontSize: '0.9em', marginTop: '8px' }}>
+                  Try a different search term.
+                </p>
+              </div>
             ) : (
               <>
-              {articles.slice(0, visibleCount).map((article) => (
+              {filteredArticles.slice(0, visibleCount).map((article) => (
                 <div
                   key={article.id}
                   style={{
@@ -277,7 +299,7 @@ export default function TechNews() {
                   </div>
                 </div>
               ))}
-              {visibleCount < articles.length && (
+              {visibleCount < filteredArticles.length && (
                 <div style={{
                   padding: '16px',
                   textAlign: 'center'
@@ -302,7 +324,7 @@ export default function TechNews() {
                       e.target.style.background = 'rgba(59, 130, 246, 0.2)';
                     }}
                   >
-                    Load More ({articles.length - visibleCount} remaining)
+                    Load More ({filteredArticles.length - visibleCount} remaining)
                   </button>
                 </div>
               )}
