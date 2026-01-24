@@ -223,10 +223,21 @@ export default function TechNews({ searchQuery = '' }) {
       }
     };
     
+    // Listen for scraper completion to reload articles
+    const handleScraperCompleted = (event) => {
+      const { articlesSaved } = event.detail;
+      if (articlesSaved > 0) {
+        console.log(`🔄 Reloading articles after scraper saved ${articlesSaved} new articles`);
+        loadArticles();
+      }
+    };
+    
     window.addEventListener('techNewsSelectArticle', handleTechNewsSelect);
+    window.addEventListener('scraperCompleted', handleScraperCompleted);
     
     return () => {
       window.removeEventListener('techNewsSelectArticle', handleTechNewsSelect);
+      window.removeEventListener('scraperCompleted', handleScraperCompleted);
     };
   }, []);
 
@@ -269,9 +280,10 @@ export default function TechNews({ searchQuery = '' }) {
   const loadArticles = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/scraper/articles?limit=200');
+      const response = await fetch('/api/scraper/articles?limit=500');
       const result = await response.json();
       if (result.success) {
+        console.log(`📰 Loaded ${result.articles?.length || 0} articles (total: ${result.total})`);
         setArticles(result.articles || []);
       } else {
         setMessage(`Error loading articles: ${result.error}`);

@@ -2583,6 +2583,10 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                         if (result.success) {
                           setScraperMessage(`✓ ${result.message}`);
                           loadScraperSources();
+                          // Notify Tech News page to reload articles
+                          window.dispatchEvent(new CustomEvent('scraperCompleted', { 
+                            detail: { articlesSaved: result.results?.articles_saved || 0 }
+                          }));
                         } else {
                           setScraperMessage(`✗ ${result.error || 'Scraping failed'}`);
                         }
