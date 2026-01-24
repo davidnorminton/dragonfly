@@ -561,14 +561,14 @@ export default function TechNews({ searchQuery = '' }) {
       {/* Main Content Area */}
       <div style={{ 
         position: 'relative',
-        height: 'calc(100vh - 180px)',
-        overflow: 'hidden'
+        height: 'calc(100vh - 180px)'
       }}>
         {/* Article Cards Grid */}
         <div style={{
           height: '100%',
           overflowY: 'auto',
           paddingRight: selectedArticle ? '70%' : '0',
+          paddingBottom: '60px',
           transition: 'padding-right 0.5s ease'
         }}>
           {loading ? (
@@ -623,7 +623,7 @@ export default function TechNews({ searchQuery = '' }) {
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
                 gap: '24px',
-                padding: '0 24px 24px 0'
+                padding: '24px 24px 24px 24px'
               }}>
                 {filteredAndSortedArticles.slice(0, visibleCount).map((article) => (
                   <div
@@ -773,8 +773,9 @@ export default function TechNews({ searchQuery = '' }) {
               {/* Load More Button */}
               {visibleCount < filteredAndSortedArticles.length && (
                 <div style={{
-                  padding: '40px 0',
-                  textAlign: 'center'
+                  padding: '40px 24px 80px 24px',
+                  textAlign: 'center',
+                  marginTop: '20px'
                 }}>
                   <button
                     onClick={() => setVisibleCount(prev => prev + 30)}
