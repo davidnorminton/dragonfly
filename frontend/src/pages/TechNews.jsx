@@ -508,7 +508,8 @@ export default function TechNews({ searchQuery = '' }) {
           <div style={{
             flex: 1,
             overflowY: 'auto',
-            overflowX: 'hidden'
+            overflowX: 'hidden',
+            padding: '8px 0'
           }}>
             {loading ? (
               <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)' }}>
@@ -534,29 +535,38 @@ export default function TechNews({ searchQuery = '' }) {
                 <div
                   key={article.id}
                   style={{
-                    padding: '16px',
-                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    padding: '24px 20px',
+                    marginBottom: '8px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255,255,255,0.08)',
                     cursor: 'pointer',
-                    background: selectedArticle?.id === article.id ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                    transition: 'background 0.2s'
+                    background: selectedArticle?.id === article.id ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255,255,255,0.02)',
+                    transition: 'all 0.3s ease',
+                    boxShadow: selectedArticle?.id === article.id ? '0 4px 12px rgba(59, 130, 246, 0.25)' : 'none'
                   }}
                   onClick={() => loadArticleDetails(article.id)}
                   onMouseEnter={(e) => {
                     if (selectedArticle?.id !== article.id) {
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.3)';
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (selectedArticle?.id !== article.id) {
-                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = 'none';
                     }
                   }}
                 >
                   <div style={{
                     display: 'flex',
                     alignItems: 'flex-start',
-                    gap: '8px',
-                    marginBottom: '8px'
+                    gap: '12px',
+                    marginBottom: '16px'
                   }}>
                     {getFaviconUrl(article.url) && (
                       <img
@@ -575,11 +585,11 @@ export default function TechNews({ searchQuery = '' }) {
                       />
                     )}
                     <h4 style={{
-                      margin: 0,
-                      fontSize: '0.95em',
+                      margin: '0 0 12px 0',
+                      fontSize: '1.1em',
                       fontWeight: '600',
                       color: '#fff',
-                      lineHeight: '1.4',
+                      lineHeight: '1.5',
                       display: '-webkit-box',
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
@@ -591,12 +601,12 @@ export default function TechNews({ searchQuery = '' }) {
                   </div>
                   {article.summary && (
                     <p style={{
-                      margin: '0 0 8px 0',
-                      fontSize: '0.8em',
-                      color: 'rgba(255,255,255,0.5)',
-                      lineHeight: '1.4',
+                      margin: '0 0 16px 0',
+                      fontSize: '0.9em',
+                      color: 'rgba(255,255,255,0.7)',
+                      lineHeight: '1.6',
                       display: '-webkit-box',
-                      WebkitLineClamp: 2,
+                      WebkitLineClamp: 3,
                       WebkitBoxOrient: 'vertical',
                       overflow: 'hidden'
                     }}>
@@ -604,41 +614,60 @@ export default function TechNews({ searchQuery = '' }) {
                     </p>
                   )}
                   <div style={{
-                    fontSize: '0.75em',
-                    color: 'rgba(255,255,255,0.4)'
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '0.85em',
+                    color: 'rgba(255,255,255,0.6)',
+                    marginTop: '8px'
                   }}>
-                    {article.published_date
-                      ? new Date(article.published_date).toLocaleDateString()
-                      : new Date(article.scraped_at).toLocaleDateString()}
+                    <span style={{ 
+                      background: 'rgba(255,255,255,0.1)', 
+                      padding: '4px 8px', 
+                      borderRadius: '6px',
+                      fontSize: '0.9em'
+                    }}>
+                      {getDomainFromUrl(article.url)}
+                    </span>
+                    <span>
+                      {article.published_date
+                        ? new Date(article.published_date).toLocaleDateString()
+                        : new Date(article.scraped_at).toLocaleDateString()}
+                    </span>
                   </div>
                 </div>
               ))}
               {visibleCount < filteredAndSortedArticles.length && (
                 <div style={{
-                  padding: '16px',
+                  padding: '24px 20px',
                   textAlign: 'center'
                 }}>
                   <button
                     onClick={() => setVisibleCount(prev => prev + 30)}
                     style={{
-                      padding: '8px 16px',
-                      background: 'rgba(59, 130, 246, 0.2)',
-                      border: '1px solid rgba(59, 130, 246, 0.5)',
-                      borderRadius: '6px',
-                      color: '#3b82f6',
+                      padding: '12px 24px',
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      borderRadius: '12px',
+                      color: '#60a5fa',
                       cursor: 'pointer',
-                      fontSize: '0.85em',
-                      fontWeight: '500',
-                      transition: 'all 0.2s'
+                      fontSize: '0.9em',
+                      fontWeight: '600',
+                      transition: 'all 0.3s ease',
+                      boxShadow: '0 4px 12px rgba(59, 130, 246, 0.2)'
                     }}
                     onMouseEnter={(e) => {
-                      e.target.style.background = 'rgba(59, 130, 246, 0.3)';
+                      e.target.style.background = 'rgba(59, 130, 246, 0.25)';
+                      e.target.style.transform = 'translateY(-2px)';
+                      e.target.style.boxShadow = '0 8px 25px rgba(59, 130, 246, 0.3)';
                     }}
                     onMouseLeave={(e) => {
-                      e.target.style.background = 'rgba(59, 130, 246, 0.2)';
+                      e.target.style.background = 'rgba(59, 130, 246, 0.15)';
+                      e.target.style.transform = 'translateY(0)';
+                      e.target.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.2)';
                     }}
                   >
-                    Load More ({filteredAndSortedArticles.length - visibleCount} remaining)
+                    📰 Load More ({filteredAndSortedArticles.length - visibleCount} remaining)
                   </button>
                 </div>
               )}
