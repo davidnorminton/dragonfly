@@ -8,6 +8,8 @@ export default function TechNews({ searchQuery = '' }) {
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
   const [sortBy, setSortBy] = useState('latest'); // latest, oldest, title-asc, title-desc
+  const [selectedDomain, setSelectedDomain] = useState('');
+  const [availableDomains, setAvailableDomains] = useState([]);
 
   // Strip HTML tags from text for search
   const stripHTML = (html) => {
@@ -79,9 +81,27 @@ export default function TechNews({ searchQuery = '' }) {
     return score;
   };
 
+  // Extract domain from URL helper
+  const getDomainFromUrl = (url) => {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace(/^www\./, '');
+    } catch {
+      return '';
+    }
+  };
+
   // Filter and sort articles with enhanced search
   const filteredAndSortedArticles = useMemo(() => {
     let filtered = articles;
+    
+    // Filter by domain if selected
+    if (selectedDomain) {
+      filtered = filtered.filter(article => {
+        const articleDomain = getDomainFromUrl(article.url || '');
+        return articleDomain === selectedDomain;
+      });
+    }
     
     // Filter and calculate relevance if searching
     if (searchQuery.trim()) {
@@ -200,10 +220,38 @@ export default function TechNews({ searchQuery = '' }) {
     };
   }, []);
 
-  // Reset visible count when articles, search query, or sort order change
+  // Load available domains from sources
+  useEffect(() => {
+    const loadDomains = async () => {
+      try {
+        const response = await fetch('/api/scraper/sources');
+        const result = await response.json();
+        if (result.success && result.sources) {
+          // Extract unique domains from source URLs
+          const domains = new Set();
+          result.sources.forEach(source => {
+            try {
+              const url = new URL(source.url);
+              // Remove www. prefix for cleaner display
+              const domain = url.hostname.replace(/^www\./, '');
+              domains.add(domain);
+            } catch (e) {
+              // Skip invalid URLs
+            }
+          });
+          setAvailableDomains(Array.from(domains).sort());
+        }
+      } catch (err) {
+        console.error('Failed to load domains:', err);
+      }
+    };
+    loadDomains();
+  }, []);
+
+  // Reset visible count when articles, search query, sort order, or domain filter change
   useEffect(() => {
     setVisibleCount(30);
-  }, [articles.length, searchQuery, sortBy]);
+  }, [articles.length, searchQuery, sortBy, selectedDomain]);
 
   const loadArticles = async () => {
     setLoading(true);
@@ -384,9 +432,55 @@ export default function TechNews({ searchQuery = '' }) {
   };
 
   return (
-    <div className="page-container">
-      <div className="page-header">
+    <div className="page-container" style={{ padding: '12px' }}>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1>Tech News</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <select
+            value={selectedDomain}
+            onChange={(e) => setSelectedDomain(e.target.value)}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '6px',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              background: 'rgba(255, 255, 255, 0.1)',
+              color: '#fff',
+              fontSize: '0.9em',
+              cursor: 'pointer',
+              minWidth: '200px'
+            }}
+          >
+            <option value="">All Sources</option>
+            {availableDomains.map(domain => (
+              <option key={domain} value={domain}>
+                {domain}
+              </option>
+            ))}
+          </select>
+          {selectedDomain && (
+            <button
+              onClick={() => setSelectedDomain('')}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                background: 'rgba(255, 255, 255, 0.1)',
+                color: '#fff',
+                fontSize: '0.9em',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = 'rgba(255, 255, 255, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = 'rgba(255, 255, 255, 0.1)';
+              }}
+            >
+              Reset Filter
+            </button>
+          )}
+        </div>
       </div>
 
 

@@ -9739,6 +9739,10 @@ body {
   padding: 16px;
 }
 
+.page-container {
+  padding: 12px;
+}
+
 /* Alerts Page */
 .alerts-page {
   display: flex;
