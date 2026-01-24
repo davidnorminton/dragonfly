@@ -287,6 +287,18 @@ export default function TechNews({ searchQuery = '' }) {
     }
   };
 
+  // Extract domain name from URL  
+  const getDomainFromUrl = (url) => {
+    if (!url) return 'Unknown';
+    try {
+      const domain = new URL(url).hostname;
+      // Clean up common prefixes and make it more readable
+      return domain.replace(/^www\./, '').split('.')[0];
+    } catch {
+      return 'Unknown';
+    }
+  };
+
   // Basic HTML sanitizer to allow safe tags
   const sanitizeHTML = (html) => {
     if (!html) return '';
@@ -629,7 +641,7 @@ export default function TechNews({ searchQuery = '' }) {
                   color: 'rgba(255,255,255,0.5)',
                   marginBottom: '12px'
                 }}>
-                  {selectedArticle.author && <span>By {selectedArticle.author}</span>}
+                  <span>By {selectedArticle.author || getDomainFromUrl(selectedArticle.url)}</span>
                   {selectedArticle.published_date && (
                     <span>{new Date(selectedArticle.published_date).toLocaleDateString()}</span>
                   )}

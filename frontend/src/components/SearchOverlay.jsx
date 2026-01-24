@@ -143,6 +143,18 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
     return temp.textContent || temp.innerText || '';
   };
 
+  // Extract domain name from URL
+  const getDomainFromUrl = (url) => {
+    if (!url) return 'Unknown';
+    try {
+      const domain = new URL(url).hostname;
+      // Clean up common prefixes and make it more readable
+      return domain.replace(/^www\./, '').split('.')[0];
+    } catch {
+      return 'Unknown';
+    }
+  };
+
   // Calculate relevance score for tech-news search results
   const calculateTechRelevanceScore = (article, query) => {
     if (!query || query.length < 1) return 0;
@@ -309,7 +321,7 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
       })
       .map(article => ({
         title: article.title,
-        subtitle: `${article.author || 'Unknown'} • ${article.published_date ? new Date(article.published_date).toLocaleDateString() : new Date(article.scraped_at).toLocaleDateString()}`,
+        subtitle: `${article.author || getDomainFromUrl(article.url)} • ${article.published_date ? new Date(article.published_date).toLocaleDateString() : new Date(article.scraped_at).toLocaleDateString()}`,
         description: article.summary ? (article.summary.length > 150 ? article.summary.slice(0, 150) + '...' : article.summary) : null,
         image: article.image_url || null,
         onClick: () => {
