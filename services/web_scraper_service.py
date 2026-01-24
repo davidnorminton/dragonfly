@@ -2,6 +2,7 @@
 Web Scraper Service
 
 Scrapes articles from category pages, RSS feeds, and extracts content, images, and metadata.
+Uses Trafilatura for high-accuracy content extraction.
 """
 import asyncio
 import hashlib
@@ -15,6 +16,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 import feedparser
+import trafilatura
 from bs4 import BeautifulSoup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -304,7 +306,7 @@ class WebScraperService:
     
     async def scrape_article(self, url: str) -> Optional[Dict[str, Any]]:
         """
-        Scrape content from a single article.
+        Scrape content from a single article using Trafilatura.
         
         Args:
             url: Article URL
@@ -318,18 +320,45 @@ class WebScraperService:
                 response = await client.get(url)
                 response.raise_for_status()
             
-            soup = BeautifulSoup(response.text, 'html.parser')
+            html_content = response.text
             
-            # Extract article data
+            # Use Trafilatura to extract content and metadata
+            # Extract metadata first
+            metadata = trafilatura.extract_metadata(html_content)
+            
+            # Extract main content
+            content = trafilatura.extract(
+                html_content,
+                include_comments=False,
+                include_tables=True,
+                include_images=False,
+                no_fallback=False,
+                output_format='txt',
+                target_language='en'
+            )
+            
+            # Build article data from Trafilatura extraction
             article_data = {
-                'title': self._extract_title(soup),
-                'content': self._extract_content(soup),
-                'summary': self._extract_summary(soup),
-                'author': self._extract_author(soup),
-                'published_date': self._extract_published_date(soup),
-                'image_url': self._extract_main_image(soup, url),
+                'title': metadata.title if metadata else None,
+                'content': content,
+                'summary': metadata.description if metadata else None,
+                'author': metadata.author if metadata else None,
+                'published_date': None,
+                'image_url': metadata.image if metadata else None,
                 'metadata': {}
             }
+            
+            # Parse published date if available
+            if metadata and metadata.date:
+                try:
+                    article_data['published_date'] = datetime.fromisoformat(metadata.date.replace('Z', '+00:00'))
+                except Exception as e:
+                    logger.debug(f"Could not parse date {metadata.date}: {e}")
+            
+            # Fallback to BeautifulSoup for image if Trafilatura didn't find one
+            if not article_data['image_url']:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                article_data['image_url'] = self._extract_main_image(soup, url)
             
             # Download and save the main image
             if article_data['image_url'] and self.images_directory:
@@ -339,127 +368,19 @@ class WebScraperService:
                 )
                 article_data['image_path'] = image_path
             
+            # Validate we got meaningful content
+            if not content or len(content.strip()) < 100:
+                logger.warning(f"Article content too short or empty: {url}")
+                return None
+            
             return article_data
             
         except Exception as e:
             logger.error(f"Error scraping article {url}: {e}", exc_info=True)
             return None
     
-    def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extract article title."""
-        # Try multiple selectors
-        selectors = [
-            'h1.entry-title',
-            'h1.post-title',
-            'h1.article-title',
-            'article h1',
-            '.article-header h1',
-            'h1',
-        ]
-        
-        for selector in selectors:
-            element = soup.select_one(selector)
-            if element:
-                return element.get_text(strip=True)
-        
-        # Fallback to page title
-        title_tag = soup.find('title')
-        if title_tag:
-            return title_tag.get_text(strip=True)
-        
-        return None
-    
-    def _extract_content(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extract main article content."""
-        # Try multiple selectors for content
-        selectors = [
-            'article .entry-content',
-            'article .post-content',
-            'article .article-content',
-            '.article-body',
-            '.post-body',
-            'article',
-            '.content',
-        ]
-        
-        for selector in selectors:
-            element = soup.select_one(selector)
-            if element:
-                # Remove unwanted elements
-                for unwanted in element.select('script, style, nav, aside, .social-share, .comments'):
-                    unwanted.decompose()
-                
-                # Get text content
-                paragraphs = element.find_all(['p', 'h2', 'h3', 'h4'])
-                if paragraphs:
-                    content = '\n\n'.join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
-                    if len(content) > 100:  # Ensure we got substantial content
-                        return content
-        
-        return None
-    
-    def _extract_summary(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extract article summary/excerpt."""
-        # Try meta description first
-        meta_desc = soup.find('meta', attrs={'name': 'description'})
-        if meta_desc and meta_desc.get('content'):
-            return meta_desc['content'].strip()
-        
-        # Try Open Graph description
-        og_desc = soup.find('meta', attrs={'property': 'og:description'})
-        if og_desc and og_desc.get('content'):
-            return og_desc['content'].strip()
-        
-        # Try excerpt class
-        excerpt = soup.select_one('.excerpt, .summary, .post-excerpt')
-        if excerpt:
-            return excerpt.get_text(strip=True)
-        
-        return None
-    
-    def _extract_author(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extract article author."""
-        # Try multiple selectors
-        selectors = [
-            '.author-name',
-            '.author',
-            '[rel="author"]',
-            '.byline',
-            '.post-author',
-        ]
-        
-        for selector in selectors:
-            element = soup.select_one(selector)
-            if element:
-                return element.get_text(strip=True)
-        
-        # Try meta author
-        meta_author = soup.find('meta', attrs={'name': 'author'})
-        if meta_author and meta_author.get('content'):
-            return meta_author['content'].strip()
-        
-        return None
-    
-    def _extract_published_date(self, soup: BeautifulSoup) -> Optional[datetime]:
-        """Extract article published date."""
-        # Try time element
-        time_elem = soup.find('time')
-        if time_elem and time_elem.get('datetime'):
-            try:
-                return datetime.fromisoformat(time_elem['datetime'].replace('Z', '+00:00'))
-            except:
-                pass
-        
-        # Try meta published_time
-        meta_time = soup.find('meta', attrs={'property': 'article:published_time'})
-        if meta_time and meta_time.get('content'):
-            try:
-                return datetime.fromisoformat(meta_time['content'].replace('Z', '+00:00'))
-            except:
-                pass
-        
-        return None
-    
+    # Old extraction methods removed - now using Trafilatura for better accuracy
+    # Keeping _extract_main_image as fallback for images
     def _extract_main_image(self, soup: BeautifulSoup, base_url: str) -> Optional[str]:
         """Extract main article image URL."""
         # Try Open Graph image
