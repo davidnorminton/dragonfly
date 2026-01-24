@@ -365,7 +365,7 @@ export default function TechNews({ searchQuery = '' }) {
                   </div>
                 </div>
               ))}
-              {visibleCount < filteredArticles.length && (
+              {visibleCount < filteredAndSortedArticles.length && (
                 <div style={{
                   padding: '16px',
                   textAlign: 'center'
