@@ -164,6 +164,9 @@ class VideoConverter:
             # Recursively scan subdirectories for TV shows
             for item in directory.rglob('*'):
                 try:
+                    # Skip macOS resource fork files (._filename) - these should be deleted, not converted
+                    if item.name.startswith('._'):
+                        continue
                     # Skip if we can't access the file (I/O errors, broken symlinks, etc.)
                     if item.is_file() and item.suffix.lower() in SOURCE_FORMATS:
                         files.append(item)
@@ -174,6 +177,9 @@ class VideoConverter:
             # Only scan top level for movies
             for item in directory.iterdir():
                 try:
+                    # Skip macOS resource fork files (._filename) - these should be deleted, not converted
+                    if item.name.startswith('._'):
+                        continue
                     # Skip if we can't access the file (I/O errors, broken symlinks, etc.)
                     if item.is_file() and item.suffix.lower() in SOURCE_FORMATS:
                         files.append(item)
@@ -195,6 +201,11 @@ class VideoConverter:
         Returns:
             True if conversion successful, False otherwise
         """
+        # Skip macOS resource fork files - these should not be converted
+        if source_path.name.startswith('._'):
+            logger.info(f"  [{index}/{total}] ⚠️  {source_path.name}: Skipping macOS resource fork file")
+            return False
+        
         # Generate output path
         output_path = source_path.with_suffix(TARGET_FORMAT)
         
@@ -301,18 +312,23 @@ class VideoConverter:
         
         files_to_convert = []
         files_to_delete = []
+        mac_resource_forks = []  # macOS ._ files to delete
         
         # Scan Movies directory
         if self.movies_dir.exists():
             logger.info(f"  📁 Scanning: {self.movies_dir}")
             movie_files = self._scan_directory(self.movies_dir)
             files_to_convert.extend(movie_files)
+            # Also find macOS resource fork files to delete
+            mac_resource_forks.extend(self._find_mac_resource_forks(self.movies_dir))
         
         # Scan TV directory
         if self.tv_dir.exists():
             logger.info(f"  📁 Scanning: {self.tv_dir}")
             tv_files = self._scan_directory(self.tv_dir, recursive=True)
             files_to_convert.extend(tv_files)
+            # Also find macOS resource fork files to delete
+            mac_resource_forks.extend(self._find_mac_resource_forks(self.tv_dir, recursive=True))
         
         # Build file lists for frontend
         convert_list = []
@@ -344,7 +360,23 @@ class VideoConverter:
                 logger.warning(f"  ⚠️  Skipping file (cannot access): {file_path} - {e}")
                 continue
         
+        # Add macOS resource fork files to delete list (these should not be converted)
+        for fork_path in mac_resource_forks:
+            try:
+                fork_size = fork_path.stat().st_size
+                delete_list.append({
+                    "name": fork_path.name,
+                    "path": str(fork_path),
+                    "format": "macOS resource fork",
+                    "size_mb": round(fork_size / (1024 * 1024), 2),
+                    "reason": "macOS resource fork file (._*)"
+                })
+            except (OSError, PermissionError) as e:
+                logger.warning(f"  ⚠️  Skipping resource fork (cannot access): {fork_path} - {e}")
+                continue
+        
         logger.info(f"  ✓ Found {len(convert_list)} files to convert")
+        logger.info(f"  ✓ Found {len(mac_resource_forks)} macOS resource fork files to delete")
         logger.info(f"  ✓ Total size: {total_source_size / (1024**3):.2f} GB")
         
         return {
@@ -357,6 +389,30 @@ class VideoConverter:
                 "space_to_free": f"{total_source_size / (1024**3):.2f} GB"
             }
         }
+    
+    def _find_mac_resource_forks(self, directory: Path, recursive: bool = False) -> List[Path]:
+        """Find macOS resource fork files (._*) that should be deleted."""
+        resource_forks = []
+        
+        try:
+            if recursive:
+                for item in directory.rglob('._*'):
+                    try:
+                        if item.is_file():
+                            resource_forks.append(item)
+                    except (OSError, PermissionError):
+                        continue
+            else:
+                for item in directory.iterdir():
+                    try:
+                        if item.is_file() and item.name.startswith('._'):
+                            resource_forks.append(item)
+                    except (OSError, PermissionError):
+                        continue
+        except (OSError, PermissionError) as e:
+            logger.warning(f"  ⚠️  Error scanning for resource forks in {directory}: {e}")
+        
+        return resource_forks
     
     async def convert_all_streaming(self):
         """
@@ -400,6 +456,11 @@ class VideoConverter:
         error_count = 0
         
         for idx, file_path in enumerate(files_to_convert, 1):
+            # Skip macOS resource fork files - these should not be converted
+            if file_path.name.startswith('._'):
+                logger.info(f"  [{idx}/{total_files}] ⚠️  {file_path.name}: Skipping macOS resource fork file")
+                continue
+            
             # Converting event
             yield {
                 "type": "converting",
