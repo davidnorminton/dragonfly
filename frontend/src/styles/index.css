@@ -4089,7 +4089,7 @@ body {
 .music-library {
   margin-top: 16px;
   overflow: auto;
-  max-height: 100vh;
+  max-height: calc(100vh - 150px);
 }
 
 .video-library {
