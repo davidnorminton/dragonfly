@@ -310,7 +310,8 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
       .map(article => ({
         title: article.title,
         subtitle: `${article.author || 'Unknown'} • ${article.published_date ? new Date(article.published_date).toLocaleDateString() : new Date(article.scraped_at).toLocaleDateString()}`,
-        image: null, // Tech articles don't have cover images
+        description: article.summary ? (article.summary.length > 150 ? article.summary.slice(0, 150) + '...' : article.summary) : null,
+        image: article.image_url || null,
         onClick: () => {
           // Navigate to tech news and open this article
           window.dispatchEvent(new CustomEvent('techNewsSelectArticle', { 
@@ -659,12 +660,26 @@ export function SearchOverlay({ activePage, onClose, searchQuery: initialQuery =
                     <div style={{
                       color: '#9da7b8',
                       fontSize: '0.85rem',
-                      marginBottom: result.snippets && result.snippets.length > 0 ? '8px' : '0',
+                      marginBottom: result.description || (result.snippets && result.snippets.length > 0) ? '8px' : '0',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap'
                     }}>
                       {result.subtitle}
+                    </div>
+                  )}
+                  {result.description && (
+                    <div style={{
+                      color: '#b0bac9',
+                      fontSize: '0.8rem',
+                      lineHeight: '1.4',
+                      marginBottom: result.snippets && result.snippets.length > 0 ? '8px' : '0',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden'
+                    }}>
+                      {result.description}
                     </div>
                   )}
                   {result.snippets && result.snippets.length > 0 && result.searchTerm && (
