@@ -9411,14 +9411,22 @@ async def convert_video_files():
 
 
 @app.post("/api/video/scan-conversion")
-async def scan_video_conversion(data: dict):
+async def scan_video_conversion(request: Request):
     """Scan video directory and return list of files that need conversion."""
     try:
         from services.video_converter import VideoConverter
         
+        data = await request.json()
         video_directory = data.get('video_directory')
         if not video_directory:
             raise HTTPException(status_code=400, detail="video_directory is required")
+        
+        # Validate directory exists
+        video_path = Path(video_directory)
+        if not video_path.exists():
+            raise HTTPException(status_code=400, detail=f"Video directory does not exist: {video_directory}")
+        if not video_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Path is not a directory: {video_directory}")
         
         # Scan for files to convert
         converter = VideoConverter(video_directory)
@@ -9434,16 +9442,24 @@ async def scan_video_conversion(data: dict):
 
 
 @app.post("/api/video/convert-to-mp4-stream")
-async def convert_videos_streaming(data: dict):
+async def convert_videos_streaming(request: Request):
     """Convert videos to MP4 with streaming progress updates."""
     try:
         from services.video_converter import VideoConverter
         from fastapi.responses import StreamingResponse
         import json
         
+        data = await request.json()
         video_directory = data.get('video_directory')
         if not video_directory:
             raise HTTPException(status_code=400, detail="video_directory is required")
+        
+        # Validate directory exists
+        video_path = Path(video_directory)
+        if not video_path.exists():
+            raise HTTPException(status_code=400, detail=f"Video directory does not exist: {video_directory}")
+        if not video_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Path is not a directory: {video_directory}")
         
         converter = VideoConverter(video_directory)
         
