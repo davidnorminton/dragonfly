@@ -107,7 +107,8 @@ export default function TechNews({ searchQuery = '' }) {
     if (searchQuery.trim()) {
       const queryTerms = searchQuery.toLowerCase().split(/\s+/).filter(term => term.length > 0);
       
-      filtered = articles
+      // Use 'filtered' (already domain-filtered) instead of 'articles'
+      filtered = filtered
         .map(article => {
           let totalScore = 0;
           let hasAnyMatch = false;
