@@ -876,14 +876,13 @@ class ScraperSource(Base):
 
 
 class ScrapedArticle(Base):
-    """Model for storing scraped article content."""
+    """Model for storing scraped article metadata and references."""
     __tablename__ = "scraped_articles"
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     source_id = Column(Integer, ForeignKey("scraper_sources.id"), nullable=False, index=True)
     url = Column(String, nullable=False, unique=True, index=True)
     title = Column(String, nullable=True)
-    content = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     author = Column(String, nullable=True)
     published_date = Column(DateTime(timezone=True), nullable=True)
@@ -896,7 +895,51 @@ class ScrapedArticle(Base):
     
     # Relationships
     source = relationship("ScraperSource", back_populates="articles")
+    text_content = relationship("ArticleTextContent", back_populates="article", uselist=False, cascade="all, delete-orphan")
+    html_content = relationship("ArticleHtmlContent", back_populates="article", uselist=False, cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<ScrapedArticle {self.id}: {self.title}>"
+
+
+class ArticleTextContent(Base):
+    """Model for storing article content as plain text."""
+    __tablename__ = "article_text_content"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    article_id = Column(Integer, ForeignKey("scraped_articles.id"), nullable=False, index=True, unique=True)
+    content = Column(Text, nullable=True)  # Plain text content
+    word_count = Column(Integer, nullable=True)  # Cached word count
+    character_count = Column(Integer, nullable=True)  # Cached character count
+    content_hash = Column(String(64), nullable=True, index=True)  # SHA-256 hash for deduplication
+    processed_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    article = relationship("ScrapedArticle", back_populates="text_content")
+    
+    def __repr__(self):
+        return f"<ArticleTextContent {self.id}: Article {self.article_id}>"
+
+
+class ArticleHtmlContent(Base):
+    """Model for storing article content as formatted HTML."""
+    __tablename__ = "article_html_content"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    article_id = Column(Integer, ForeignKey("scraped_articles.id"), nullable=False, index=True, unique=True)
+    content = Column(Text, nullable=True)  # HTML formatted content
+    sanitized_content = Column(Text, nullable=True)  # Sanitized HTML for safe display
+    content_type = Column(String(50), nullable=True, default='html')  # html, markdown, etc.
+    content_hash = Column(String(64), nullable=True, index=True)  # SHA-256 hash for deduplication
+    processed_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    article = relationship("ScrapedArticle", back_populates="html_content")
+    
+    def __repr__(self):
+        return f"<ArticleHtmlContent {self.id}: Article {self.article_id}>"
 

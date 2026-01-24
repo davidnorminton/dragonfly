@@ -27,7 +27,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion, ScraperSource, ScrapedArticle
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion, ScraperSource, ScrapedArticle, ArticleTextContent, ArticleHtmlContent
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -16361,13 +16361,27 @@ async def get_scraped_article(article_id: int):
     """Get a single scraped article with full content."""
     try:
         async with AsyncSessionLocal() as session:
+            # Use eager loading to fetch article with content
             result = await session.execute(
-                select(ScrapedArticle).where(ScrapedArticle.id == article_id)
+                select(ScrapedArticle)
+                .options(
+                    selectinload(ScrapedArticle.text_content),
+                    selectinload(ScrapedArticle.html_content)
+                )
+                .where(ScrapedArticle.id == article_id)
             )
             article = result.scalar_one_or_none()
             
             if not article:
                 return {"success": False, "error": "Article not found"}
+            
+            # Get content from separate tables
+            text_content = article.text_content.content if article.text_content else None
+            html_content = article.html_content.content if article.html_content else None
+            sanitized_content = article.html_content.sanitized_content if article.html_content else None
+            
+            # Prefer HTML content, fallback to text content for backward compatibility
+            content = html_content or text_content
             
             return {
                 "success": True,
@@ -16376,7 +16390,10 @@ async def get_scraped_article(article_id: int):
                     "source_id": article.source_id,
                     "url": article.url,
                     "title": article.title,
-                    "content": article.content,
+                    "content": content,  # Main content (HTML preferred, text fallback)
+                    "text_content": text_content,  # Plain text content
+                    "html_content": html_content,  # Raw HTML content
+                    "sanitized_content": sanitized_content,  # Sanitized HTML content
                     "summary": article.summary,
                     "author": article.author,
                     "published_date": article.published_date.isoformat() if article.published_date else None,
@@ -16384,6 +16401,14 @@ async def get_scraped_article(article_id: int):
                     "image_url": article.image_url,
                     "metadata": article.article_metadata,
                     "scraped_at": article.scraped_at.isoformat() if article.scraped_at else None,
+                    # Content metadata
+                    "content_stats": {
+                        "word_count": article.text_content.word_count if article.text_content else None,
+                        "character_count": article.text_content.character_count if article.text_content else None,
+                        "content_type": article.html_content.content_type if article.html_content else 'text',
+                        "has_text_content": article.text_content is not None,
+                        "has_html_content": article.html_content is not None,
+                    }
                 }
             }
     except Exception as e:
