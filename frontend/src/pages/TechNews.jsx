@@ -21,58 +21,113 @@ export default function TechNews({ searchQuery = '' }) {
 
   // Calculate relevance score for search results
   const calculateRelevanceScore = (article, query) => {
-    if (!query) return 0;
+    if (!query || query.length < 1) return 0;
     
     const queryLower = query.toLowerCase();
     let score = 0;
     
-    // Title matches are most important (weight: 10)
+    // Title matches are most important (weight: 15)
     const title = (article.title || '').toLowerCase();
     if (title.includes(queryLower)) {
-      score += 10;
-      // Bonus for exact match or match at beginning
-      if (title === queryLower) score += 15;
-      else if (title.startsWith(queryLower)) score += 10;
-      else if (title.endsWith(queryLower)) score += 5;
+      score += 15;
+      // Bonus for word boundary matches
+      const wordBoundaryRegex = new RegExp(`\\b${queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      if (wordBoundaryRegex.test(title)) {
+        score += 10; // Whole word match bonus
+      }
+      // Position bonuses
+      if (title === queryLower) score += 20; // Exact match
+      else if (title.startsWith(queryLower)) score += 15; // Starts with
+      else if (title.endsWith(queryLower)) score += 10; // Ends with
     }
     
-    // Summary matches (weight: 5)
+    // Summary matches (weight: 8)
     const summary = (article.summary || '').toLowerCase();
     if (summary.includes(queryLower)) {
+      score += 8;
+      const wordBoundaryRegex = new RegExp(`\\b${queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      if (wordBoundaryRegex.test(summary)) {
+        score += 5; // Whole word in summary
+      }
+    }
+    
+    // Content matches (weight: 3) - strip HTML first
+    const contentText = stripHTML(article.content || '').toLowerCase();
+    if (contentText.includes(queryLower)) {
+      score += 3;
+      // Count occurrences but be more generous
+      const matches = (contentText.match(new RegExp(queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      score += Math.min(matches, 8); // Up to 8 bonus points for multiple matches
+      
+      // Whole word bonus in content
+      const wordBoundaryRegex = new RegExp(`\\b${queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      if (wordBoundaryRegex.test(contentText)) {
+        score += 3;
+      }
+    }
+    
+    // Author matches (weight: 5)
+    const author = (article.author || '').toLowerCase();
+    if (author.includes(queryLower)) {
       score += 5;
     }
     
-    // Content matches (weight: 2) - strip HTML first
-    const contentText = stripHTML(article.content || '').toLowerCase();
-    if (contentText.includes(queryLower)) {
+    // URL matches for site-specific searches (weight: 2)
+    const url = (article.url || '').toLowerCase();
+    if (url.includes(queryLower)) {
       score += 2;
-      // Count multiple occurrences in content
-      const matches = (contentText.match(new RegExp(queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-      score += Math.min(matches - 1, 5); // Max 5 bonus points for multiple matches
-    }
-    
-    // Author matches (weight: 3)
-    const author = (article.author || '').toLowerCase();
-    if (author.includes(queryLower)) {
-      score += 3;
     }
     
     return score;
   };
 
-  // Filter and sort articles with relevance scoring
+  // Filter and sort articles with enhanced search
   const filteredAndSortedArticles = useMemo(() => {
     let filtered = articles;
     
     // Filter and calculate relevance if searching
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
+      const queryTerms = searchQuery.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+      
       filtered = articles
-        .map(article => ({
-          ...article,
-          _relevanceScore: calculateRelevanceScore(article, query)
-        }))
-        .filter(article => article._relevanceScore > 0);
+        .map(article => {
+          let totalScore = 0;
+          let hasAnyMatch = false;
+          
+          // Check each search term
+          for (const term of queryTerms) {
+            const termScore = calculateRelevanceScore(article, term);
+            if (termScore > 0) {
+              hasAnyMatch = true;
+              totalScore += termScore;
+            }
+          }
+          
+          // Bonus for matching multiple terms
+          if (queryTerms.length > 1) {
+            const matchedTerms = queryTerms.filter(term => calculateRelevanceScore(article, term) > 0);
+            if (matchedTerms.length > 1) {
+              totalScore += matchedTerms.length * 2; // Bonus for multi-term matches
+            }
+          }
+          
+          return {
+            ...article,
+            _relevanceScore: totalScore,
+            _hasMatch: hasAnyMatch
+          };
+        })
+        .filter(article => article._hasMatch) // Show any article with at least one match
+        .sort((a, b) => {
+          // Primary sort: relevance score (higher first)
+          const scoreDiff = (b._relevanceScore || 0) - (a._relevanceScore || 0);
+          if (scoreDiff !== 0) return scoreDiff;
+          
+          // Secondary sort: newer articles first
+          const dateA = new Date(a.published_date || a.scraped_at);
+          const dateB = new Date(b.published_date || b.scraped_at);
+          return dateB - dateA;
+        });
     }
 
     // Sort based on current sort option or search relevance
