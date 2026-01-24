@@ -222,36 +222,6 @@ export default function TechNews({ searchQuery = '' }) {
     }
   };
 
-  const runScraper = async () => {
-    setScraping(true);
-    setMessage('');
-    setDebugInfo(null);
-    
-    try {
-      const response = await fetch('/api/scraper/run', { method: 'POST' });
-      const result = await response.json();
-      
-      if (result.success) {
-        setMessage(`✓ ${result.message}`);
-        setDebugInfo({
-          sources_scraped: result.results?.sources_scraped,
-          articles_found: result.results?.articles_found,
-          articles_saved: result.results?.articles_saved,
-          errors: result.results?.errors,
-          timestamp: new Date().toISOString()
-        });
-        
-        // Reload articles after scraping
-        setTimeout(() => loadArticles(), 1000);
-      } else {
-        setMessage(`✗ ${result.error || 'Scraping failed'}`);
-      }
-    } catch (err) {
-      setMessage(`✗ Error: ${err.message}`);
-    } finally {
-      setScraping(false);
-    }
-  };
 
   const loadArticleDetails = async (articleId) => {
     setLoadingArticle(true);
