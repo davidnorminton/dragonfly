@@ -8,10 +8,16 @@ export default function TechNews() {
   const [debugInfo, setDebugInfo] = useState(null);
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [loadingArticle, setLoadingArticle] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(30);
 
   useEffect(() => {
     loadArticles();
   }, []);
+
+  // Reset visible count when articles change
+  useEffect(() => {
+    setVisibleCount(30);
+  }, [articles.length]);
 
   const loadArticles = async () => {
     setLoading(true);
@@ -187,7 +193,8 @@ export default function TechNews() {
                 </p>
               </div>
             ) : (
-              articles.map((article) => (
+              <>
+              {articles.slice(0, visibleCount).map((article) => (
                 <div
                   key={article.id}
                   style={{
@@ -269,7 +276,37 @@ export default function TechNews() {
                       : new Date(article.scraped_at).toLocaleDateString()}
                   </div>
                 </div>
-              ))
+              ))}
+              {visibleCount < articles.length && (
+                <div style={{
+                  padding: '16px',
+                  textAlign: 'center'
+                }}>
+                  <button
+                    onClick={() => setVisibleCount(prev => prev + 30)}
+                    style={{
+                      padding: '8px 16px',
+                      background: 'rgba(59, 130, 246, 0.2)',
+                      border: '1px solid rgba(59, 130, 246, 0.5)',
+                      borderRadius: '6px',
+                      color: '#3b82f6',
+                      cursor: 'pointer',
+                      fontSize: '0.85em',
+                      fontWeight: '500',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.background = 'rgba(59, 130, 246, 0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.background = 'rgba(59, 130, 246, 0.2)';
+                    }}
+                  >
+                    Load More ({articles.length - visibleCount} remaining)
+                  </button>
+                </div>
+              )}
+              </>
             )}
           </div>
         </div>
