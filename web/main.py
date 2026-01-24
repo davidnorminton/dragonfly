@@ -9419,26 +9419,39 @@ async def scan_video_conversion(request: Request):
         data = await request.json()
         video_directory = data.get('video_directory')
         if not video_directory:
+            logger.error("Video scan-conversion: video_directory is missing from request")
             raise HTTPException(status_code=400, detail="video_directory is required")
+        
+        logger.info(f"Video scan-conversion: Processing directory: {video_directory}")
         
         # Validate directory exists
         video_path = Path(video_directory)
         if not video_path.exists():
+            logger.error(f"Video scan-conversion: Directory does not exist: {video_directory}")
             raise HTTPException(status_code=400, detail=f"Video directory does not exist: {video_directory}")
         if not video_path.is_dir():
+            logger.error(f"Video scan-conversion: Path is not a directory: {video_directory}")
             raise HTTPException(status_code=400, detail=f"Path is not a directory: {video_directory}")
         
         # Scan for files to convert
+        logger.info(f"Video scan-conversion: Initializing VideoConverter for {video_directory}")
         converter = VideoConverter(video_directory)
+        logger.info("Video scan-conversion: Starting scan...")
         scan_results = converter.scan_for_conversion()
+        logger.info(f"Video scan-conversion: Scan complete, found {scan_results.get('summary', {}).get('total_to_convert', 0)} files")
         
         return scan_results
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Video conversion scan error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = f"Video conversion scan error: {e}"
+        logger.error(error_msg, exc_info=True)
+        # Include more detail in the error response for debugging
+        import traceback
+        tb_str = traceback.format_exc()
+        logger.error(f"Full traceback: {tb_str}")
+        raise HTTPException(status_code=500, detail=f"{error_msg}. Check server logs for details.")
 
 
 @app.post("/api/video/convert-to-mp4-stream")
