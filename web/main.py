@@ -17252,7 +17252,9 @@ async def personal_chat(request: Request):
             # Log context size for debugging
             total_chars = sum(len(msg.get("content", "")) for msg in conversation_history) + len(question)
             logger.info(f"📊 Personal chat context: {len(conversation_history)} messages, ~{total_chars} characters")
-            logger.info(f"📊 Personal chat context details: summary_present={bool(summary_text)}, last_pairs_count={len(last_pairs)}, conversation_history={[f'{m.get(\"role\", \"?\")}: {len(m.get(\"content\", \"\"))} chars' for m in conversation_history]}")
+            # Build context details for logging
+            context_details = [f"{m.get('role', '?')}: {len(m.get('content', ''))} chars" for m in conversation_history]
+            logger.info(f"📊 Personal chat context details: summary_present={bool(summary_text)}, last_pairs_count={len(last_pairs)}, conversation_history={context_details}")
             
             try:
                 result = await ai_service.execute(input_data)
