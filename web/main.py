@@ -17112,25 +17112,43 @@ async def personal_chat(request: Request):
                 custom_context = config.config_value.get("custom_context", "")
                 max_tokens = config.config_value.get("max_tokens", 4096)
             
-            # Get summaries for this session
-            summaries_result = await session.execute(
+            # Get the latest summary for this session (most recent)
+            latest_summary_result = await session.execute(
                 select(PersonalSummary)
                 .where(PersonalSummary.session_id == session_id)
-                .order_by(PersonalSummary.created_at.asc())  # Oldest summaries first
+                .order_by(PersonalSummary.created_at.desc())  # Most recent first
+                .limit(1)
             )
-            summaries = summaries_result.scalars().all()
+            latest_summary = latest_summary_result.scalar_one_or_none()
             
-            # Collect all message IDs that have been summarized
+            # Collect all message IDs that have been summarized (from all summaries, not just latest)
+            # We need this to filter out summarized messages when getting last 5 pairs
+            all_summaries_result = await session.execute(
+                select(PersonalSummary)
+                .where(PersonalSummary.session_id == session_id)
+            )
+            all_summaries = all_summaries_result.scalars().all()
+            
             summarized_message_ids = set()
-            summary_texts = []
-            for summary in summaries:
+            for summary in all_summaries:
                 if summary.message_ids and isinstance(summary.message_ids, list):
                     summarized_message_ids.update(summary.message_ids)
-                # Add summary text to context
-                if summary.summary:
-                    summary_texts.append(f"[Summary from {summary.start_date.strftime('%Y-%m-%d') if summary.start_date else 'earlier'} to {summary.end_date.strftime('%Y-%m-%d') if summary.end_date else 'later'}]: {summary.summary}")
             
-            logger.info(f"📚 Personal chat: Found {len(summaries)} summaries covering {len(summarized_message_ids)} messages")
+            # Build summary text from latest summary only
+            summary_text = ""
+            if latest_summary and latest_summary.summary:
+                date_range = ""
+                if latest_summary.start_date and latest_summary.end_date:
+                    date_range = f" ({latest_summary.start_date.strftime('%Y-%m-%d')} to {latest_summary.end_date.strftime('%Y-%m-%d')})"
+                elif latest_summary.start_date:
+                    date_range = f" (from {latest_summary.start_date.strftime('%Y-%m-%d')})"
+                elif latest_summary.end_date:
+                    date_range = f" (until {latest_summary.end_date.strftime('%Y-%m-%d')})"
+                
+                title_part = f"{latest_summary.title}: " if latest_summary.title else ""
+                summary_text = f"{title_part}{latest_summary.summary}{date_range}"
+            
+            logger.info(f"📚 Personal chat: Using latest summary (covering {len(summarized_message_ids)} messages) + last 5 Q&A pairs")
             
             # Get all messages to find the last 5 Q&A pairs that haven't been summarized
             all_history_result = await session.execute(
@@ -17188,15 +17206,14 @@ async def personal_chat(request: Request):
             # Reverse to get chronological order (oldest first)
             last_pairs = list(reversed(last_pairs_reversed))
             
-            # Build conversation history: summaries first, then last 5 pairs
+            # Build conversation history: latest summary first, then last 5 pairs
             conversation_history = []
             
-            # Add summaries as a system message or user message
-            if summary_texts:
-                summary_context = "\n\n".join(summary_texts)
+            # Add latest summary as context
+            if summary_text:
                 conversation_history.append({
                     "role": "user",
-                    "content": f"[Previous conversation summaries]:\n{summary_context}"
+                    "content": f"[Previous conversation summary]:\n{summary_text}"
                 })
                 conversation_history.append({
                     "role": "assistant",
@@ -17206,7 +17223,7 @@ async def personal_chat(request: Request):
             # Add last 5 Q&A pairs
             conversation_history.extend(last_pairs)
             
-            logger.info(f"📚 Personal chat: Using {len(summaries)} summaries + {len(last_pairs)} recent messages ({len(last_pairs) // 2} Q&A pairs) as context")
+            logger.info(f"📚 Personal chat: Using latest summary + {len(last_pairs)} recent messages ({len(last_pairs) // 2} Q&A pairs) as context")
             
             # Save user message AFTER loading history
             user_message = PersonalChat(
