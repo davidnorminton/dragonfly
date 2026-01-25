@@ -198,6 +198,65 @@
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
+  flex: 1;
+}
+
+.summary-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-edit-summary,
+.btn-save-summary,
+.btn-cancel-edit {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-edit-summary {
+  background: var(--secondary-bg);
+  color: var(--text-primary);
+}
+
+.btn-edit-summary:hover {
+  background: var(--hover-bg);
+}
+
+.btn-save-summary {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.btn-save-summary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.btn-save-summary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-cancel-edit {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-cancel-edit:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.btn-cancel-edit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-close {
@@ -241,6 +300,27 @@
 .summary-content p {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.summary-edit-textarea {
+  width: 100%;
+  min-height: 400px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.summary-edit-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
 }
 
 .loading,

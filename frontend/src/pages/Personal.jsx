@@ -10,11 +10,22 @@ export function PersonalPage() {
   const [summarizing, setSummarizing] = useState(false);
   const [newSummary, setNewSummary] = useState(null);
   const [summaries, setSummaries] = useState([]);
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [editedSummaryText, setEditedSummaryText] = useState('');
+  const [savingSummary, setSavingSummary] = useState(false);
 
   useEffect(() => {
-    loadMessages();
-    loadSummaries();
+    loadSummaries().then(() => {
+      loadMessages();
+    });
   }, []);
+
+  // Reload messages when summaries change to filter out already summarized ones
+  useEffect(() => {
+    if (summaries.length > 0) {
+      loadMessages();
+    }
+  }, [summaries.length]);
 
   const loadMessages = async () => {
     try {
@@ -56,7 +67,25 @@ export function PersonalPage() {
           pairs.push(currentPair);
         }
         
-        setMessages(pairs);
+        // Filter out already summarized messages
+        if (summaries.length > 0) {
+          const summarizedMessageIds = new Set();
+          summaries.forEach(summary => {
+            if (summary.message_ids && Array.isArray(summary.message_ids)) {
+              summary.message_ids.forEach(id => summarizedMessageIds.add(id));
+            }
+          });
+          
+          const filteredPairs = pairs.filter(pair => {
+            const questionSummarized = summarizedMessageIds.has(pair.questionId);
+            const answerSummarized = pair.answerId ? summarizedMessageIds.has(pair.answerId) : false;
+            return !questionSummarized && !answerSummarized;
+          });
+          
+          setMessages(filteredPairs);
+        } else {
+          setMessages(pairs);
+        }
       }
     } catch (err) {
       console.error('Error loading messages:', err);
@@ -154,10 +183,53 @@ export function PersonalPage() {
 
   const handleViewSummary = (summary) => {
     setNewSummary(summary);
+    setEditedSummaryText(summary.summary);
+    setEditingSummary(false);
   };
 
   const handleCloseSummary = () => {
     setNewSummary(null);
+    setEditingSummary(false);
+    setEditedSummaryText('');
+  };
+
+  const handleEditSummary = () => {
+    setEditingSummary(true);
+    setEditedSummaryText(newSummary?.summary || '');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingSummary(false);
+    setEditedSummaryText(newSummary?.summary || '');
+  };
+
+  const handleSaveSummary = async () => {
+    if (!newSummary) return;
+    
+    setSavingSummary(true);
+    try {
+      const response = await fetch(`/api/personal/summaries/${newSummary.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary: editedSummaryText
+        })
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        setNewSummary({ ...newSummary, summary: editedSummaryText });
+        setEditingSummary(false);
+        await loadSummaries();
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('Error saving summary:', err);
+      alert(`Error saving summary: ${err.message}`);
+    } finally {
+      setSavingSummary(false);
+    }
   };
 
   if (loading) {
@@ -233,12 +305,43 @@ export function PersonalPage() {
           <div className="personal-right-pane">
             <div className="summary-header">
               <h2>{newSummary.title || 'Summary'}</h2>
-              <button
-                className="btn-close"
-                onClick={handleCloseSummary}
-              >
-                ×
-              </button>
+              <div className="summary-header-actions">
+                {!editingSummary ? (
+                  <button
+                    className="btn-edit-summary"
+                    onClick={handleEditSummary}
+                    title="Edit summary"
+                  >
+                    Edit
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="btn-save-summary"
+                      onClick={handleSaveSummary}
+                      disabled={savingSummary}
+                      title="Save changes"
+                    >
+                      {savingSummary ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      className="btn-cancel-edit"
+                      onClick={handleCancelEdit}
+                      disabled={savingSummary}
+                      title="Cancel editing"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+                <button
+                  className="btn-close"
+                  onClick={handleCloseSummary}
+                  title="Close"
+                >
+                  ×
+                </button>
+              </div>
             </div>
             <div className="summary-meta">
               <span>{newSummary.message_count || 0} messages</span>
@@ -250,7 +353,16 @@ export function PersonalPage() {
               <span>Created: {new Date(newSummary.created_at).toLocaleString()}</span>
             </div>
             <div className="summary-content">
-              <p>{newSummary.summary}</p>
+              {editingSummary ? (
+                <textarea
+                  className="summary-edit-textarea"
+                  value={editedSummaryText}
+                  onChange={(e) => setEditedSummaryText(e.target.value)}
+                  rows={20}
+                />
+              ) : (
+                <p>{newSummary.summary}</p>
+              )}
             </div>
           </div>
         )}

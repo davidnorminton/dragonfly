@@ -17324,6 +17324,50 @@ Provide a clear, structured summary that captures only the essential facts and i
         return {"success": False, "error": str(e)}
 
 
+@app.put("/api/personal/summaries/{summary_id}")
+async def update_personal_summary(summary_id: int, request: Request):
+    """Update a personal chat summary."""
+    try:
+        body = await request.json()
+        summary_text = body.get("summary")
+        
+        if not summary_text:
+            return {"success": False, "error": "Summary text is required"}
+        
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(PersonalSummary).where(PersonalSummary.id == summary_id)
+            )
+            summary = result.scalar_one_or_none()
+            
+            if not summary:
+                return {"success": False, "error": "Summary not found"}
+            
+            summary.summary = summary_text
+            await session.commit()
+            await session.refresh(summary)
+            
+            return {
+                "success": True,
+                "summary": {
+                    "id": summary.id,
+                    "session_id": summary.session_id,
+                    "user_id": summary.user_id,
+                    "title": summary.title,
+                    "summary": summary.summary,
+                    "message_count": summary.message_count,
+                    "message_ids": summary.message_ids,
+                    "start_date": summary.start_date.isoformat() if summary.start_date else None,
+                    "end_date": summary.end_date.isoformat() if summary.end_date else None,
+                    "created_at": summary.created_at.isoformat() if summary.created_at else None,
+                    "updated_at": summary.updated_at.isoformat() if summary.updated_at else None
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error updating personal summary: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @app.delete("/api/personal/summaries/{summary_id}")
 async def delete_personal_summary(summary_id: int):
     """Delete a personal chat summary."""
