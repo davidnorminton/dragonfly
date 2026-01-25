@@ -17156,6 +17156,7 @@ async def get_personal_summaries(session_id: str = None):
                         "title": s.title,
                         "summary": s.summary,
                         "message_count": s.message_count,
+                        "message_ids": s.message_ids,
                         "start_date": s.start_date.isoformat() if s.start_date else None,
                         "end_date": s.end_date.isoformat() if s.end_date else None,
                         "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -17176,24 +17177,32 @@ async def create_personal_summary(
     summary: str = None,
     message_count: int = 0,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    message_ids: Optional[List[int]] = None
 ):
     """Create a new personal chat summary."""
     try:
         async with AsyncSessionLocal() as session:
-            # If summary is not provided, generate one using AI
+            # If summary is provided, use AI to condense it to main facts only
+            # If not provided, get messages and generate summary
             if not summary:
-                # Get messages from the period to summarize
-                query = select(PersonalChat).where(PersonalChat.session_id == session_id)
-                if start_date:
-                    from datetime import datetime
-                    start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-                    query = query.where(PersonalChat.created_at >= start_dt)
-                if end_date:
-                    from datetime import datetime
-                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                    query = query.where(PersonalChat.created_at <= end_dt)
-                query = query.order_by(PersonalChat.created_at.asc())
+                # Get messages from message_ids if provided, otherwise use date range
+                if message_ids:
+                    query = select(PersonalChat).where(
+                        PersonalChat.session_id == session_id,
+                        PersonalChat.id.in_(message_ids)
+                    ).order_by(PersonalChat.created_at.asc())
+                else:
+                    query = select(PersonalChat).where(PersonalChat.session_id == session_id)
+                    if start_date:
+                        from datetime import datetime
+                        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                        query = query.where(PersonalChat.created_at >= start_dt)
+                    if end_date:
+                        from datetime import datetime
+                        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                        query = query.where(PersonalChat.created_at <= end_dt)
+                    query = query.order_by(PersonalChat.created_at.asc())
                 
                 result = await session.execute(query)
                 messages = result.scalars().all()
@@ -17201,30 +17210,32 @@ async def create_personal_summary(
                 if not messages:
                     return {"success": False, "error": "No messages found to summarize"}
                 
-                # Generate summary using AI
+                # Build conversation text
                 conversation_text = "\n".join([
                     f"{msg.role}: {msg.message}" for msg in messages
                 ])
-                
-                summary_prompt = f"""Please provide a concise summary of the following conversation. Focus on key topics, decisions, and important information discussed:
-
-{conversation_text[:50000]}  # Limit to avoid context issues
-
-Provide a clear, structured summary that captures the essence of this conversation."""
-                
-                from services.ai_service import AIService
-                ai_service = AIService()
-                await ai_service._load_api_key()
-                
-                summary_result = await ai_service.execute({
-                    "question": summary_prompt,
-                    "messages": [],
-                    "use_system_max_tokens": False,
-                    "max_tokens": 2000
-                })
-                
-                summary = summary_result.get("answer", "Summary generation failed.")
+                summary = conversation_text
                 message_count = len(messages)
+            
+            # Always use AI to create a concise summary focusing on main facts
+            summary_prompt = f"""Please provide a concise summary of the following conversation. Focus ONLY on the main facts, key topics, decisions, and important information. Remove any unnecessary details, conversational fluff, or redundant information. Keep it factual and to the point:
+
+{summary[:50000]}  # Limit to avoid context issues
+
+Provide a clear, structured summary that captures only the essential facts and information."""
+            
+            from services.ai_service import AIService
+            ai_service = AIService()
+            await ai_service._load_api_key()
+            
+            summary_result = await ai_service.execute({
+                "question": summary_prompt,
+                "messages": [],
+                "use_system_max_tokens": False,
+                "max_tokens": 2000
+            })
+            
+            final_summary = summary_result.get("answer", "Summary generation failed.")
             
             # Parse dates if provided
             from datetime import datetime
@@ -17251,8 +17262,9 @@ Provide a clear, structured summary that captures the essence of this conversati
                 session_id=session_id,
                 user_id=user_id,
                 title=title,
-                summary=summary,
+                summary=final_summary,
                 message_count=message_count,
+                message_ids=message_ids,
                 start_date=start_dt,
                 end_date=end_dt
             )
@@ -17270,6 +17282,7 @@ Provide a clear, structured summary that captures the essence of this conversati
                     "title": new_summary.title,
                     "summary": new_summary.summary,
                     "message_count": new_summary.message_count,
+                    "message_ids": new_summary.message_ids,
                     "start_date": new_summary.start_date.isoformat() if new_summary.start_date else None,
                     "end_date": new_summary.end_date.isoformat() if new_summary.end_date else None,
                     "created_at": new_summary.created_at.isoformat() if new_summary.created_at else None,

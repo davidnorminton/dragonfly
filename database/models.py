@@ -124,6 +124,7 @@ class PersonalSummary(Base):
     title = Column(String, nullable=True)  # Optional title for the summary
     summary = Column(Text, nullable=False)  # The summary text
     message_count = Column(Integer, nullable=False, default=0)  # Number of messages summarized
+    message_ids = Column(JSON, nullable=True)  # Array of message IDs that were summarized
     start_date = Column(DateTime(timezone=True), nullable=True)  # Start of summarized period
     end_date = Column(DateTime(timezone=True), nullable=True)  # End of summarized period
     created_at = Column(DateTime(timezone=True), server_default=func.now())
