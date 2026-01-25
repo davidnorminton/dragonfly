@@ -17147,17 +17147,18 @@ async def personal_chat(request: Request):
             unsummarized_messages = [msg for msg in all_history if msg.id not in summarized_message_ids]
             
             # Get last 5 Q&A pairs (10 messages max) - work backwards from most recent
-            last_pairs = []
+            # We'll collect pairs in reverse order, then reverse at the end
+            last_pairs_reversed = []
             pairs_collected = 0
             current_pair = []
             
             # Iterate from most recent to oldest
             for msg in reversed(unsummarized_messages):
                 if msg.role == 'user':
-                    # If we have a complete pair, save it
+                    # If we have a complete pair, save it (in reverse order since we're going backwards)
                     if len(current_pair) == 2:  # Complete pair (user + assistant)
-                        last_pairs.insert(0, current_pair[0])  # User message
-                        last_pairs.insert(1, current_pair[1])  # Assistant message
+                        last_pairs_reversed.append(current_pair[1])  # Assistant message (most recent first)
+                        last_pairs_reversed.append(current_pair[0])  # User message
                         pairs_collected += 1
                         if pairs_collected >= 5:  # Got 5 pairs
                             break
@@ -17172,9 +17173,9 @@ async def personal_chat(request: Request):
                         "role": msg.role,
                         "content": msg.message
                     })
-                    # Save the complete pair
-                    last_pairs.insert(0, current_pair[0])  # User message
-                    last_pairs.insert(1, current_pair[1])  # Assistant message
+                    # Save the complete pair (in reverse order)
+                    last_pairs_reversed.append(current_pair[1])  # Assistant message
+                    last_pairs_reversed.append(current_pair[0])  # User message
                     pairs_collected += 1
                     if pairs_collected >= 5:  # Got 5 pairs
                         break
@@ -17182,7 +17183,10 @@ async def personal_chat(request: Request):
             
             # If we have an incomplete pair (user without assistant), add just the user message
             if len(current_pair) == 1:
-                last_pairs.insert(0, current_pair[0])
+                last_pairs_reversed.append(current_pair[0])
+            
+            # Reverse to get chronological order (oldest first)
+            last_pairs = list(reversed(last_pairs_reversed))
             
             # Build conversation history: summaries first, then last 5 pairs
             conversation_history = []
