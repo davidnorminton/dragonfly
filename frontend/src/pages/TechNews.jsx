@@ -7,7 +7,6 @@ export default function TechNews({ searchQuery = '' }) {
   const [message, setMessage] = useState('');
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [loadingArticle, setLoadingArticle] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(30);
   const [totalArticles, setTotalArticles] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const scrollContainerRef = useRef(null);
@@ -687,13 +686,16 @@ export default function TechNews({ searchQuery = '' }) {
         height: 'calc(100vh - 180px)'
       }}>
         {/* Article Cards Grid */}
-        <div style={{
-          height: '100%',
-          overflowY: 'auto',
-          paddingRight: selectedArticle ? '70%' : '0',
-          paddingBottom: '60px',
-          transition: 'padding-right 0.5s ease'
-        }}>
+        <div 
+          ref={scrollContainerRef}
+          style={{
+            height: '100%',
+            overflowY: 'auto',
+            paddingRight: selectedArticle ? '70%' : '0',
+            paddingBottom: '60px',
+            transition: 'padding-right 0.5s ease'
+          }}
+        >
           {loading ? (
             <div style={{
               display: 'flex',
@@ -742,17 +744,12 @@ export default function TechNews({ searchQuery = '' }) {
           ) : (
             <>
               {/* Articles Grid */}
-              <div 
-                ref={scrollContainerRef}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
-                  gap: '24px',
-                  padding: '24px 24px 24px 24px',
-                  maxHeight: 'calc(100vh - 200px)',
-                  overflowY: 'auto'
-                }}
-              >
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
+                gap: '24px',
+                padding: '24px 24px 24px 24px'
+              }}>
                 {filteredAndSortedArticles.map((article) => (
                   <div
                     key={article.id}
