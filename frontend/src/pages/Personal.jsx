@@ -15,17 +15,12 @@ export function PersonalPage() {
   const [savingSummary, setSavingSummary] = useState(false);
 
   useEffect(() => {
-    loadSummaries().then(() => {
-      loadMessages();
-    });
+    const initialize = async () => {
+      await loadSummaries();
+      await loadMessages();
+    };
+    initialize();
   }, []);
-
-  // Reload messages when summaries change to filter out already summarized ones
-  useEffect(() => {
-    if (summaries.length > 0) {
-      loadMessages();
-    }
-  }, [summaries.length]);
 
   const loadMessages = async () => {
     try {
@@ -68,24 +63,20 @@ export function PersonalPage() {
         }
         
         // Filter out already summarized messages
-        if (summaries.length > 0) {
-          const summarizedMessageIds = new Set();
-          summaries.forEach(summary => {
-            if (summary.message_ids && Array.isArray(summary.message_ids)) {
-              summary.message_ids.forEach(id => summarizedMessageIds.add(id));
-            }
-          });
-          
-          const filteredPairs = pairs.filter(pair => {
-            const questionSummarized = summarizedMessageIds.has(pair.questionId);
-            const answerSummarized = pair.answerId ? summarizedMessageIds.has(pair.answerId) : false;
-            return !questionSummarized && !answerSummarized;
-          });
-          
-          setMessages(filteredPairs);
-        } else {
-          setMessages(pairs);
-        }
+        const summarizedMessageIds = new Set();
+        summaries.forEach(summary => {
+          if (summary.message_ids && Array.isArray(summary.message_ids)) {
+            summary.message_ids.forEach(id => summarizedMessageIds.add(id));
+          }
+        });
+        
+        const filteredPairs = pairs.filter(pair => {
+          const questionSummarized = summarizedMessageIds.has(pair.questionId);
+          const answerSummarized = pair.answerId ? summarizedMessageIds.has(pair.answerId) : false;
+          return !questionSummarized && !answerSummarized;
+        });
+        
+        setMessages(filteredPairs);
       }
     } catch (err) {
       console.error('Error loading messages:', err);
@@ -169,6 +160,7 @@ export function PersonalPage() {
       if (result.success) {
         setNewSummary(result.summary);
         await loadSummaries();
+        await loadMessages(); // Reload messages to filter out summarized ones
         setSelectedItems(new Set());
       } else {
         alert(`Error: ${result.error}`);
