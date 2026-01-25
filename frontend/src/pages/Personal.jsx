@@ -29,7 +29,7 @@ export function PersonalPage({ onNavigate }) {
 
   // Reload messages when summaries change
   useEffect(() => {
-    if (summaries.length > 0) {
+    if (summaries.length >= 0) { // Reload even if 0 summaries (to show all messages)
       loadMessages(summaries);
     }
   }, [summaries.length]);
@@ -90,10 +90,14 @@ export function PersonalPage({ onNavigate }) {
         const filteredPairs = pairs.filter(pair => {
           const questionSummarized = summarizedMessageIds.has(pair.questionId);
           const answerSummarized = pair.answerId ? summarizedMessageIds.has(pair.answerId) : false;
-          return !questionSummarized && !answerSummarized;
+          const isSummarized = questionSummarized || answerSummarized;
+          if (isSummarized) {
+            console.log(`[Personal] Filtering out pair ${pair.id} - questionId: ${pair.questionId} (${questionSummarized}), answerId: ${pair.answerId} (${answerSummarized})`);
+          }
+          return !isSummarized;
         });
         
-        console.log(`[Personal] Loaded ${pairs.length} total pairs, filtered to ${filteredPairs.length} unsummarized pairs`);
+        console.log(`[Personal] Loaded ${pairs.length} total pairs, ${summarizedMessageIds.size} summarized message IDs, filtered to ${filteredPairs.length} unsummarized pairs`);
         setMessages(filteredPairs);
       }
     } catch (err) {
