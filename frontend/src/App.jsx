@@ -313,7 +313,19 @@ function App() {
       ) : activePage === 'alerts' ? (
         <AlertsPage />
       ) : activePage === 'personal' ? (
-        <PersonalPage />
+        <PersonalPage onNavigate={(page) => {
+          setActivePage(page);
+          window.location.hash = page;
+          localStorage.setItem('activePage', page);
+          setSearchOverlayOpen(false);
+        }} />
+      ) : activePage === 'personal-summaries' ? (
+        <PersonalSummariesPage onNavigate={(page) => {
+          setActivePage(page);
+          window.location.hash = page;
+          localStorage.setItem('activePage', page);
+          setSearchOverlayOpen(false);
+        }} />
       ) : activePage === 'users' ? (
         <UsersPage 
           key={`users-${Date.now()}`}
