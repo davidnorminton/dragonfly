@@ -27,7 +27,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion, ScraperSource, ScrapedArticle, ArticleTextContent, ArticleHtmlContent, PersonalChat
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion, ScraperSource, ScrapedArticle, ArticleTextContent, ArticleHtmlContent, PersonalChat, PersonalSummary
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -17114,6 +17114,193 @@ async def get_personal_chat_history(session_id: str, limit: int = 200):
                 .limit(limit)
             )
             messages = result.scalars().all()
+            
+            return {
+                "success": True,
+                "messages": [
+                    {
+                        "id": msg.id,
+                        "role": msg.role,
+                        "message": msg.message,
+                        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                        "session_id": msg.session_id
+                    }
+                    for msg in messages
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting personal chat history: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/personal/summaries")
+async def get_personal_summaries(session_id: str = None):
+    """Get all personal chat summaries, optionally filtered by session_id."""
+    try:
+        async with AsyncSessionLocal() as session:
+            query = select(PersonalSummary)
+            if session_id:
+                query = query.where(PersonalSummary.session_id == session_id)
+            query = query.order_by(PersonalSummary.created_at.desc())
+            
+            result = await session.execute(query)
+            summaries = result.scalars().all()
+            
+            return {
+                "success": True,
+                "summaries": [
+                    {
+                        "id": s.id,
+                        "session_id": s.session_id,
+                        "user_id": s.user_id,
+                        "title": s.title,
+                        "summary": s.summary,
+                        "message_count": s.message_count,
+                        "start_date": s.start_date.isoformat() if s.start_date else None,
+                        "end_date": s.end_date.isoformat() if s.end_date else None,
+                        "created_at": s.created_at.isoformat() if s.created_at else None,
+                        "updated_at": s.updated_at.isoformat() if s.updated_at else None
+                    }
+                    for s in summaries
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting personal summaries: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/personal/summaries")
+async def create_personal_summary(
+    session_id: str,
+    title: Optional[str] = None,
+    summary: str = None,
+    message_count: int = 0,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Create a new personal chat summary."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # If summary is not provided, generate one using AI
+            if not summary:
+                # Get messages from the period to summarize
+                query = select(PersonalChat).where(PersonalChat.session_id == session_id)
+                if start_date:
+                    from datetime import datetime
+                    start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                    query = query.where(PersonalChat.created_at >= start_dt)
+                if end_date:
+                    from datetime import datetime
+                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                    query = query.where(PersonalChat.created_at <= end_dt)
+                query = query.order_by(PersonalChat.created_at.asc())
+                
+                result = await session.execute(query)
+                messages = result.scalars().all()
+                
+                if not messages:
+                    return {"success": False, "error": "No messages found to summarize"}
+                
+                # Generate summary using AI
+                conversation_text = "\n".join([
+                    f"{msg.role}: {msg.message}" for msg in messages
+                ])
+                
+                summary_prompt = f"""Please provide a concise summary of the following conversation. Focus on key topics, decisions, and important information discussed:
+
+{conversation_text[:50000]}  # Limit to avoid context issues
+
+Provide a clear, structured summary that captures the essence of this conversation."""
+                
+                from services.ai_service import AIService
+                ai_service = AIService()
+                await ai_service._load_api_key()
+                
+                summary_result = await ai_service.execute({
+                    "question": summary_prompt,
+                    "messages": [],
+                    "use_system_max_tokens": False,
+                    "max_tokens": 2000
+                })
+                
+                summary = summary_result.get("answer", "Summary generation failed.")
+                message_count = len(messages)
+            
+            # Parse dates if provided
+            from datetime import datetime
+            start_dt = None
+            end_dt = None
+            if start_date:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            if end_date:
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            
+            # Get user_id from first message if available
+            user_id = None
+            if session_id:
+                msg_result = await session.execute(
+                    select(PersonalChat)
+                    .where(PersonalChat.session_id == session_id)
+                    .limit(1)
+                )
+                first_msg = msg_result.scalar_one_or_none()
+                if first_msg:
+                    user_id = first_msg.user_id
+            
+            new_summary = PersonalSummary(
+                session_id=session_id,
+                user_id=user_id,
+                title=title,
+                summary=summary,
+                message_count=message_count,
+                start_date=start_dt,
+                end_date=end_dt
+            )
+            
+            session.add(new_summary)
+            await session.commit()
+            await session.refresh(new_summary)
+            
+            return {
+                "success": True,
+                "summary": {
+                    "id": new_summary.id,
+                    "session_id": new_summary.session_id,
+                    "user_id": new_summary.user_id,
+                    "title": new_summary.title,
+                    "summary": new_summary.summary,
+                    "message_count": new_summary.message_count,
+                    "start_date": new_summary.start_date.isoformat() if new_summary.start_date else None,
+                    "end_date": new_summary.end_date.isoformat() if new_summary.end_date else None,
+                    "created_at": new_summary.created_at.isoformat() if new_summary.created_at else None,
+                    "updated_at": new_summary.updated_at.isoformat() if new_summary.updated_at else None
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error creating personal summary: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/api/personal/summaries/{summary_id}")
+async def delete_personal_summary(summary_id: int):
+    """Delete a personal chat summary."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(PersonalSummary).where(PersonalSummary.id == summary_id)
+            )
+            summary = result.scalar_one_or_none()
+            
+            if not summary:
+                return {"success": False, "error": "Summary not found"}
+            
+            await session.delete(summary)
+            await session.commit()
+            
+            return {"success": True}
+    except Exception as e:
+        logger.error(f"Error deleting personal summary: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
             
             return {
                 "success": True,

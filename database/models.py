@@ -114,6 +114,25 @@ class PersonalChat(Base):
         return f"<PersonalChat {self.role} - {self.id}>"
 
 
+class PersonalSummary(Base):
+    """Model for storing summaries of personal chat conversations to reduce context size."""
+    __tablename__ = "personal_summaries"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    session_id = Column(String, index=True, nullable=True)  # Session ID this summary covers
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)  # Link to user
+    title = Column(String, nullable=True)  # Optional title for the summary
+    summary = Column(Text, nullable=False)  # The summary text
+    message_count = Column(Integer, nullable=False, default=0)  # Number of messages summarized
+    start_date = Column(DateTime(timezone=True), nullable=True)  # Start of summarized period
+    end_date = Column(DateTime(timezone=True), nullable=True)  # End of summarized period
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<PersonalSummary {self.id}: {self.title or 'Untitled'}>"
+
+
 class PromptPreset(Base):
     """Model for storing custom prompt presets with context, temperature, and top_p."""
     __tablename__ = "prompt_presets"
