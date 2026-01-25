@@ -3,7 +3,7 @@ import os
 from services.base_service import BaseService
 from typing import Dict, Any, Optional, List
 import anthropic
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, APIError
 from config.settings import settings
 from config.persona_loader import load_persona_config, get_current_persona_name
 from config.api_key_loader import load_api_keys
@@ -11,6 +11,7 @@ from database.base import AsyncSessionLocal
 from database.models import ChatMessage
 from sqlalchemy import select, desc
 import asyncio
+import random
 
 
 class AIService(BaseService):
@@ -498,18 +499,53 @@ IMPORTANT: All text will be converted to speech.
             if estimated_tokens > 150000:
                 self.logger.warning(f"⚠️ Large context detected (~{estimated_tokens} tokens). May hit API limits.")
             
-            try:
-                message = await self.async_client.messages.create(
-                    messages=messages,
-                    **persona_settings
-                )
-            except Exception as e:
-                error_str = str(e)
-                if "context_length_exceeded" in error_str.lower() or "maximum context length" in error_str.lower():
-                    self.logger.error(f"❌ Context length exceeded! Estimated ~{estimated_tokens} tokens. Consider limiting conversation history.")
-                    raise Exception(f"Context too large (~{estimated_tokens} tokens). Please reduce conversation history or clear old messages.")
-                else:
-                    raise
+            # Retry logic for API overload errors (529)
+            max_retries = 3
+            base_delay = 2  # seconds
+            for attempt in range(max_retries):
+                try:
+                    message = await self.async_client.messages.create(
+                        messages=messages,
+                        **persona_settings
+                    )
+                    break  # Success, exit retry loop
+                except APIError as e:
+                    error_code = getattr(e, 'status_code', None)
+                    error_type = getattr(e, 'type', None)
+                    
+                    # Check for overload error (529) or rate limit errors
+                    is_overload = (
+                        error_code == 529 or 
+                        (error_type == 'overloaded_error') or
+                        'overloaded' in str(e).lower() or
+                        'rate_limit' in str(e).lower() or
+                        error_code == 429
+                    )
+                    
+                    if is_overload and attempt < max_retries - 1:
+                        # Exponential backoff with jitter
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        self.logger.warning(f"⚠️ API overloaded (attempt {attempt + 1}/{max_retries}). Retrying in {delay:.1f}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        # Not a retryable error or out of retries
+                        error_str = str(e)
+                        if "context_length_exceeded" in error_str.lower() or "maximum context length" in error_str.lower():
+                            self.logger.error(f"❌ Context length exceeded! Estimated ~{estimated_tokens} tokens. Consider limiting conversation history.")
+                            raise Exception(f"Context too large (~{estimated_tokens} tokens). Please reduce conversation history or clear old messages.")
+                        elif is_overload:
+                            self.logger.error(f"❌ API overloaded after {max_retries} attempts. Please try again in a moment.")
+                            raise Exception("The AI service is currently overloaded. Please try again in a few moments.")
+                        else:
+                            raise
+                except Exception as e:
+                    error_str = str(e)
+                    if "context_length_exceeded" in error_str.lower() or "maximum context length" in error_str.lower():
+                        self.logger.error(f"❌ Context length exceeded! Estimated ~{estimated_tokens} tokens. Consider limiting conversation history.")
+                        raise Exception(f"Context too large (~{estimated_tokens} tokens). Please reduce conversation history or clear old messages.")
+                    else:
+                        raise
             
             # Extract the response text
             answer = ""

@@ -17069,8 +17069,18 @@ async def personal_chat(request: Request):
                     logger.warning(f"⚠️ Personal chat: AI service returned empty answer")
                     answer = "I'm sorry, I couldn't generate a response. Please try again."
             except Exception as e:
+                error_str = str(e)
                 logger.error(f"❌ Personal chat: Error calling AI service: {e}", exc_info=True)
-                answer = f"Error: {str(e)}"
+                
+                # Provide user-friendly error messages
+                if "overloaded" in error_str.lower() or "529" in error_str:
+                    answer = "The AI service is currently overloaded. Please try again in a few moments."
+                elif "context too large" in error_str.lower():
+                    answer = "The conversation history is too long. Please clear old messages or start a new conversation."
+                elif "rate_limit" in error_str.lower() or "429" in error_str:
+                    answer = "Rate limit exceeded. Please wait a moment and try again."
+                else:
+                    answer = f"I encountered an error: {str(e)}. Please try again."
             
             # Save assistant message
             assistant_message = PersonalChat(
