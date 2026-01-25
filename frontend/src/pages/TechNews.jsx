@@ -916,40 +916,27 @@ export default function TechNews({ searchQuery = '' }) {
                 ))}
               </div>
               
-              {/* Load More Button */}
-              {visibleCount < filteredAndSortedArticles.length && (
-                <div style={{
-                  padding: '40px 24px 80px 24px',
-                  textAlign: 'center',
-                  marginTop: '20px'
+              {/* Loading More Indicator */}
+              {loadingMore && (
+                <div style={{ 
+                  textAlign: 'center', 
+                  marginTop: '32px', 
+                  paddingBottom: '60px',
+                  color: 'rgba(255,255,255,0.6)'
                 }}>
-                  <button
-                    onClick={() => setVisibleCount(prev => prev + 30)}
-                    style={{
-                      padding: '16px 32px',
-                      background: 'rgba(59, 130, 246, 0.15)',
-                      border: '1px solid rgba(59, 130, 246, 0.3)',
-                      borderRadius: '12px',
-                      color: '#60a5fa',
-                      cursor: 'pointer',
-                      fontSize: '1em',
-                      fontWeight: '600',
-                      transition: 'all 0.3s ease',
-                      boxShadow: '0 4px 16px rgba(59, 130, 246, 0.2)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.background = 'rgba(59, 130, 246, 0.25)';
-                      e.target.style.transform = 'translateY(-2px)';
-                      e.target.style.boxShadow = '0 8px 32px rgba(59, 130, 246, 0.3)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.background = 'rgba(59, 130, 246, 0.15)';
-                      e.target.style.transform = 'translateY(0)';
-                      e.target.style.boxShadow = '0 4px 16px rgba(59, 130, 246, 0.2)';
-                    }}
-                  >
-                    📰 Load More Articles ({filteredAndSortedArticles.length - visibleCount} remaining)
-                  </button>
+                  <div style={{ fontSize: '1.2em', marginBottom: '8px' }}>📰</div>
+                  <div>Loading more articles...</div>
+                </div>
+              )}
+              {!hasMore && articles.length > 0 && !searchQuery && !selectedDomain && (
+                <div style={{ 
+                  textAlign: 'center', 
+                  marginTop: '32px', 
+                  paddingBottom: '60px',
+                  color: 'rgba(255,255,255,0.5)',
+                  fontSize: '0.9em'
+                }}>
+                  ✓ All articles loaded ({articles.length} total)
                 </div>
               )}
             </>
