@@ -108,6 +108,7 @@ export default function TechNews({ searchQuery = '' }) {
 
   // Filter and sort articles with enhanced search
   const filteredAndSortedArticles = useMemo(() => {
+    console.log(`[TechNews] Filtering articles: ${articles.length} total, viewMode: ${viewMode}, selectedDomain: ${selectedDomain}, searchQuery: ${searchQuery}`);
     let filtered = articles;
     
     // Filter by domain if selected
@@ -221,8 +222,9 @@ export default function TechNews({ searchQuery = '' }) {
       }
     }
 
+    console.log(`[TechNews] Filtered and sorted: ${sorted.length} articles`);
     return sorted;
-  }, [articles, searchQuery, sortBy, selectedDomain]);
+  }, [articles, searchQuery, sortBy, selectedDomain, viewMode]);
 
   useEffect(() => {
     // Ensure selectedDomain is cleared on mount (in case of stale state)
@@ -302,15 +304,23 @@ export default function TechNews({ searchQuery = '' }) {
     try {
       const offset = reset ? 0 : articles.length;
       const limit = 30;
+      console.log(`[TechNews] Loading articles: offset=${offset}, limit=${limit}`);
       const response = await fetch(`/api/scraper/articles?limit=${limit}&offset=${offset}`);
       const result = await response.json();
+      
+      console.log(`[TechNews] API response:`, { success: result.success, articlesCount: result.articles?.length, total: result.total, error: result.error });
       
       if (result.success) {
         if (reset) {
           setArticles(result.articles || []);
           setTotalArticles(result.total || 0);
+          console.log(`[TechNews] Set articles: ${result.articles?.length || 0} articles, total: ${result.total || 0}`);
         } else {
-          setArticles(prev => [...prev, ...(result.articles || [])]);
+          setArticles(prev => {
+            const newArticles = [...prev, ...(result.articles || [])];
+            console.log(`[TechNews] Appended articles: ${prev.length} → ${newArticles.length}`);
+            return newArticles;
+          });
         }
         
         // Check if there are more articles to load
@@ -319,9 +329,11 @@ export default function TechNews({ searchQuery = '' }) {
         
         console.log(`📰 Loaded ${result.articles?.length || 0} articles (${loadedCount}/${result.total || 0} total)`);
       } else {
+        console.error(`[TechNews] Error loading articles:`, result.error);
         setMessage(`Error loading articles: ${result.error}`);
       }
     } catch (err) {
+      console.error(`[TechNews] Failed to load articles:`, err);
       setMessage(`Failed to load articles: ${err.message}`);
     } finally {
       setLoading(false);
