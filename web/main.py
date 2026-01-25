@@ -17171,17 +17171,18 @@ async def get_personal_summaries(session_id: str = None):
 
 
 @app.post("/api/personal/summaries")
-async def create_personal_summary(
-    session_id: str,
-    title: Optional[str] = None,
-    summary: str = None,
-    message_count: int = 0,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    message_ids: Optional[List[int]] = None
-):
+async def create_personal_summary(request: Request):
     """Create a new personal chat summary."""
     try:
+        body = await request.json()
+        session_id = body.get("session_id")
+        title = body.get("title")
+        summary = body.get("summary")
+        message_count = body.get("message_count", 0)
+        start_date = body.get("start_date")
+        end_date = body.get("end_date")
+        message_ids = body.get("message_ids")
+        
         async with AsyncSessionLocal() as session:
             # If summary is provided, use AI to condense it to main facts only
             # If not provided, get messages and generate summary
