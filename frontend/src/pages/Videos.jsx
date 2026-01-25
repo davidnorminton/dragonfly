@@ -1130,51 +1130,30 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
 
             {/* TV Shows List */}
             {viewMode === 'tvshows' &&
-              filteredTVShows.map((show) => {
-                // Get first episode for download
-                const firstSeason = show.seasons?.find(s => s.episodes && s.episodes.length > 0);
-                const firstEpisode = firstSeason?.episodes?.sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0))[0];
-                
-                return (
-                  <div
-                    key={show.id}
-                    className={`video-row artist-only ${selectedShow?.id === show.id ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedShow(show);
-                      setSelectedMovie(null);
-                      setSelectedSeason(null);
-                    }}
-                  >
-                    {show.poster_path && (
-                      <img
-                        src={show.poster_path}
-                        alt={show.title}
-                        className="artist-thumb"
-                        style={{ borderRadius: '4px' }}
-                      />
-                    )}
-                    <div style={{ flex: 1 }}>
-                      <strong>{show.title}</strong>
-                      {show.seasons && <div className="video-row-sub">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>}
-                    </div>
-                    {firstEpisode && (
-                      <button
-                        className="cast-episode-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          window.open(`/api/video/download/${firstEpisode.id}`, '_blank');
-                        }}
-                        title="Download First Episode"
-                        style={{ marginLeft: 'auto', flexShrink: 0 }}
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
-                        </svg>
-                      </button>
-                    )}
+              filteredTVShows.map((show) => (
+                <div
+                  key={show.id}
+                  className={`video-row artist-only ${selectedShow?.id === show.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedShow(show);
+                    setSelectedMovie(null);
+                    setSelectedSeason(null);
+                  }}
+                >
+                  {show.poster_path && (
+                    <img
+                      src={show.poster_path}
+                      alt={show.title}
+                      className="artist-thumb"
+                      style={{ borderRadius: '4px' }}
+                    />
+                  )}
+                  <div>
+                    <strong>{show.title}</strong>
+                    {show.seasons && <div className="video-row-sub">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>}
                   </div>
-                );
-              })}
+                </div>
+              ))}
           </div>
         </div>
 

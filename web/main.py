@@ -9740,6 +9740,104 @@ async def stream_video(video_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/video/download/{video_id}")
+async def download_video(video_id: int):
+    """Download a video file with properly formatted filename."""
+    try:
+        async with AsyncSessionLocal() as session:
+            logger.info(f"[DOWNLOAD] Attempting to download video ID: {video_id}")
+            
+            # Try to find in movies
+            result = await session.execute(
+                select(VideoMovie).where(VideoMovie.id == video_id)
+            )
+            movie = result.scalar_one_or_none()
+            
+            if movie:
+                logger.info(f"[DOWNLOAD] Found movie: {movie.title} (ID: {movie.id})")
+                video_path = Path(movie.file_path)
+                # Format: movie_name_year.mp4
+                movie_name = movie.title.replace(' ', '_').replace('/', '_').replace('\\', '_')
+                # Remove invalid filename characters
+                movie_name = re.sub(r'[<>:"|?*]', '', movie_name)
+                year = movie.year if movie.year else ''
+                filename = f"{movie_name}_{year}.mp4" if year else f"{movie_name}.mp4"
+                logger.info(f"[DOWNLOAD] Movie file path: {video_path}, exists: {video_path.exists()}")
+            else:
+                # Try to find in TV episodes
+                logger.info(f"[DOWNLOAD] Not a movie, checking TV episodes...")
+                result = await session.execute(
+                    select(VideoTVEpisode)
+                    .options(selectinload(VideoTVEpisode.season).selectinload(VideoTVSeason.show))
+                    .where(VideoTVEpisode.id == video_id)
+                )
+                episode = result.scalar_one_or_none()
+                
+                if not episode:
+                    logger.warning(f"[DOWNLOAD] Video ID {video_id} not found in movies or episodes")
+                    raise HTTPException(status_code=404, detail=f"Video with ID {video_id} not found in database")
+                
+                logger.info(f"[DOWNLOAD] Found episode: ID {episode.id}")
+                video_path = Path(episode.file_path)
+                # Get show and season info
+                season = episode.season
+                if not season:
+                    logger.error(f"[DOWNLOAD] Season not found for episode {episode.id}")
+                    raise HTTPException(status_code=404, detail="Season not found")
+                
+                show = season.show
+                if not show:
+                    logger.error(f"[DOWNLOAD] Show not found for season {season.id}")
+                    raise HTTPException(status_code=404, detail="Show not found")
+                
+                # Format: show_name_S?.E?.mp4
+                show_name = show.title.replace(' ', '_').replace('/', '_').replace('\\', '_')
+                # Remove invalid filename characters
+                show_name = re.sub(r'[<>:"|?*]', '', show_name)
+                season_num = season.season_number if season.season_number else 0
+                episode_num = episode.episode_number if episode.episode_number else 0
+                filename = f"{show_name}_S{season_num:02d}E{episode_num:02d}.mp4"
+                logger.info(f"[DOWNLOAD] Episode file path: {video_path}, exists: {video_path.exists()}")
+            
+            if not video_path.exists():
+                logger.error(f"[DOWNLOAD] Video file does not exist: {video_path}")
+                raise HTTPException(status_code=404, detail=f"Video file not found at path: {video_path}")
+            
+            # Get file extension from original file
+            ext = video_path.suffix.lower()
+            if ext:
+                # Replace extension in filename
+                filename = filename.rsplit('.', 1)[0] + ext
+            
+            # Detect MIME type
+            mime_types = {
+                '.mp4': 'video/mp4',
+                '.m4v': 'video/mp4',
+                '.webm': 'video/webm',
+                '.mkv': 'video/x-matroska',
+                '.avi': 'video/x-msvideo',
+                '.mov': 'video/quicktime',
+            }
+            media_type = mime_types.get(ext, 'video/mp4')
+            
+            logger.info(f"[DOWNLOAD] Serving file: {video_path} as {filename} ({media_type})")
+            return FileResponse(
+                video_path,
+                media_type=media_type,
+                filename=filename,
+                headers={
+                    'Content-Disposition': f'attachment; filename="{filename}"',
+                    'Access-Control-Allow-Origin': '*',
+                }
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[DOWNLOAD] Error downloading video ID {video_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/images/{filename:path}")
 async def serve_video_image(filename: str):
     """Serve images from Movies/images or TV/images directories."""
