@@ -21,6 +21,10 @@ export default function TechNews({ searchQuery = '' }) {
     return '';
   });
   const [availableDomains, setAvailableDomains] = useState([]);
+  const [viewMode, setViewMode] = useState(() => {
+    const stored = localStorage.getItem('techNewsViewMode');
+    return stored || 'card'; // 'card' or 'list'
+  });
 
   // Strip HTML tags from text for search
   const stripHTML = (html) => {
@@ -673,6 +677,84 @@ export default function TechNews({ searchQuery = '' }) {
             <option value="title-desc" style={{ background: '#1a1a1a' }}>Title (Z-A)</option>
           </select>
         </div>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <button
+            onClick={() => {
+              const newMode = viewMode === 'card' ? 'list' : 'card';
+              setViewMode(newMode);
+              localStorage.setItem('techNewsViewMode', newMode);
+            }}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: viewMode === 'card' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)',
+              color: '#fff',
+              fontSize: '0.9em',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              if (viewMode !== 'card') {
+                e.target.style.background = 'rgba(255,255,255,0.1)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (viewMode !== 'card') {
+                e.target.style.background = 'rgba(255,255,255,0.05)';
+              }
+            }}
+            title="Card View"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
+            </svg>
+            Cards
+          </button>
+          <button
+            onClick={() => {
+              const newMode = viewMode === 'list' ? 'card' : 'list';
+              setViewMode(newMode);
+              localStorage.setItem('techNewsViewMode', newMode);
+            }}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: viewMode === 'list' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)',
+              color: '#fff',
+              fontSize: '0.9em',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              if (viewMode !== 'list') {
+                e.target.style.background = 'rgba(255,255,255,0.1)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (viewMode !== 'list') {
+                e.target.style.background = 'rgba(255,255,255,0.05)';
+              }
+            }}
+            title="List View"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+            </svg>
+            List
+          </button>
+        </div>
       </div>
 
       {/* Main Content Area */}
@@ -736,6 +818,187 @@ export default function TechNews({ searchQuery = '' }) {
                 </p>
               </div>
             </div>
+          ) : viewMode === 'list' ? (
+            <>
+              {/* Articles List View */}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px',
+                padding: '24px'
+              }}>
+                {filteredAndSortedArticles.map((article) => (
+                  <div
+                    key={article.id}
+                    style={{
+                      display: 'flex',
+                      gap: '20px',
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      boxShadow: selectedArticle?.id === article.id ? '0 8px 32px rgba(59, 130, 246, 0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+                      position: 'relative',
+                      padding: '16px'
+                    }}
+                    onClick={() => loadArticleDetails(article.id)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateX(4px)';
+                      e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.2)';
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateX(0)';
+                      e.currentTarget.style.boxShadow = selectedArticle?.id === article.id ? '0 8px 32px rgba(59, 130, 246, 0.3)' : '0 2px 8px rgba(0,0,0,0.1)';
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                    }}
+                  >
+                    {/* Read Checkmark */}
+                    {article.read && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '12px',
+                        right: '12px',
+                        background: 'rgba(34, 197, 94, 0.9)',
+                        borderRadius: '50%',
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10,
+                        boxShadow: '0 2px 8px rgba(34, 197, 94, 0.4)'
+                      }}>
+                        <span style={{ color: '#fff', fontSize: '16px' }}>✓</span>
+                      </div>
+                    )}
+                    
+                    {/* Article Image - Left Side */}
+                    {article.image_url ? (
+                      <div style={{
+                        width: '200px',
+                        minWidth: '200px',
+                        height: '150px',
+                        background: `url(${article.image_url})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        borderRadius: '8px',
+                        flexShrink: 0
+                      }} />
+                    ) : (
+                      <div style={{
+                        width: '200px',
+                        minWidth: '200px',
+                        height: '150px',
+                        background: 'rgba(255,255,255,0.05)',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}>
+                        {getFaviconUrl(article.url) ? (
+                          <img
+                            src={getFaviconUrl(article.url)}
+                            alt=""
+                            style={{ width: '48px', height: '48px', opacity: 0.5 }}
+                            onError={(e) => e.target.style.display = 'none'}
+                          />
+                        ) : (
+                          <span style={{ fontSize: '2em', opacity: 0.3 }}>📰</span>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Article Content - Right Side */}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {/* Domain Badge */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '4px'
+                      }}>
+                        {getFaviconUrl(article.url) && (
+                          <img
+                            src={getFaviconUrl(article.url)}
+                            alt=""
+                            style={{ width: '14px', height: '14px', opacity: 0.7 }}
+                            onError={(e) => e.target.style.display = 'none'}
+                          />
+                        )}
+                        <span style={{
+                          background: 'rgba(255,255,255,0.1)',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.75em',
+                          color: 'rgba(255,255,255,0.7)'
+                        }}>
+                          {getDomainFromUrl(article.url)}
+                        </span>
+                        <span style={{
+                          fontSize: '0.8em',
+                          color: 'rgba(255,255,255,0.5)',
+                          marginLeft: 'auto'
+                        }}>
+                          {article.published_date
+                            ? new Date(article.published_date).toLocaleDateString()
+                            : new Date(article.scraped_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      
+                      {/* Title */}
+                      <h3 style={{
+                        margin: '0',
+                        fontSize: '1.3em',
+                        fontWeight: '600',
+                        color: '#fff',
+                        lineHeight: '1.4'
+                      }}>
+                        {article.title || 'Untitled Article'}
+                      </h3>
+                      
+                      {/* Description */}
+                      {article.summary && (
+                        <p style={{
+                          margin: '0',
+                          fontSize: '0.95em',
+                          color: 'rgba(255,255,255,0.7)',
+                          lineHeight: '1.6',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 3,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden'
+                        }}>
+                          {article.summary}
+                        </p>
+                      )}
+                      
+                      {/* Read More Indicator */}
+                      <div style={{
+                        marginTop: 'auto',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '0.85em',
+                        color: '#60a5fa'
+                      }}>
+                        <span style={{
+                          background: 'rgba(59, 130, 246, 0.2)',
+                          color: '#60a5fa',
+                          padding: '4px 8px',
+                          borderRadius: '6px'
+                        }}>
+                          Read more →
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           ) : (
             <>
               {/* Articles Grid */}
