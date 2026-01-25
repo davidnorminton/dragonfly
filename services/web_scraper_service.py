@@ -10,7 +10,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from urllib.parse import urljoin, urlparse
 from email.utils import parsedate_to_datetime
 
@@ -112,6 +112,9 @@ class WebScraperService:
         Yields:
             Progress events as dictionaries
         """
+        # Store feed data for fallback content extraction
+        feed_data = {}
+        
         try:
             # Fetch the source
             async with httpx.AsyncClient(timeout=30.0, headers=self.headers, follow_redirects=True) as client:
@@ -132,7 +135,7 @@ class WebScraperService:
             
             if is_feed:
                 logger.info(f"Detected RSS/Atom feed: {source.url}")
-                article_urls = self._extract_urls_from_feed(response.text)
+                article_urls, feed_data = self._extract_urls_and_data_from_feed(response.text)
             else:
                 logger.info(f"Detected HTML page: {source.url}")
                 soup = BeautifulSoup(response.text, 'html.parser')
@@ -171,8 +174,9 @@ class WebScraperService:
                 try:
                     yield {"type": "url", "url": article_url, "current": idx, "total": len(new_article_urls)}
                     
-                    # Scrape the article
-                    article_data = await self.scrape_article(article_url)
+                    # Scrape the article with RSS fallback
+                    rss_fallback = feed_data.get(article_url)
+                    article_data = await self.scrape_article(article_url, rss_fallback=rss_fallback)
                     
                     if article_data:
                         # Create new scraped article
@@ -220,7 +224,7 @@ class WebScraperService:
                         
                         await session.commit()
                         saved_count += 1
-                        yield {"type": "scraped", "url": article_url}
+                        yield {"type": "scraped", "url": article_url, "used_rss_fallback": article_data.get('metadata', {}).get('used_rss_fallback', False)}
                     else:
                         failed_count += 1
                         yield {"type": "failed", "url": article_url, "reason": "Failed to extract content"}
@@ -254,6 +258,9 @@ class WebScraperService:
             "articles_saved": 0
         }
         
+        # Store feed data for fallback content extraction
+        feed_data = {}
+        
         try:
             # Fetch the source
             async with httpx.AsyncClient(timeout=30.0, headers=self.headers, follow_redirects=True) as client:
@@ -274,7 +281,7 @@ class WebScraperService:
             
             if is_feed:
                 logger.info(f"Detected RSS/Atom feed: {source.url}")
-                article_urls = self._extract_urls_from_feed(response.text)
+                article_urls, feed_data = self._extract_urls_and_data_from_feed(response.text)
                 if not article_urls:
                     logger.warning(f"⚠️  No URLs extracted from RSS feed: {source.url}")
                     logger.warning(f"   Feed content length: {len(response.text)}")
@@ -333,8 +340,9 @@ class WebScraperService:
                 try:
                     logger.info(f"  [{idx}/{len(new_article_urls)}] Scraping: {article_url}")
                     
-                    # Scrape the article
-                    article_data = await self.scrape_article(article_url)
+                    # Scrape the article, passing feed data as fallback
+                    rss_fallback = feed_data.get(article_url)
+                    article_data = await self.scrape_article(article_url, rss_fallback=rss_fallback)
                     
                     if article_data:
                         # Create new scraped article (without content field)
@@ -409,9 +417,23 @@ class WebScraperService:
         Returns:
             List of article URLs
         """
+        urls, _ = self._extract_urls_and_data_from_feed(feed_content)
+        return urls
+    
+    def _extract_urls_and_data_from_feed(self, feed_content: str) -> Tuple[List[str], Dict[str, Dict]]:
+        """
+        Extract article URLs and data from an RSS/Atom feed.
+        
+        Args:
+            feed_content: Raw feed content (XML)
+            
+        Returns:
+            Tuple of (list of article URLs, dict mapping URL to feed entry data)
+        """
         try:
             feed = feedparser.parse(feed_content)
             article_urls = []
+            feed_data = {}
             
             # Check for feed parsing errors
             if feed.bozo:
@@ -420,22 +442,61 @@ class WebScraperService:
             if not feed.entries:
                 logger.warning(f"No entries found in feed. Feed status: {feed.get('status', 'unknown')}")
                 logger.debug(f"Feed keys: {list(feed.keys())}")
-                return []
+                return [], {}
             
             for entry in feed.entries:
                 # Get the article URL (link)
                 url = entry.get('link')
                 if url:
                     article_urls.append(url)
+                    
+                    # Store feed entry data for fallback content extraction
+                    entry_data = {
+                        'title': entry.get('title'),
+                        'summary': entry.get('summary') or entry.get('description'),
+                        'author': entry.get('author') or entry.get('dc_creator'),
+                        'published': entry.get('published') or entry.get('updated'),
+                        'content': None,
+                        'image': None
+                    }
+                    
+                    # Try to get full content from content:encoded or content field
+                    if hasattr(entry, 'content') and entry.content:
+                        # content is usually a list
+                        for content_item in entry.content:
+                            if content_item.get('type', '').startswith('text/html') or 'html' in content_item.get('type', '').lower():
+                                entry_data['content'] = content_item.get('value')
+                                break
+                            elif content_item.get('value'):
+                                entry_data['content'] = content_item.get('value')
+                    
+                    # Try content:encoded
+                    if not entry_data['content'] and hasattr(entry, 'content_encoded'):
+                        entry_data['content'] = entry.content_encoded
+                    
+                    # Fall back to summary if no content
+                    if not entry_data['content'] and entry_data['summary']:
+                        entry_data['content'] = entry_data['summary']
+                    
+                    # Try to get image from media:thumbnail or enclosure
+                    if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+                        entry_data['image'] = entry.media_thumbnail[0].get('url')
+                    elif hasattr(entry, 'enclosures') and entry.enclosures:
+                        for enc in entry.enclosures:
+                            if enc.get('type', '').startswith('image/'):
+                                entry_data['image'] = enc.get('href') or enc.get('url')
+                                break
+                    
+                    feed_data[url] = entry_data
                 else:
                     logger.debug(f"Entry missing 'link': {entry.get('title', 'No title')}")
             
             logger.info(f"Extracted {len(article_urls)} URLs from RSS/Atom feed (from {len(feed.entries)} entries)")
-            return article_urls
+            return article_urls, feed_data
             
         except Exception as e:
             logger.error(f"Error parsing feed: {e}", exc_info=True)
-            return []
+            return [], {}
     
     def _extract_article_urls(self, soup: BeautifulSoup, base_url: str) -> List[str]:
         """
@@ -526,12 +587,14 @@ class WebScraperService:
         
         return True
     
-    async def scrape_article(self, url: str) -> Optional[Dict[str, Any]]:
+    async def scrape_article(self, url: str, rss_fallback: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
         """
         Scrape content from a single article using Trafilatura.
+        Falls back to RSS feed content if regular extraction fails.
         
         Args:
             url: Article URL
+            rss_fallback: Optional dict with data from RSS feed entry (title, summary, content, author, etc.)
             
         Returns:
             Dictionary with article data or None if failed
@@ -714,15 +777,78 @@ class WebScraperService:
                 )
                 article_data['image_path'] = image_path
             
-            # Validate we got meaningful content
-            if not content or len(content.strip()) < 100:
-                logger.warning(f"Article content too short or empty: {url}")
+            # Check if we got meaningful content - if not, try RSS fallback
+            content_too_short = not content or len(content.strip()) < 100
+            missing_metadata = not article_data.get('title') and not article_data.get('summary')
+            
+            if (content_too_short or missing_metadata) and rss_fallback:
+                logger.info(f"🔄 Attempting RSS fallback for {url} (content_short={content_too_short}, missing_meta={missing_metadata})")
+                
+                # Use RSS feed data as fallback
+                if rss_fallback.get('content') and (content_too_short or len(rss_fallback['content']) > len(content or '')):
+                    rss_content = rss_fallback['content']
+                    # Clean up RSS content and ensure it's valid HTML
+                    if not rss_content.startswith('<'):
+                        rss_content = f"<p>{rss_content.replace(chr(10), '</p><p>')}</p>"
+                    # Fix image URLs in RSS content too
+                    rss_content = self._fix_image_urls(rss_content, url)
+                    article_data['content'] = rss_content
+                    content = rss_content  # Update content variable for validation
+                    logger.info(f"   ✓ Using RSS content ({len(rss_content)} chars)")
+                
+                if not article_data.get('title') and rss_fallback.get('title'):
+                    article_data['title'] = rss_fallback['title']
+                    logger.info(f"   ✓ Using RSS title: {rss_fallback['title'][:50]}")
+                
+                if not article_data.get('summary') and rss_fallback.get('summary'):
+                    # Clean HTML tags from summary
+                    summary = rss_fallback['summary']
+                    if '<' in summary:
+                        try:
+                            summary = BeautifulSoup(summary, 'html.parser').get_text(strip=True)
+                        except:
+                            pass
+                    article_data['summary'] = summary[:500]  # Limit summary length
+                    logger.info(f"   ✓ Using RSS summary")
+                
+                if not article_data.get('author') and rss_fallback.get('author'):
+                    article_data['author'] = rss_fallback['author']
+                    logger.info(f"   ✓ Using RSS author: {rss_fallback['author']}")
+                
+                if not article_data.get('image_url') and rss_fallback.get('image'):
+                    article_data['image_url'] = rss_fallback['image']
+                    # Download RSS image
+                    if self.images_directory:
+                        image_path = await self._download_image(
+                            rss_fallback['image'],
+                            article_data.get('title') or url
+                        )
+                        article_data['image_path'] = image_path
+                    logger.info(f"   ✓ Using RSS image")
+                
+                if not article_data.get('published_date') and rss_fallback.get('published'):
+                    try:
+                        # Try parsing RSS date format
+                        pub_date = rss_fallback['published']
+                        article_data['published_date'] = parsedate_to_datetime(pub_date)
+                        logger.info(f"   ✓ Using RSS published date")
+                    except Exception as e:
+                        logger.debug(f"Could not parse RSS date {rss_fallback.get('published')}: {e}")
+            
+            # Final validation - be more lenient if we have RSS data
+            final_content = article_data.get('content') or content
+            if not final_content or len(final_content.strip()) < 50:
+                logger.warning(f"Article content too short or empty after all attempts: {url}")
                 return None
             
             # Also ensure we have at least a title or summary
             if not article_data.get('title') and not article_data.get('summary'):
                 logger.warning(f"Article missing both title and summary: {url}")
                 return None
+            
+            # Mark if we used RSS fallback
+            if rss_fallback:
+                article_data['metadata']['used_rss_fallback'] = True
             
             return article_data
             
