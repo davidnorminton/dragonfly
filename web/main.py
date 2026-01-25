@@ -17057,8 +17057,20 @@ async def personal_chat(request: Request):
             }
             
             # Get response
-            result = await ai_service.execute(input_data)
-            answer = result.get("answer", "")
+            # Log context size for debugging
+            total_chars = sum(len(msg.get("content", "")) for msg in conversation_history) + len(question)
+            logger.info(f"📊 Personal chat context: {len(conversation_history)} messages, ~{total_chars} characters")
+            
+            try:
+                result = await ai_service.execute(input_data)
+                answer = result.get("answer", "")
+                
+                if not answer:
+                    logger.warning(f"⚠️ Personal chat: AI service returned empty answer")
+                    answer = "I'm sorry, I couldn't generate a response. Please try again."
+            except Exception as e:
+                logger.error(f"❌ Personal chat: Error calling AI service: {e}", exc_info=True)
+                answer = f"Error: {str(e)}"
             
             # Save assistant message
             assistant_message = PersonalChat(

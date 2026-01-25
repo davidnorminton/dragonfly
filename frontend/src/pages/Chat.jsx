@@ -106,13 +106,20 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           const result = await response.json();
           if (result.success && result.messages) {
             // Convert personal chat messages to the format expected by the UI
-            const formattedMessages = result.messages.map(msg => ({
-              id: msg.id,
-              role: msg.role,
-              message: msg.message,
-              created_at: msg.created_at,
-              session_id: PERSONAL_SESSION_ID
-            }));
+            const formattedMessages = result.messages
+              .map(msg => ({
+                id: msg.id,
+                role: msg.role,
+                message: msg.message,
+                created_at: msg.created_at,
+                session_id: PERSONAL_SESSION_ID
+              }))
+              .sort((a, b) => {
+                // Sort by created_at to ensure chronological order
+                const dateA = new Date(a.created_at || 0).getTime();
+                const dateB = new Date(b.created_at || 0).getTime();
+                return dateA - dateB;
+              });
             // Clear existing messages and set new ones
             setPersonalMessages(formattedMessages);
           } else {
@@ -437,13 +444,20 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               const historyResponse = await fetch(`/api/personal/chat/history?session_id=${PERSONAL_SESSION_ID}`);
               const historyResult = await historyResponse.json();
               if (historyResult.success && historyResult.messages) {
-                const formattedMessages = historyResult.messages.map(msg => ({
-                  id: msg.id,
-                  role: msg.role,
-                  message: msg.message,
-                  created_at: msg.created_at,
-                  session_id: PERSONAL_SESSION_ID
-                }));
+                const formattedMessages = historyResult.messages
+                  .map(msg => ({
+                    id: msg.id,
+                    role: msg.role,
+                    message: msg.message,
+                    created_at: msg.created_at,
+                    session_id: PERSONAL_SESSION_ID
+                  }))
+                  .sort((a, b) => {
+                    // Sort by created_at to ensure chronological order
+                    const dateA = new Date(a.created_at || 0).getTime();
+                    const dateB = new Date(b.created_at || 0).getTime();
+                    return dateA - dateB;
+                  });
                 setPersonalMessages(formattedMessages);
               }
             } catch (err) {

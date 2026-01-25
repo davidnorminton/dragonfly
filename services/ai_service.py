@@ -486,10 +486,30 @@ IMPORTANT: All text will be converted to speech.
             self.logger.debug(f"Sending {len(messages)} messages to Claude API (including {len(conversation_history)} from history)")
             self.logger.info(f"🔍 API call will include 'system' parameter: {'system' in persona_settings}")
             
-            message = await self.async_client.messages.create(
-                messages=messages,
-                **persona_settings
-            )
+            # Estimate token count (rough: ~4 chars per token)
+            total_chars = sum(len(msg.get("content", "")) for msg in messages)
+            estimated_tokens = total_chars // 4
+            if system_prompt:
+                estimated_tokens += len(system_prompt) // 4
+            self.logger.info(f"📊 Estimated context size: ~{estimated_tokens} tokens ({total_chars} characters)")
+            
+            # Claude models have context limits (e.g., Claude 3.5 Sonnet: 200k tokens)
+            # If we're getting close, warn but still try
+            if estimated_tokens > 150000:
+                self.logger.warning(f"⚠️ Large context detected (~{estimated_tokens} tokens). May hit API limits.")
+            
+            try:
+                message = await self.async_client.messages.create(
+                    messages=messages,
+                    **persona_settings
+                )
+            except Exception as e:
+                error_str = str(e)
+                if "context_length_exceeded" in error_str.lower() or "maximum context length" in error_str.lower():
+                    self.logger.error(f"❌ Context length exceeded! Estimated ~{estimated_tokens} tokens. Consider limiting conversation history.")
+                    raise Exception(f"Context too large (~{estimated_tokens} tokens). Please reduce conversation history or clear old messages.")
+                else:
+                    raise
             
             # Extract the response text
             answer = ""
