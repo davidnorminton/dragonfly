@@ -27,7 +27,7 @@ from collections import defaultdict
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 from database.base import AsyncSessionLocal, engine as db_engine
-from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion, ScraperSource, ScrapedArticle, ArticleTextContent, ArticleHtmlContent
+from database.models import DeviceConnection, DeviceTelemetry, ChatMessage, CollectedData, MusicArtist, MusicAlbum, MusicSong, MusicPlay, MusicPlaylist, MusicPlaylistSong, OctopusEnergyConsumption, OctopusEnergyTariff, OctopusEnergyTariffRate, ChatSession, ArticleSummary, Alarm, AlarmType, PromptPreset, AIModelCache, VideoMovie, VideoTVShow, VideoTVSeason, VideoTVEpisode, VideoPlaybackProgress, VideoSimilarContent, ActorFilmography, MovieCastCrew, TVShowCastCrew, SystemConfig, ApiKeysConfig, User, Story, Plot, StoryCast, StoryScreenplayVersion, StoryComplete, Course, CourseSection, CourseSubsection, Lesson, CourseQuestion, ScraperSource, ScrapedArticle, ArticleTextContent, ArticleHtmlContent, PersonalChat
 from sqlalchemy import select, desc, func, or_, delete, and_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -16899,6 +16899,187 @@ async def test_scraper_url(request: Request):
             
     except Exception as e:
         logger.error(f"Error testing scraper URL: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/personal/config")
+async def get_personal_config():
+    """Get personal chat configuration."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "personal_chat")
+            )
+            config = result.scalar_one_or_none()
+            
+            if config and config.config_value:
+                return {
+                    "success": True,
+                    "config": config.config_value
+                }
+            else:
+                # Return defaults
+                return {
+                    "success": True,
+                    "config": {
+                        "custom_context": "",
+                        "max_tokens": 4096
+                    }
+                }
+    except Exception as e:
+        logger.error(f"Error getting personal config: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/personal/config")
+async def save_personal_config(request: Request):
+    """Save personal chat configuration."""
+    try:
+        data = await request.json()
+        
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "personal_chat")
+            )
+            config = result.scalar_one_or_none()
+            
+            if config:
+                config.config_value = {
+                    "custom_context": data.get("custom_context", ""),
+                    "max_tokens": data.get("max_tokens", 4096)
+                }
+            else:
+                config = SystemConfig(
+                    config_key="personal_chat",
+                    config_value={
+                        "custom_context": data.get("custom_context", ""),
+                        "max_tokens": data.get("max_tokens", 4096)
+                    }
+                )
+                session.add(config)
+            
+            await session.commit()
+            return {"success": True}
+    except Exception as e:
+        logger.error(f"Error saving personal config: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/personal/chat")
+async def personal_chat(request: Request):
+    """Handle personal chat message."""
+    try:
+        data = await request.json()
+        question = data.get("question")
+        session_id = data.get("session_id")
+        user_id = data.get("user_id")
+        
+        if not question:
+            return {"success": False, "error": "No question provided"}
+        
+        # Get personal config
+        async with AsyncSessionLocal() as session:
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "personal_chat")
+            )
+            config = config_result.scalar_one_or_none()
+            
+            custom_context = ""
+            max_tokens = 4096
+            if config and config.config_value:
+                custom_context = config.config_value.get("custom_context", "")
+                max_tokens = config.config_value.get("max_tokens", 4096)
+            
+            # Save user message
+            user_message = PersonalChat(
+                session_id=session_id,
+                user_id=user_id,
+                role="user",
+                message=question
+            )
+            session.add(user_message)
+            await session.flush()
+            
+            # Get conversation history for personal chat
+            history_result = await session.execute(
+                select(PersonalChat)
+                .where(PersonalChat.session_id == session_id)
+                .order_by(PersonalChat.created_at.asc())
+                .limit(50)
+            )
+            history = history_result.scalars().all()
+            
+            # Convert to message format for AI service
+            conversation_history = []
+            for msg in history:
+                conversation_history.append({
+                    "role": msg.role,
+                    "content": msg.message
+                })
+            
+            # Use AI service with personal context
+            from services.ai_service import AIService
+            ai_service = AIService()
+            
+            input_data = {
+                "question": question,
+                "messages": conversation_history,
+                "use_system_max_tokens": False,
+                "max_tokens": max_tokens,
+                "custom_context": custom_context  # Pass custom context to override system prompt
+            }
+            
+            # Get response
+            result = await ai_service.execute(input_data)
+            answer = result.get("answer", "")
+            
+            # Save assistant message
+            assistant_message = PersonalChat(
+                session_id=session_id,
+                user_id=user_id,
+                role="assistant",
+                message=answer
+            )
+            session.add(assistant_message)
+            await session.commit()
+            
+            return {
+                "success": True,
+                "answer": answer
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in personal chat: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/personal/chat/history")
+async def get_personal_chat_history(session_id: str, limit: int = 50):
+    """Get personal chat history."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(PersonalChat)
+                .where(PersonalChat.session_id == session_id)
+                .order_by(PersonalChat.created_at.asc())
+                .limit(limit)
+            )
+            messages = result.scalars().all()
+            
+            return {
+                "success": True,
+                "messages": [
+                    {
+                        "id": msg.id,
+                        "role": msg.role,
+                        "message": msg.message,
+                        "created_at": msg.created_at.isoformat() if msg.created_at else None
+                    }
+                    for msg in messages
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting personal chat history: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
 

@@ -35,6 +35,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [sessionPresets, setSessionPresets] = useState({}); // Store preset per session: { sessionId: { presetId: number | null, useSystemContext: boolean } }
   const [deleteError, setDeleteError] = useState(null);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false); // Track if user has manually scrolled away from bottom
+  const [personalMode, setPersonalMode] = useState(false);
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (baseSessionId && baseSessionId.startsWith('chat-')) {
@@ -90,6 +91,36 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const sessionId = currentSessionId && currentSessionId.startsWith('chat-') ? currentSessionId : (currentSessionId ? `${currentSessionId}_${mode}_${expertType}` : null);
 
   const { messages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory, addMessage } = useChat(sessionId, mode, currentPersona);
+  
+  // Load personal chat messages when in personal mode
+  useEffect(() => {
+    if (personalMode && currentSessionId) {
+      const loadPersonalMessages = async () => {
+        try {
+          const response = await fetch(`/api/personal/chat/history?session_id=${currentSessionId}`);
+          const result = await response.json();
+          if (result.success && result.messages) {
+            // Convert personal chat messages to the format expected by the UI
+            const formattedMessages = result.messages.map(msg => ({
+              id: msg.id,
+              role: msg.role,
+              message: msg.message,
+              created_at: msg.created_at,
+              session_id: currentSessionId
+            }));
+            // Clear existing messages and set new ones
+            setPersonalMessages(formattedMessages);
+          }
+        } catch (err) {
+          console.error('Error loading personal chat messages:', err);
+        }
+      };
+      loadPersonalMessages();
+    } else if (!personalMode && currentSessionId) {
+      // Reload regular chat messages when switching out of personal mode
+      reloadHistory();
+    }
+  }, [personalMode, currentSessionId]);
   
   // Get session display name helper function
   const getSessionDisplayName = useCallback((sessionId) => {
@@ -347,6 +378,56 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
 
   const handleSend = async () => {
+    if (personalMode) {
+      // Use personal chat API
+      if (!input.trim() || !currentSessionId) return;
+      
+      const userMessage = input.trim();
+      setInput('');
+      setIsWaiting(true);
+      setPendingUserMessage(userMessage);
+      
+      try {
+        const response = await fetch('/api/personal/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: userMessage,
+            session_id: currentSessionId,
+            user_id: selectedUser?.id
+          })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+          // Reload personal messages to show the new conversation
+          const historyResponse = await fetch(`/api/personal/chat/history?session_id=${currentSessionId}`);
+          const historyResult = await historyResponse.json();
+          if (historyResult.success && historyResult.messages) {
+            const formattedMessages = historyResult.messages.map(msg => ({
+              id: msg.id,
+              role: msg.role,
+              message: msg.message,
+              created_at: msg.created_at,
+              session_id: currentSessionId
+            }));
+            setPersonalMessages(formattedMessages);
+          }
+          setPendingUserMessage(null);
+        } else {
+          setPendingUserMessage(null);
+          alert(`Error: ${result.error || 'Failed to send message'}`);
+        }
+      } catch (err) {
+        setPendingUserMessage(null);
+        alert(`Error: ${err.message}`);
+      } finally {
+        setIsWaiting(false);
+      }
+      return;
+    }
+    
+    // Original chat logic
     if (!input.trim()) return;
     
     // If no session is selected, create a new one first (without clearing messages)
@@ -1055,6 +1136,28 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               ? (currentTitle || 'AI Assistant')
               : (selectedPreset ? selectedPreset.name : 'AI Assistant')
             }
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              cursor: 'pointer',
+              fontSize: '0.9em',
+              color: 'rgba(255,255,255,0.8)'
+            }}>
+              <input
+                type="checkbox"
+                checked={personalMode}
+                onChange={(e) => setPersonalMode(e.target.checked)}
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  cursor: 'pointer'
+                }}
+              />
+              <span>Personal Mode</span>
+            </label>
           </div>
         </div>
 

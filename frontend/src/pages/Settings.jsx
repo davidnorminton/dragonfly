@@ -366,6 +366,12 @@ export function SettingsPage({ onNavigate }) {
   const [scrapingSourceId, setScrapingSourceId] = useState(null);
   const [showScraperProgress, setShowScraperProgress] = useState(false);
   const [scrapingSource, setScrapingSource] = useState(null);
+  const [personalConfig, setPersonalConfig] = useState({
+    custom_context: '',
+    max_tokens: 4096
+  });
+  const [personalLoading, setPersonalLoading] = useState(false);
+  const [personalSaving, setPersonalSaving] = useState(false);
   const loadingTableRef = useRef(null);
   const {
     model,
@@ -445,8 +451,29 @@ export function SettingsPage({ onNavigate }) {
     if (activeTab === 'database') {
       loadDatabaseTables();
     }
+    if (activeTab === 'personal') {
+      loadPersonalConfig();
+    }
     // Users tab doesn't need to load data here - it's handled by UsersPage
   }, [activeTab]);
+  
+  const loadPersonalConfig = async () => {
+    setPersonalLoading(true);
+    try {
+      const response = await fetch('/api/personal/config');
+      const result = await response.json();
+      if (result.success) {
+        setPersonalConfig({
+          custom_context: result.config?.custom_context || '',
+          max_tokens: result.config?.max_tokens || 4096
+        });
+      }
+    } catch (err) {
+      console.error('Error loading personal config:', err);
+    } finally {
+      setPersonalLoading(false);
+    }
+  };
   
   useEffect(() => {
     console.log('useEffect fired - selectedTable:', selectedTable, 'activeTab:', activeTab, 'tablePage:', tablePage);
@@ -1287,6 +1314,12 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
             onClick={() => setActiveTab('database')}
           >
             Database
+          </button>
+          <button
+            className={activeTab === 'personal' ? 'active' : ''}
+            onClick={() => setActiveTab('personal')}
+          >
+            Personal
           </button>
           <button
             className={activeTab === 'users' ? 'active' : ''}
@@ -3510,6 +3543,85 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
 
           {activeTab === 'users' && (
             <UserManagementPanel onNavigate={onNavigate} />
+          )}
+
+          {activeTab === 'personal' && (
+            <div className="settings-panel">
+              <div className="settings-panel-header">
+                <h3>Personal Chat Settings</h3>
+                <div className="settings-panel-actions">
+                  <button 
+                    onClick={async () => {
+                      setPersonalSaving(true);
+                      try {
+                        const response = await fetch('/api/personal/config', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(personalConfig)
+                        });
+                        const result = await response.json();
+                        if (result.success) {
+                          setSuccess('Personal chat settings saved successfully');
+                          setTimeout(() => setSuccess(null), 3000);
+                        } else {
+                          setError(result.error || 'Failed to save settings');
+                          setTimeout(() => setError(null), 3000);
+                        }
+                      } catch (err) {
+                        setError(`Error: ${err.message}`);
+                        setTimeout(() => setError(null), 3000);
+                      } finally {
+                        setPersonalSaving(false);
+                      }
+                    }}
+                    className="save-button"
+                    disabled={personalSaving || personalLoading}
+                  >
+                    {personalSaving ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              
+              {personalLoading ? (
+                <div className="loading">Loading personal settings...</div>
+              ) : (
+                <>
+                  <div className="form-group">
+                    <label>
+                      Custom Context
+                      <span className="field-hint">
+                        Custom system context/prompt for personal chat mode. This will be used instead of the default system context.
+                      </span>
+                    </label>
+                    <textarea
+                      value={personalConfig.custom_context || ''}
+                      onChange={(e) => setPersonalConfig({ ...personalConfig, custom_context: e.target.value })}
+                      className="config-textarea"
+                      rows={15}
+                      placeholder="Enter your custom context for personal chat mode..."
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>
+                      Max Tokens
+                      <span className="field-hint">
+                        Maximum tokens for responses in personal chat mode (default: 4096)
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      value={personalConfig.max_tokens || 4096}
+                      onChange={(e) => setPersonalConfig({ ...personalConfig, max_tokens: parseInt(e.target.value) || 4096 })}
+                      className="config-input"
+                      min="256"
+                      max="16384"
+                      placeholder="4096"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {activeTab === 'courses' && (
