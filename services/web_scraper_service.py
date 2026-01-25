@@ -100,6 +100,143 @@ class WebScraperService:
         
         return results
     
+    async def scrape_source_streaming(self, source: ScraperSource, session: AsyncSession, limit: Optional[int] = None):
+        """
+        Scrape a single source with streaming progress updates (async generator).
+        
+        Args:
+            source: ScraperSource model instance
+            session: Database session
+            limit: Optional limit on number of articles to scrape (None = all)
+            
+        Yields:
+            Progress events as dictionaries
+        """
+        try:
+            # Fetch the source
+            async with httpx.AsyncClient(timeout=30.0, headers=self.headers, follow_redirects=True) as client:
+                response = await client.get(source.url)
+                response.raise_for_status()
+            
+            # Check if this is an RSS/Atom feed
+            content_type = response.headers.get('content-type', '').lower()
+            is_feed = (
+                'xml' in content_type or
+                'rss' in content_type or
+                'atom' in content_type or
+                source.url.endswith('.xml') or
+                source.url.endswith('.rss') or
+                '/feed' in source.url.lower() or
+                '/rss' in source.url.lower()
+            )
+            
+            if is_feed:
+                logger.info(f"Detected RSS/Atom feed: {source.url}")
+                article_urls = self._extract_urls_from_feed(response.text)
+            else:
+                logger.info(f"Detected HTML page: {source.url}")
+                soup = BeautifulSoup(response.text, 'html.parser')
+                article_urls = self._extract_article_urls(soup, source.url)
+            
+            # Apply limit if specified
+            original_count = len(article_urls)
+            if limit and limit > 0:
+                article_urls = article_urls[:limit]
+                logger.info(f"Limited to {limit} newest articles (from {original_count} total)")
+            
+            if len(article_urls) == 0:
+                yield {"type": "error", "message": "No article URLs found"}
+                return
+            
+            # Batch check for existing articles
+            existing_urls_result = await session.execute(
+                select(ScrapedArticle.url).where(ScrapedArticle.url.in_(article_urls))
+            )
+            existing_urls = set(row[0] for row in existing_urls_result.fetchall())
+            
+            # Filter out existing articles
+            new_article_urls = [url for url in article_urls if url not in existing_urls]
+            
+            yield {"type": "urls", "urls": article_urls, "new_count": len(new_article_urls), "existing_count": len(existing_urls)}
+            
+            if not new_article_urls:
+                yield {"type": "complete", "saved": 0, "found": len(article_urls)}
+                return
+            
+            # Scrape each new article
+            saved_count = 0
+            failed_count = 0
+            
+            for idx, article_url in enumerate(new_article_urls, 1):
+                try:
+                    yield {"type": "url", "url": article_url, "current": idx, "total": len(new_article_urls)}
+                    
+                    # Scrape the article
+                    article_data = await self.scrape_article(article_url)
+                    
+                    if article_data:
+                        # Create new scraped article
+                        article = ScrapedArticle(
+                            source_id=source.id,
+                            url=article_url,
+                            title=article_data.get('title'),
+                            summary=article_data.get('summary'),
+                            author=article_data.get('author'),
+                            published_date=article_data.get('published_date'),
+                            image_path=article_data.get('image_path'),
+                            image_url=article_data.get('image_url'),
+                            article_metadata=article_data.get('metadata')
+                        )
+                        
+                        session.add(article)
+                        await session.flush()
+                        
+                        article_id = article.id
+                        
+                        # Create separate content records if content exists
+                        content = article_data.get('content')
+                        if content:
+                            html_content = ArticleHtmlContent(
+                                article_id=article_id,
+                                content=content,
+                                sanitized_content=content,
+                                content_type='text/html',
+                                content_hash=hashlib.md5(content.encode()).hexdigest()
+                            )
+                            session.add(html_content)
+                            
+                            soup = BeautifulSoup(content, 'html.parser')
+                            plain_text = soup.get_text(separator=' ', strip=True)
+                            
+                            if plain_text:
+                                text_content = ArticleTextContent(
+                                    article_id=article_id,
+                                    content=plain_text,
+                                    word_count=len(plain_text.split()),
+                                    character_count=len(plain_text),
+                                    content_hash=hashlib.md5(plain_text.encode()).hexdigest()
+                                )
+                                session.add(text_content)
+                        
+                        await session.commit()
+                        saved_count += 1
+                        yield {"type": "scraped", "url": article_url}
+                    else:
+                        failed_count += 1
+                        yield {"type": "failed", "url": article_url, "reason": "Failed to extract content"}
+                    
+                except Exception as e:
+                    logger.error(f"  ❌ Error scraping {article_url}: {e}")
+                    await session.rollback()
+                    failed_count += 1
+                    yield {"type": "failed", "url": article_url, "reason": str(e)}
+            
+            yield {"type": "complete", "saved": saved_count, "found": len(article_urls), "failed": failed_count}
+            
+        except Exception as e:
+            logger.error(f"Error in streaming scrape: {e}", exc_info=True)
+            yield {"type": "error", "message": str(e)}
+
     async def scrape_source(self, source: ScraperSource, session: AsyncSession, limit: Optional[int] = None) -> Dict[str, int]:
         """
         Scrape a single source (category page or RSS feed).

@@ -363,6 +363,8 @@ export function SettingsPage({ onNavigate }) {
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceName, setNewSourceName] = useState('');
   const [scrapingSourceId, setScrapingSourceId] = useState(null);
+  const [showScraperProgress, setShowScraperProgress] = useState(false);
+  const [scrapingSource, setScrapingSource] = useState(null);
   const loadingTableRef = useRef(null);
   const {
     model,
@@ -2764,31 +2766,10 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                             </div>
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                               <button
-                                onClick={async () => {
+                                onClick={() => {
+                                  setScrapingSource(source);
+                                  setShowScraperProgress(true);
                                   setScrapingSourceId(source.id);
-                                  setScraperMessage('');
-                                  try {
-                                    const response = await fetch(`/api/scraper/scrape-source/${source.id}`, {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({})
-                                    });
-                                    const result = await response.json();
-                                    if (result.success) {
-                                      setScraperMessage(`✓ ${result.message}`);
-                                      loadScraperSources();
-                                      // Notify Tech News page to reload articles
-                                      window.dispatchEvent(new CustomEvent('scraperCompleted', { 
-                                        detail: { articlesSaved: result.results?.articles_saved || 0 }
-                                      }));
-                                    } else {
-                                      setScraperMessage(`✗ ${result.error || 'Scraping failed'}`);
-                                    }
-                                  } catch (err) {
-                                    setScraperMessage(`✗ Error: ${err.message}`);
-                                  } finally {
-                                    setScrapingSourceId(null);
-                                  }
                                 }}
                                 disabled={scrapingSourceId === source.id || scraperLoading || !source.is_active}
                                 className="save-button"

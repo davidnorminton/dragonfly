@@ -16350,6 +16350,151 @@ async def run_scraper():
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/scraper/scrape-source/{source_id}/scan")
+async def scan_scraper_source(source_id: int):
+    """Scan a source to get list of URLs without scraping (for progress modal)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get the source
+            result = await session.execute(
+                select(ScraperSource).where(ScraperSource.id == source_id)
+            )
+            source = result.scalar_one_or_none()
+            
+            if not source:
+                return {"success": False, "error": f"Source {source_id} not found"}
+            
+            # Get scraper images directory
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = config_result.scalar_one_or_none()
+            
+            images_dir = None
+            if config and config.config_value:
+                images_dir = config.config_value.get("scraper_images_directory")
+            
+            if not images_dir:
+                return {"success": False, "error": "Scraper images directory not configured"}
+            
+            # Initialize scraper service
+            from services.web_scraper_service import WebScraperService
+            import httpx
+            scraper = WebScraperService(images_directory=images_dir)
+            
+            # Fetch the source to get URLs
+            async with httpx.AsyncClient(timeout=30.0, headers=scraper.headers, follow_redirects=True) as client:
+                response = await client.get(source.url)
+                response.raise_for_status()
+            
+            # Check if this is an RSS/Atom feed
+            content_type = response.headers.get('content-type', '').lower()
+            is_feed = (
+                'xml' in content_type or
+                'rss' in content_type or
+                'atom' in content_type or
+                source.url.endswith('.xml') or
+                source.url.endswith('.rss') or
+                '/feed' in source.url.lower() or
+                '/rss' in source.url.lower()
+            )
+            
+            if is_feed:
+                article_urls = scraper._extract_urls_from_feed(response.text)
+            else:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.text, 'html.parser')
+                article_urls = scraper._extract_article_urls(soup, source.url)
+            
+            return {
+                "success": True,
+                "urls": article_urls,
+                "count": len(article_urls)
+            }
+            
+    except Exception as e:
+        logger.error(f"Error scanning source: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/scraper/scrape-source/{source_id}/stream")
+async def scrape_single_source_stream(source_id: int, request: Request):
+    """Scrape a single source with streaming progress updates."""
+    try:
+        data = await request.json() if request.method == "POST" else {}
+        limit = data.get("limit")  # Optional limit, None = all articles
+        
+        async with AsyncSessionLocal() as session:
+            # Get the source
+            result = await session.execute(
+                select(ScraperSource).where(ScraperSource.id == source_id)
+            )
+            source = result.scalar_one_or_none()
+            
+            if not source:
+                return StreamingResponse(
+                    iter([f"data: {json.dumps({'type': 'error', 'message': f'Source {source_id} not found'})}\n\n"]),
+                    media_type="text/event-stream"
+                )
+            
+            if not source.is_active:
+                return StreamingResponse(
+                    iter([f"data: {json.dumps({'type': 'error', 'message': f'Source {source.name} is not active'})}\n\n"]),
+                    media_type="text/event-stream"
+                )
+            
+            # Get scraper images directory
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = config_result.scalar_one_or_none()
+            
+            images_dir = None
+            if config and config.config_value:
+                images_dir = config.config_value.get("scraper_images_directory")
+            
+            if not images_dir:
+                return StreamingResponse(
+                    iter([f"data: {json.dumps({'type': 'error', 'message': 'Scraper images directory not configured'})}\n\n"]),
+                    media_type="text/event-stream"
+                )
+            
+            # Initialize scraper service
+            from services.web_scraper_service import WebScraperService
+            scraper = WebScraperService(images_directory=images_dir)
+            
+            async def event_stream():
+                """Generate Server-Sent Events for scraping progress."""
+                try:
+                    async for event in scraper.scrape_source_streaming(source, session, limit=limit):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    
+                    # Update last_scraped timestamp
+                    source.last_scraped = datetime.utcnow()
+                    await session.commit()
+                    
+                except Exception as e:
+                    logger.error(f"Streaming scrape error: {e}", exc_info=True)
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in streaming scrape: {e}", exc_info=True)
+        return StreamingResponse(
+            iter([f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"]),
+            media_type="text/event-stream"
+        )
+
+
 @app.post("/api/scraper/scrape-source/{source_id}")
 async def scrape_single_source(source_id: int, request: Request):
     """Scrape a single source (gets all articles, not limited like automatic scraping)."""
