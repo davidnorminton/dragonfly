@@ -16990,22 +16990,10 @@ async def personal_chat(request: Request):
                 custom_context = config.config_value.get("custom_context", "")
                 max_tokens = config.config_value.get("max_tokens", 4096)
             
-            # Save user message
-            user_message = PersonalChat(
-                session_id=session_id,
-                user_id=user_id,
-                role="user",
-                message=question
-            )
-            session.add(user_message)
-            await session.flush()
-            
-            # Get conversation history for personal chat (all previous messages)
-            # Note: We exclude the current user message we just added above
+            # Get conversation history FIRST (before saving new message) to get all previous messages
             history_result = await session.execute(
                 select(PersonalChat)
                 .where(PersonalChat.session_id == session_id)
-                .where(PersonalChat.id != user_message.id)  # Exclude the message we just added
                 .order_by(PersonalChat.created_at.asc())
             )
             history = history_result.scalars().all()
@@ -17019,6 +17007,16 @@ async def personal_chat(request: Request):
                 })
             
             logger.info(f"📚 Personal chat: Loaded {len(conversation_history)} previous messages as context")
+            
+            # Save user message AFTER loading history
+            user_message = PersonalChat(
+                session_id=session_id,
+                user_id=user_id,
+                role="user",
+                message=question
+            )
+            session.add(user_message)
+            await session.flush()
             
             # Use AI service with personal context
             from services.ai_service import AIService
