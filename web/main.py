@@ -16944,7 +16944,8 @@ async def get_personal_config():
                     "success": True,
                     "config": {
                         "custom_context": "",
-                        "max_tokens": 4096
+                        "max_tokens": 4096,
+                        "summary_context": ""
                     }
                 }
     except Exception as e:
@@ -16967,14 +16968,16 @@ async def save_personal_config(request: Request):
             if config:
                 config.config_value = {
                     "custom_context": data.get("custom_context", ""),
-                    "max_tokens": data.get("max_tokens", 4096)
+                    "max_tokens": data.get("max_tokens", 4096),
+                    "summary_context": data.get("summary_context", "")
                 }
             else:
                 config = SystemConfig(
                     config_key="personal_chat",
                     config_value={
                         "custom_context": data.get("custom_context", ""),
-                        "max_tokens": data.get("max_tokens", 4096)
+                        "max_tokens": data.get("max_tokens", 4096),
+                        "summary_context": data.get("summary_context", "")
                     }
                 )
                 session.add(config)
@@ -17218,10 +17221,34 @@ async def create_personal_summary(request: Request):
                 summary = conversation_text
                 message_count = len(messages)
             
+            # Get summary context from config if available
+            summary_context = ""
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "personal_chat")
+            )
+            config = config_result.scalar_one_or_none()
+            if config and config.config_value:
+                summary_context = config.config_value.get("summary_context", "")
+            
             # Always use AI to create a concise summary focusing on main facts
             # Limit summary text to avoid context issues
             summary_text = summary[:50000] if len(summary) > 50000 else summary
-            summary_prompt = f"""Please provide a concise summary of the following conversation. Focus ONLY on the main facts, key topics, decisions, and important information. Remove any unnecessary details, conversational fluff, or redundant information. Keep it factual and to the point:
+            
+            # Build prompt with optional summary context
+            base_prompt = """Please provide a concise summary of the following conversation. Focus ONLY on the main facts, key topics, decisions, and important information. Remove any unnecessary details, conversational fluff, or redundant information. Keep it factual and to the point:"""
+            
+            if summary_context:
+                summary_prompt = f"""{base_prompt}
+
+Additional context for summary generation:
+{summary_context}
+
+Conversation to summarize:
+{summary_text}
+
+Provide a clear, structured summary that captures only the essential facts and information."""
+            else:
+                summary_prompt = f"""{base_prompt}
 
 {summary_text}
 

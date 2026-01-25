@@ -368,7 +368,8 @@ export function SettingsPage({ onNavigate }) {
   const [scrapingSource, setScrapingSource] = useState(null);
   const [personalConfig, setPersonalConfig] = useState({
     custom_context: '',
-    max_tokens: 4096
+    max_tokens: 4096,
+    summary_context: ''
   });
   const [personalLoading, setPersonalLoading] = useState(false);
   const [personalSaving, setPersonalSaving] = useState(false);
@@ -465,7 +466,8 @@ export function SettingsPage({ onNavigate }) {
       if (result.success) {
         setPersonalConfig({
           custom_context: result.config?.custom_context || '',
-          max_tokens: result.config?.max_tokens || 4096
+          max_tokens: result.config?.max_tokens || 4096,
+          summary_context: result.config?.summary_context || ''
         });
       }
     } catch (err) {
@@ -3617,6 +3619,22 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                       min="256"
                       max="16384"
                       placeholder="4096"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>
+                      Summary Context
+                      <span className="field-hint">
+                        Additional context to include when generating summaries. This will be added to the AI prompt to guide how summaries should be created (e.g., focus areas, format preferences, etc.).
+                      </span>
+                    </label>
+                    <textarea
+                      value={personalConfig.summary_context || ''}
+                      onChange={(e) => setPersonalConfig({ ...personalConfig, summary_context: e.target.value })}
+                      className="config-textarea"
+                      rows={8}
+                      placeholder="Enter additional context for summary generation (e.g., 'Focus on technical decisions and key learnings', 'Include dates and action items', etc.)..."
                     />
                   </div>
                 </>
