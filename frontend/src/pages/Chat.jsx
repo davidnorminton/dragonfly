@@ -967,15 +967,18 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   }, [openMenuId]);
 
   // Filter messages to only show those for the current session
-  const filteredMessages = messages.filter(msg => {
-    if (!msg.session_id) return false;
-    // For chat sessions, match exact session_id
-    if (sessionId && sessionId.startsWith('chat-')) {
-      return msg.session_id === sessionId;
-    }
-    // For other sessions, match if session_id starts with currentSessionId
-    return msg.session_id.startsWith(currentSessionId);
-  });
+  // For personal mode, show all personal messages (they all have the same session_id)
+  const filteredMessages = personalMode 
+    ? messages // In personal mode, all messages are already filtered by the API
+    : messages.filter(msg => {
+        if (!msg.session_id) return false;
+        // For chat sessions, match exact session_id
+        if (sessionId && sessionId.startsWith('chat-')) {
+          return msg.session_id === sessionId;
+        }
+        // For other sessions, match if session_id starts with currentSessionId
+        return msg.session_id.startsWith(currentSessionId);
+      });
   
   // Combine messages: DB messages first, then pending user message, then streaming response
   // Filter out duplicates by checking if pending message already exists in filteredMessages
