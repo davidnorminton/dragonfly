@@ -74,7 +74,8 @@ class WebScraperService:
                 for source in sources:
                     try:
                         logger.info(f"Scraping source: {source.url}")
-                        source_results = await self.scrape_source(source, session)
+                        # Limit to 15 newest articles for automatic scraping (only check for new content)
+                        source_results = await self.scrape_source(source, session, limit=15)
                         
                         results["sources_scraped"] += 1
                         results["articles_found"] += source_results["articles_found"]
@@ -99,13 +100,14 @@ class WebScraperService:
         
         return results
     
-    async def scrape_source(self, source: ScraperSource, session: AsyncSession) -> Dict[str, int]:
+    async def scrape_source(self, source: ScraperSource, session: AsyncSession, limit: Optional[int] = None) -> Dict[str, int]:
         """
         Scrape a single source (category page or RSS feed).
         
         Args:
             source: ScraperSource model instance
             session: Database session
+            limit: Optional limit on number of articles to scrape (None = all, used for automatic scraping)
             
         Returns:
             Dictionary with results
@@ -156,6 +158,12 @@ class WebScraperService:
                     logger.warning(f"⚠️  No URLs extracted from HTML page: {source.url}")
                     logger.warning(f"   Page content length: {len(response.text)}")
                     logger.warning(f"   Tried {len(soup.select('a[href]'))} total links on page")
+            
+            # Apply limit if specified (for automatic scraping - only check newest articles)
+            original_count = len(article_urls)
+            if limit and limit > 0:
+                article_urls = article_urls[:limit]
+                logger.info(f"Limited to {limit} newest articles (from {original_count} total)")
             
             results["articles_found"] = len(article_urls)
             logger.info(f"Found {len(article_urls)} article URLs on {source.url}")

@@ -16350,9 +16350,70 @@ async def run_scraper():
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/scraper/scrape-source/{source_id}")
+async def scrape_single_source(source_id: int, request: Request):
+    """Scrape a single source (gets all articles, not limited like automatic scraping)."""
+    try:
+        data = await request.json() if request.method == "POST" else {}
+        limit = data.get("limit")  # Optional limit, None = all articles
+        
+        async with AsyncSessionLocal() as session:
+            # Get the source
+            result = await session.execute(
+                select(ScraperSource).where(ScraperSource.id == source_id)
+            )
+            source = result.scalar_one_or_none()
+            
+            if not source:
+                return {"success": False, "error": f"Source {source_id} not found"}
+            
+            if not source.is_active:
+                return {"success": False, "error": f"Source {source.name} is not active"}
+            
+            # Get scraper images directory
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = config_result.scalar_one_or_none()
+            
+            images_dir = None
+            if config and config.config_value:
+                images_dir = config.config_value.get("scraper_images_directory")
+            
+            if not images_dir:
+                return {"success": False, "error": "Scraper images directory not configured"}
+            
+            # Initialize scraper service
+            from services.web_scraper_service import WebScraperService
+            scraper = WebScraperService(images_directory=images_dir)
+            
+            # Scrape this source (no limit = get all articles)
+            logger.info(f"Scraping source {source_id}: {source.name} ({source.url}) - Getting all articles")
+            results = await scraper.scrape_source(source, session, limit=limit)
+            
+            # Update last_scraped timestamp
+            source.last_scraped = datetime.utcnow()
+            await session.commit()
+            
+            return {
+                "success": True,
+                "message": f"Scraped {source.name}: found {results['articles_found']} articles, saved {results['articles_saved']} new articles",
+                "source": {
+                    "id": source.id,
+                    "name": source.name,
+                    "url": source.url
+                },
+                "results": results
+            }
+            
+    except Exception as e:
+        logger.error(f"Error scraping source: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/scraper/test-source/{source_id}")
 async def test_scraper_source(source_id: int):
-    """Test scraping a single source for debugging."""
+    """Test scraping a single source for debugging (deprecated - use scrape-source instead)."""
     try:
         async with AsyncSessionLocal() as session:
             # Get the source

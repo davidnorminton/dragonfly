@@ -362,6 +362,7 @@ export function SettingsPage({ onNavigate }) {
   const [scraperMessage, setScraperMessage] = useState('');
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [newSourceName, setNewSourceName] = useState('');
+  const [scrapingSourceId, setScrapingSourceId] = useState(null);
   const loadingTableRef = useRef(null);
   const {
     model,
@@ -2762,6 +2763,44 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                               )}
                             </div>
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <button
+                                onClick={async () => {
+                                  setScrapingSourceId(source.id);
+                                  setScraperMessage('');
+                                  try {
+                                    const response = await fetch(`/api/scraper/scrape-source/${source.id}`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({})
+                                    });
+                                    const result = await response.json();
+                                    if (result.success) {
+                                      setScraperMessage(`✓ ${result.message}`);
+                                      loadScraperSources();
+                                      // Notify Tech News page to reload articles
+                                      window.dispatchEvent(new CustomEvent('scraperCompleted', { 
+                                        detail: { articlesSaved: result.results?.articles_saved || 0 }
+                                      }));
+                                    } else {
+                                      setScraperMessage(`✗ ${result.error || 'Scraping failed'}`);
+                                    }
+                                  } catch (err) {
+                                    setScraperMessage(`✗ Error: ${err.message}`);
+                                  } finally {
+                                    setScrapingSourceId(null);
+                                  }
+                                }}
+                                disabled={scrapingSourceId === source.id || scraperLoading || !source.is_active}
+                                className="save-button"
+                                style={{ 
+                                  padding: '4px 12px', 
+                                  fontSize: '0.85em',
+                                  background: (scrapingSourceId === source.id || !source.is_active) ? '#666' : '#10b981'
+                                }}
+                                title={!source.is_active ? 'Source must be active to scrape' : 'Scrape all articles from this source'}
+                              >
+                                {scrapingSourceId === source.id ? 'Scraping...' : 'Scrape'}
+                              </button>
                               <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                                 <input
                                   type="checkbox"
