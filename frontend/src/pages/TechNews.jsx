@@ -285,16 +285,11 @@ export default function TechNews({ searchQuery = '' }) {
     loadDomains();
   }, []);
 
-  // Reset visible count when articles, search query, sort order, or domain filter change
-  useEffect(() => {
-    setVisibleCount(30);
-  }, [articles.length, searchQuery, sortBy, selectedDomain]);
 
   const loadArticles = async (reset = true) => {
     if (reset) {
       setLoading(true);
       setArticles([]);
-      setVisibleCount(30);
       setHasMore(true);
     } else {
       setLoadingMore(true);
