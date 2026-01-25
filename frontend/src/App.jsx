@@ -107,7 +107,7 @@ function App() {
     const handleHashChange = () => {
       const hash = window.location.hash.slice(1);
       // Check for exact matches first
-      if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'personal', 'personal-summaries', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
+      if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'personal', 'personal-summaries', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games', 'stories', 'create-story', 'edit-story', 'story-view', 'courses', 'course-contents', 'lesson-view', 'tech-news'].includes(hash)) {
         setActivePage(hash);
         localStorage.setItem('activePage', hash);
         setSearchOverlayOpen(false);
