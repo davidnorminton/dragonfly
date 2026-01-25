@@ -17219,9 +17219,11 @@ async def create_personal_summary(request: Request):
                 message_count = len(messages)
             
             # Always use AI to create a concise summary focusing on main facts
+            # Limit summary text to avoid context issues
+            summary_text = summary[:50000] if len(summary) > 50000 else summary
             summary_prompt = f"""Please provide a concise summary of the following conversation. Focus ONLY on the main facts, key topics, decisions, and important information. Remove any unnecessary details, conversational fluff, or redundant information. Keep it factual and to the point:
 
-{summary[:50000]}  # Limit to avoid context issues
+{summary_text}
 
 Provide a clear, structured summary that captures only the essential facts and information."""
             
