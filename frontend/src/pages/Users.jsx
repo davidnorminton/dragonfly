@@ -448,8 +448,47 @@ export function UsersPage({ onNavigate, selectedUser, onSelectUser }) {
   return (
     <div className="settings-page">
       <div className="settings-container">
-        <div className="settings-header">
+        <div className="settings-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2>Switch User</h2>
+          {isAdmin && (
+            <button
+              onClick={() => {
+                if (onNavigate) {
+                  onNavigate('personal');
+                }
+              }}
+              style={{
+                padding: '8px 16px',
+                background: 'rgba(102, 126, 234, 0.2)',
+                border: '1px solid rgba(102, 126, 234, 0.4)',
+                borderRadius: '6px',
+                color: '#fff',
+                fontSize: '14px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(102, 126, 234, 0.3)';
+                e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(102, 126, 234, 0.2)';
+                e.currentTarget.style.borderColor = 'rgba(102, 126, 234, 0.4)';
+              }}
+              title="Manage Personal Chat Summaries"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                <path d="M13 8H3"></path>
+                <path d="M17 12H3"></path>
+              </svg>
+              Personal Chat
+            </button>
+          )}
         </div>
 
         <div className="settings-content">
