@@ -290,7 +290,7 @@ export default function TechNews({ searchQuery = '' }) {
   const loadArticles = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/scraper/articles?limit=500');
+      const response = await fetch('/api/scraper/articles?limit=10000');
       const result = await response.json();
       if (result.success) {
         console.log(`📰 Loaded ${result.articles?.length || 0} articles (total: ${result.total})`);

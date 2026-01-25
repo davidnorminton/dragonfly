@@ -572,7 +572,7 @@ class WebScraperService:
                     content = self._fix_image_urls(content, url)
                     
             except Exception as e:
-                logger.warning(f"Trafilatura extraction failed for {url}: {e}")
+                logger.warning(f"Trafilatura HTML extraction failed for {url}: {e}")
                 # Fallback to simple text extraction
                 try:
                     content = trafilatura.extract(
@@ -585,10 +585,100 @@ class WebScraperService:
                         # Wrap plain text in basic HTML
                         content = f"<p>{content.replace(chr(10), '</p><p>')}</p>"
                 except Exception as e2:
-                    logger.warning(f"Fallback extraction also failed for {url}: {e2}")
-                    content = None
+                    logger.warning(f"Trafilatura text extraction also failed for {url}: {e2}")
+                    # Final fallback: use BeautifulSoup to extract main content
+                    try:
+                        soup = BeautifulSoup(html_content, 'html.parser')
+                        # Try to find main article content
+                        main_content = None
+                        
+                        # Common article content selectors
+                        content_selectors = [
+                            'article',
+                            '.article-content',
+                            '.post-content',
+                            '.entry-content',
+                            '[role="article"]',
+                            'main',
+                            '.content',
+                            '#content'
+                        ]
+                        
+                        for selector in content_selectors:
+                            elements = soup.select(selector)
+                            if elements:
+                                main_content = elements[0]
+                                break
+                        
+                        # If no specific content area found, try to extract from body
+                        if not main_content:
+                            main_content = soup.find('body')
+                        
+                        if main_content:
+                            # Remove script and style tags
+                            for tag in main_content.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+                                tag.decompose()
+                            
+                            # Get text and wrap in paragraphs
+                            text = main_content.get_text(separator='\n', strip=True)
+                            if text and len(text) > 100:
+                                # Split into paragraphs and wrap
+                                paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+                                content = ''.join([f'<p>{p}</p>' for p in paragraphs])
+                                logger.info(f"Used BeautifulSoup fallback for {url}, extracted {len(content)} chars")
+                            else:
+                                content = None
+                        else:
+                            content = None
+                    except Exception as e3:
+                        logger.error(f"BeautifulSoup fallback also failed for {url}: {e3}")
+                        content = None
             
             # Build article data from Trafilatura extraction
+            # If metadata extraction failed, try BeautifulSoup for title/author
+            if not metadata:
+                try:
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    # Try to get title from various sources
+                    title = None
+                    for selector in ['h1', 'title', 'meta[property="og:title"]', 'meta[name="twitter:title"]']:
+                        elem = soup.select_one(selector)
+                        if elem:
+                            title = elem.get('content') if elem.name == 'meta' else elem.get_text(strip=True)
+                            if title:
+                                break
+                    
+                    # Try to get author
+                    author = None
+                    for selector in ['meta[name="author"]', '.author', '[rel="author"]', 'meta[property="article:author"]']:
+                        elem = soup.select_one(selector)
+                        if elem:
+                            author = elem.get('content') if elem.name == 'meta' else elem.get_text(strip=True)
+                            if author:
+                                break
+                    
+                    # Try to get description/summary
+                    summary = None
+                    for selector in ['meta[name="description"]', 'meta[property="og:description"]', '.summary', '.excerpt']:
+                        elem = soup.select_one(selector)
+                        if elem:
+                            summary = elem.get('content') if elem.name == 'meta' else elem.get_text(strip=True)
+                            if summary:
+                                break
+                    
+                    # Create a simple metadata-like object
+                    class SimpleMetadata:
+                        def __init__(self, title, author, description, image, date):
+                            self.title = title
+                            self.author = author
+                            self.description = description
+                            self.image = image
+                            self.date = date
+                    
+                    metadata = SimpleMetadata(title, author, summary, None, None)
+                except Exception as e:
+                    logger.warning(f"Failed to extract metadata with BeautifulSoup for {url}: {e}")
+            
             article_data = {
                 'title': metadata.title if metadata else None,
                 'content': content,
@@ -609,7 +699,8 @@ class WebScraperService:
             # Fallback to BeautifulSoup for image if Trafilatura didn't find one
             if not article_data['image_url']:
                 try:
-                    soup = BeautifulSoup(html_content, 'html.parser')
+                    if 'soup' not in locals():
+                        soup = BeautifulSoup(html_content, 'html.parser')
                     article_data['image_url'] = self._extract_main_image(soup, url)
                 except Exception as e:
                     logger.warning(f"Failed to extract image from {url}: {e}")
