@@ -17392,6 +17392,33 @@ async def create_personal_summary(request: Request):
                 summary = conversation_text
                 message_count = len(messages)
             
+            # Get all previous summaries for this session to provide context
+            previous_summaries_result = await session.execute(
+                select(PersonalSummary)
+                .where(PersonalSummary.session_id == session_id)
+                .order_by(PersonalSummary.created_at.asc())  # Oldest summaries first
+            )
+            previous_summaries = previous_summaries_result.scalars().all()
+            
+            # Build previous summaries context
+            previous_summaries_text = ""
+            if previous_summaries:
+                summaries_list = []
+                for prev_summary in previous_summaries:
+                    date_range = ""
+                    if prev_summary.start_date and prev_summary.end_date:
+                        date_range = f" ({prev_summary.start_date.strftime('%Y-%m-%d')} to {prev_summary.end_date.strftime('%Y-%m-%d')})"
+                    elif prev_summary.start_date:
+                        date_range = f" (from {prev_summary.start_date.strftime('%Y-%m-%d')})"
+                    elif prev_summary.end_date:
+                        date_range = f" (until {prev_summary.end_date.strftime('%Y-%m-%d')})"
+                    
+                    title_part = f"{prev_summary.title}: " if prev_summary.title else ""
+                    summaries_list.append(f"{title_part}{prev_summary.summary}{date_range}")
+                
+                previous_summaries_text = "\n\n".join(summaries_list)
+                logger.info(f"📚 Summary creation: Including {len(previous_summaries)} previous summaries as context")
+            
             # Get summary context from config if available
             summary_context = ""
             config_result = await session.execute(
@@ -17405,25 +17432,29 @@ async def create_personal_summary(request: Request):
             # Limit summary text to avoid context issues
             summary_text = summary[:50000] if len(summary) > 50000 else summary
             
-            # Build prompt with optional summary context
+            # Build prompt with previous summaries, optional summary context, and conversation to summarize
             base_prompt = """Please provide a concise summary of the following conversation. Focus ONLY on the main facts, key topics, decisions, and important information. Remove any unnecessary details, conversational fluff, or redundant information. Keep it factual and to the point:"""
             
+            # Build the full prompt with all context
+            prompt_parts = [base_prompt]
+            
+            # Add previous summaries if they exist
+            if previous_summaries_text:
+                prompt_parts.append(f"""Previous conversation summaries (for context):
+{previous_summaries_text}""")
+            
+            # Add summary context from config if available
             if summary_context:
-                summary_prompt = f"""{base_prompt}
-
-Additional context for summary generation:
-{summary_context}
-
-Conversation to summarize:
+                prompt_parts.append(f"""Additional context for summary generation:
+{summary_context}""")
+            
+            # Add the conversation to summarize
+            prompt_parts.append(f"""Conversation to summarize:
 {summary_text}
 
-Provide a clear, structured summary that captures only the essential facts and information."""
-            else:
-                summary_prompt = f"""{base_prompt}
-
-{summary_text}
-
-Provide a clear, structured summary that captures only the essential facts and information."""
+Provide a clear, structured summary that captures only the essential facts and information.""")
+            
+            summary_prompt = "\n\n".join(prompt_parts)
             
             from services.ai_service import AIService
             ai_service = AIService()
