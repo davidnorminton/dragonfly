@@ -1130,30 +1130,51 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
 
             {/* TV Shows List */}
             {viewMode === 'tvshows' &&
-              filteredTVShows.map((show) => (
-                <div
-                  key={show.id}
-                  className={`video-row artist-only ${selectedShow?.id === show.id ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedShow(show);
-                    setSelectedMovie(null);
-                    setSelectedSeason(null);
-                  }}
-                >
-                  {show.poster_path && (
-                    <img
-                      src={show.poster_path}
-                      alt={show.title}
-                      className="artist-thumb"
-                      style={{ borderRadius: '4px' }}
-                    />
-                  )}
-                  <div>
-                    <strong>{show.title}</strong>
-                    {show.seasons && <div className="video-row-sub">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>}
+              filteredTVShows.map((show) => {
+                // Get first episode for download
+                const firstSeason = show.seasons?.find(s => s.episodes && s.episodes.length > 0);
+                const firstEpisode = firstSeason?.episodes?.sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0))[0];
+                
+                return (
+                  <div
+                    key={show.id}
+                    className={`video-row artist-only ${selectedShow?.id === show.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedShow(show);
+                      setSelectedMovie(null);
+                      setSelectedSeason(null);
+                    }}
+                  >
+                    {show.poster_path && (
+                      <img
+                        src={show.poster_path}
+                        alt={show.title}
+                        className="artist-thumb"
+                        style={{ borderRadius: '4px' }}
+                      />
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <strong>{show.title}</strong>
+                      {show.seasons && <div className="video-row-sub">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>}
+                    </div>
+                    {firstEpisode && (
+                      <button
+                        className="cast-episode-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.open(`/api/video/download/${firstEpisode.id}`, '_blank');
+                        }}
+                        title="Download First Episode"
+                        style={{ marginLeft: 'auto', flexShrink: 0 }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                        </svg>
+                      </button>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
           </div>
         </div>
 
@@ -1400,6 +1421,18 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                           Cast
                         </button>
                       )}
+                      <button
+                        className="hero-cast-btn"
+                        onClick={() => {
+                          window.open(`/api/video/download/${selectedMovie.id}`, '_blank');
+                        }}
+                        title="Download Movie"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                        </svg>
+                        Download
+                      </button>
                     </>
                   )}
                   {selectedShow && currentSeason && currentSeason.episodes?.length > 0 && (
@@ -1559,7 +1592,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                   </div>
                   <div className="tracklist-header" style={{ 
                     display: 'grid', 
-                    gridTemplateColumns: castAvailable ? '40px 60px 1fr 140px' : '60px 1fr 140px', 
+                    gridTemplateColumns: castAvailable ? '40px 60px 1fr 140px 60px' : '60px 1fr 140px 60px', 
                     gap: '15px',
                     padding: '0 16px',
                     marginBottom: '8px'
@@ -1568,6 +1601,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                     <span className="col-index">#</span>
                     <span className="col-title">Title</span>
                     <span className="col-length-wide">Duration</span>
+                    <span className="col-download"></span>
                   </div>
                   {currentSeason?.episodes
                     ?.sort((a, b) => (a.episode_number || 0) - (b.episode_number || 0))
@@ -1578,7 +1612,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                       className="track-row episode-row-item"
                       style={{ 
                         display: 'grid', 
-                        gridTemplateColumns: castAvailable ? '40px 60px 1fr 140px' : '60px 1fr 140px', 
+                        gridTemplateColumns: castAvailable ? '40px 60px 1fr 140px 60px' : '60px 1fr 140px 60px', 
                         gap: '15px', 
                         alignItems: 'center',
                         padding: '8px 16px'
@@ -1631,6 +1665,20 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                         <div className="title-main">{episode.title || `Episode ${episode.episode_number}`}</div>
                       </span>
                       <span className="col-length-wide">{episode.duration ? formatDuration(episode.duration) : '-'}</span>
+                      <span className="col-download">
+                        <button
+                          className="cast-episode-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(`/api/video/download/${episode.id}`, '_blank');
+                          }}
+                          title="Download Episode"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                          </svg>
+                        </button>
+                      </span>
                     </div>
                   ))}
                 </div>
