@@ -17732,9 +17732,6 @@ async def delete_personal_summary(summary_id: int):
     except Exception as e:
         logger.error(f"Error deleting personal summary: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
-    except Exception as e:
-        logger.error(f"Error getting personal chat history: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
 
 
 @app.delete("/api/scraper/articles")  
