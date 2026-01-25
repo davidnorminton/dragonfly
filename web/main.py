@@ -17315,19 +17315,6 @@ async def delete_personal_summary(summary_id: int):
     except Exception as e:
         logger.error(f"Error deleting personal summary: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
-            
-            return {
-                "success": True,
-                "messages": [
-                    {
-                        "id": msg.id,
-                        "role": msg.role,
-                        "message": msg.message,
-                        "created_at": msg.created_at.isoformat() if msg.created_at else None
-                    }
-                    for msg in messages
-                ]
-            }
     except Exception as e:
         logger.error(f"Error getting personal chat history: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
