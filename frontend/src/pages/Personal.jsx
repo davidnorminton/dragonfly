@@ -16,13 +16,25 @@ export function PersonalPage({ onNavigate }) {
 
   useEffect(() => {
     const initialize = async () => {
-      await loadSummaries();
-      await loadMessages();
+      const summariesResult = await loadSummaries();
+      // Pass summaries directly to loadMessages
+      if (summariesResult) {
+        loadMessages(summariesResult);
+      } else {
+        loadMessages();
+      }
     };
     initialize();
   }, []);
 
-  const loadMessages = async () => {
+  // Reload messages when summaries change
+  useEffect(() => {
+    if (summaries.length > 0) {
+      loadMessages(summaries);
+    }
+  }, [summaries.length]);
+
+  const loadMessages = async (currentSummariesList = null) => {
     try {
       setLoading(true);
       const response = await fetch(`/api/personal/chat/history?session_id=${PERSONAL_SESSION_ID}&limit=1000`);
@@ -63,12 +75,17 @@ export function PersonalPage({ onNavigate }) {
         }
         
         // Filter out already summarized messages
+        // Use provided summaries list or current state
+        const summariesToUse = currentSummariesList || summaries;
         const summarizedMessageIds = new Set();
-        summaries.forEach(summary => {
-          if (summary.message_ids && Array.isArray(summary.message_ids)) {
-            summary.message_ids.forEach(id => summarizedMessageIds.add(id));
-          }
-        });
+        
+        if (summariesToUse && summariesToUse.length > 0) {
+          summariesToUse.forEach(summary => {
+            if (summary.message_ids && Array.isArray(summary.message_ids)) {
+              summary.message_ids.forEach(id => summarizedMessageIds.add(id));
+            }
+          });
+        }
         
         const filteredPairs = pairs.filter(pair => {
           const questionSummarized = summarizedMessageIds.has(pair.questionId);
@@ -76,6 +93,7 @@ export function PersonalPage({ onNavigate }) {
           return !questionSummarized && !answerSummarized;
         });
         
+        console.log(`[Personal] Loaded ${pairs.length} total pairs, filtered to ${filteredPairs.length} unsummarized pairs`);
         setMessages(filteredPairs);
       }
     } catch (err) {
@@ -90,10 +108,14 @@ export function PersonalPage({ onNavigate }) {
       const response = await fetch(`/api/personal/summaries?session_id=${PERSONAL_SESSION_ID}`);
       const result = await response.json();
       if (result.success) {
-        setSummaries(result.summaries || []);
+        const summariesList = result.summaries || [];
+        setSummaries(summariesList);
+        return summariesList; // Return for use in loadMessages
       }
+      return [];
     } catch (err) {
       console.error('Error loading summaries:', err);
+      return [];
     }
   };
 
@@ -159,8 +181,8 @@ export function PersonalPage({ onNavigate }) {
       const result = await response.json();
       if (result.success) {
         setNewSummary(result.summary);
-        await loadSummaries();
-        await loadMessages(); // Reload messages to filter out summarized ones
+        const updatedSummaries = await loadSummaries();
+        await loadMessages(updatedSummaries); // Reload messages to filter out summarized ones
         setSelectedItems(new Set());
       } else {
         alert(`Error: ${result.error}`);
