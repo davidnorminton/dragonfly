@@ -3644,6 +3644,24 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
         directoryPath={coverScanDirectory}
         scanData={coverScanData}
       />
+
+      {/* Scraper Progress Modal */}
+      {showScraperProgress && scrapingSource && (
+        <ScraperProgressModal
+          source={scrapingSource}
+          isOpen={showScraperProgress}
+          onClose={() => {
+            setShowScraperProgress(false);
+            setScrapingSource(null);
+            setScrapingSourceId(null);
+            loadScraperSources();
+            // Notify Tech News page to reload articles
+            window.dispatchEvent(new CustomEvent('scraperCompleted', { 
+              detail: { articlesSaved: 0 }
+            }));
+          }}
+        />
+      )}
     </div>
   );
 }
