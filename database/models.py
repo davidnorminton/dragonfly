@@ -112,9 +112,6 @@ class PersonalChat(Base):
     
     def __repr__(self):
         return f"<PersonalChat {self.role} - {self.id}>"
-    
-    def __repr__(self):
-        return f"<ChatSession {self.session_id} - {self.title}>"
 
 
 class PromptPreset(Base):
