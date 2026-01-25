@@ -1,12 +1,16 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
 export default function TechNews({ searchQuery = '' }) {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [message, setMessage] = useState('');
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [visibleCount, setVisibleCount] = useState(30);
+  const [totalArticles, setTotalArticles] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const scrollContainerRef = useRef(null);
   const [sortBy, setSortBy] = useState('latest'); // latest, oldest, title-asc, title-desc
   const [selectedDomain, setSelectedDomain] = useState(() => {
     // Initialize from localStorage if available, but clear it on mount to ensure fresh state
@@ -287,14 +291,35 @@ export default function TechNews({ searchQuery = '' }) {
     setVisibleCount(30);
   }, [articles.length, searchQuery, sortBy, selectedDomain]);
 
-  const loadArticles = async () => {
-    setLoading(true);
+  const loadArticles = async (reset = true) => {
+    if (reset) {
+      setLoading(true);
+      setArticles([]);
+      setVisibleCount(30);
+      setHasMore(true);
+    } else {
+      setLoadingMore(true);
+    }
+    
     try {
-      const response = await fetch('/api/scraper/articles?limit=10000');
+      const offset = reset ? 0 : articles.length;
+      const limit = 30;
+      const response = await fetch(`/api/scraper/articles?limit=${limit}&offset=${offset}`);
       const result = await response.json();
+      
       if (result.success) {
-        console.log(`📰 Loaded ${result.articles?.length || 0} articles (total: ${result.total})`);
-        setArticles(result.articles || []);
+        if (reset) {
+          setArticles(result.articles || []);
+          setTotalArticles(result.total || 0);
+        } else {
+          setArticles(prev => [...prev, ...(result.articles || [])]);
+        }
+        
+        // Check if there are more articles to load
+        const loadedCount = reset ? (result.articles?.length || 0) : articles.length + (result.articles?.length || 0);
+        setHasMore(loadedCount < (result.total || 0));
+        
+        console.log(`📰 Loaded ${result.articles?.length || 0} articles (${loadedCount}/${result.total || 0} total)`);
       } else {
         setMessage(`Error loading articles: ${result.error}`);
       }
@@ -302,8 +327,34 @@ export default function TechNews({ searchQuery = '' }) {
       setMessage(`Failed to load articles: ${err.message}`);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
+
+  // Lazy load more articles when scrolling near bottom
+  const handleScroll = useCallback(() => {
+    if (loadingMore || !hasMore) return;
+    
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    
+    // Load more when within 200px of bottom
+    if (scrollHeight - scrollTop - clientHeight < 200) {
+      loadArticles(false);
+    }
+  }, [articles.length, loadingMore, hasMore]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      return () => container.removeEventListener('scroll', handleScroll);
+    }
+  }, [handleScroll]);
 
 
   const loadArticleDetails = async (articleId) => {
@@ -696,7 +747,7 @@ export default function TechNews({ searchQuery = '' }) {
                 gap: '24px',
                 padding: '24px 24px 24px 24px'
               }}>
-                {filteredAndSortedArticles.slice(0, visibleCount).map((article) => (
+                {articles.map((article) => (
                   <div
                     key={article.id}
                     style={{
