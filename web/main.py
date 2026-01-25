@@ -17146,31 +17146,43 @@ async def personal_chat(request: Request):
             # Filter out summarized messages and get last 5 Q&A pairs (10 messages)
             unsummarized_messages = [msg for msg in all_history if msg.id not in summarized_message_ids]
             
-            # Get last 5 Q&A pairs (10 messages max)
+            # Get last 5 Q&A pairs (10 messages max) - work backwards from most recent
             last_pairs = []
-            current_pair = None
-            for msg in reversed(unsummarized_messages):  # Start from most recent
+            pairs_collected = 0
+            current_pair = []
+            
+            # Iterate from most recent to oldest
+            for msg in reversed(unsummarized_messages):
                 if msg.role == 'user':
+                    # If we have a complete pair, save it
+                    if len(current_pair) == 2:  # Complete pair (user + assistant)
+                        last_pairs.insert(0, current_pair[0])  # User message
+                        last_pairs.insert(1, current_pair[1])  # Assistant message
+                        pairs_collected += 1
+                        if pairs_collected >= 5:  # Got 5 pairs
+                            break
                     # Start new pair
-                    if current_pair:
-                        last_pairs.insert(0, current_pair)  # Insert at beginning to maintain order
-                    current_pair = {
+                    current_pair = [{
                         "role": msg.role,
                         "content": msg.message
-                    }
-                elif msg.role == 'assistant' and current_pair:
+                    }]
+                elif msg.role == 'assistant' and len(current_pair) == 1:
                     # Complete the pair
-                    last_pairs.insert(0, {
+                    current_pair.append({
                         "role": msg.role,
                         "content": msg.message
                     })
-                    if len(last_pairs) >= 10:  # 5 pairs = 10 messages
+                    # Save the complete pair
+                    last_pairs.insert(0, current_pair[0])  # User message
+                    last_pairs.insert(1, current_pair[1])  # Assistant message
+                    pairs_collected += 1
+                    if pairs_collected >= 5:  # Got 5 pairs
                         break
-                    current_pair = None
+                    current_pair = []
             
-            # If we have an incomplete pair, add it
-            if current_pair:
-                last_pairs.insert(0, current_pair)
+            # If we have an incomplete pair (user without assistant), add just the user message
+            if len(current_pair) == 1:
+                last_pairs.insert(0, current_pair[0])
             
             # Build conversation history: summaries first, then last 5 pairs
             conversation_history = []
