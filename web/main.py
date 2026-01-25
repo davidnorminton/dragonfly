@@ -16843,6 +16843,65 @@ async def get_scraper_diagnostics():
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/scraper/test-url")
+async def test_scraper_url(request: Request):
+    """Test scraper on a specific URL (for debugging)."""
+    try:
+        data = await request.json()
+        test_url = data.get("url")
+        
+        if not test_url:
+            return {"success": False, "error": "URL parameter required"}
+        
+        async with AsyncSessionLocal() as session:
+            # Get scraper images directory
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = config_result.scalar_one_or_none()
+            
+            images_dir = None
+            if config and config.config_value:
+                images_dir = config.config_value.get("scraper_images_directory")
+            
+            if not images_dir:
+                images_dir = "/tmp/scraper_images"  # Fallback for testing
+            
+            # Initialize scraper service
+            from services.web_scraper_service import WebScraperService
+            scraper = WebScraperService(images_directory=images_dir)
+            
+            # Test scraping the URL
+            logger.info(f"Testing scraper on URL: {test_url}")
+            article_data = await scraper.scrape_article(test_url)
+            
+            if article_data:
+                return {
+                    "success": True,
+                    "url": test_url,
+                    "title": article_data.get("title"),
+                    "author": article_data.get("author"),
+                    "summary": article_data.get("summary"),
+                    "published_date": article_data.get("published_date").isoformat() if article_data.get("published_date") else None,
+                    "image_url": article_data.get("image_url"),
+                    "content_length": len(article_data.get("content", "")),
+                    "content_preview": article_data.get("content", "")[:500] if article_data.get("content") else None,
+                    "has_content": bool(article_data.get("content")),
+                    "has_title": bool(article_data.get("title")),
+                    "has_summary": bool(article_data.get("summary"))
+                }
+            else:
+                return {
+                    "success": False,
+                    "url": test_url,
+                    "error": "Scraper returned None - content extraction failed"
+                }
+            
+    except Exception as e:
+        logger.error(f"Error testing scraper URL: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @app.delete("/api/scraper/articles")  
 async def clear_all_scraped_articles():
     """Clear all scraped articles from the database."""
