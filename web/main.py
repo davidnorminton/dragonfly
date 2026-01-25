@@ -17224,6 +17224,7 @@ async def personal_chat(request: Request):
             conversation_history.extend(last_pairs)
             
             logger.info(f"📚 Personal chat: Using latest summary + {len(last_pairs)} recent messages ({len(last_pairs) // 2} Q&A pairs) as context")
+            logger.info(f"📚 Personal chat context breakdown: summary={bool(summary_text)}, pairs={len(last_pairs) // 2}, total_messages_in_context={len(conversation_history)}")
             
             # Save user message AFTER loading history
             user_message = PersonalChat(
@@ -17294,17 +17295,73 @@ async def personal_chat(request: Request):
 
 
 @app.get("/api/personal/chat/history")
-async def get_personal_chat_history(session_id: str, limit: int = 200):
-    """Get personal chat history."""
+async def get_personal_chat_history(session_id: str, limit: int = None):
+    """Get personal chat history. If limit is not specified, returns only last 5 Q&A pairs (10 messages)."""
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(PersonalChat)
-                .where(PersonalChat.session_id == session_id)
-                .order_by(PersonalChat.created_at.asc())  # Chronological order (oldest first)
-                .limit(limit)
+            # Get all summarized message IDs to filter them out
+            all_summaries_result = await session.execute(
+                select(PersonalSummary)
+                .where(PersonalSummary.session_id == session_id)
             )
-            messages = result.scalars().all()
+            all_summaries = all_summaries_result.scalars().all()
+            
+            summarized_message_ids = set()
+            for summary in all_summaries:
+                if summary.message_ids and isinstance(summary.message_ids, list):
+                    summarized_message_ids.update(summary.message_ids)
+            
+            # If limit is specified, use it (for backward compatibility)
+            # Otherwise, get only last 5 Q&A pairs (10 messages) that haven't been summarized
+            if limit is not None:
+                result = await session.execute(
+                    select(PersonalChat)
+                    .where(PersonalChat.session_id == session_id)
+                    .order_by(PersonalChat.created_at.asc())  # Chronological order (oldest first)
+                    .limit(limit)
+                )
+                messages = result.scalars().all()
+            else:
+                # Get all messages, filter out summarized ones, then get last 5 pairs
+                all_result = await session.execute(
+                    select(PersonalChat)
+                    .where(PersonalChat.session_id == session_id)
+                    .order_by(PersonalChat.created_at.desc())  # Most recent first
+                )
+                all_messages = all_result.scalars().all()
+                
+                # Filter out summarized messages
+                unsummarized = [msg for msg in all_messages if msg.id not in summarized_message_ids]
+                
+                # Get last 5 Q&A pairs (10 messages max)
+                last_pairs = []
+                current_pair = []
+                pairs_collected = 0
+                
+                for msg in unsummarized:  # Already in reverse order (most recent first)
+                    if msg.role == 'user':
+                        if len(current_pair) == 2:  # Complete pair
+                            last_pairs.insert(0, current_pair[1])  # Assistant
+                            last_pairs.insert(0, current_pair[0])  # User
+                            pairs_collected += 1
+                            if pairs_collected >= 5:
+                                break
+                        current_pair = [msg]
+                    elif msg.role == 'assistant' and len(current_pair) == 1:
+                        current_pair.append(msg)
+                        last_pairs.insert(0, current_pair[1])  # Assistant
+                        last_pairs.insert(0, current_pair[0])  # User
+                        pairs_collected += 1
+                        if pairs_collected >= 5:
+                            break
+                        current_pair = []
+                
+                if len(current_pair) == 1:
+                    last_pairs.insert(0, current_pair[0])
+                
+                messages = last_pairs
+            
+            logger.info(f"📚 Personal chat history: Returning {len(messages)} messages (filtered from {len(summarized_message_ids)} summarized)")
             
             return {
                 "success": True,
