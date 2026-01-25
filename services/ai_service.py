@@ -454,12 +454,19 @@ IMPORTANT: All text will be converted to speech.
                     "max_tokens": max_tokens_override if max_tokens_override is not None else 1024
                 }
             
-            # Build system prompt with pre-context
-            system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
-            if system_prompt:
-                self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
+            # Check for custom context (for personal chat mode)
+            custom_context = input_data.get("custom_context")
+            if custom_context and custom_context.strip():
+                # Use custom context instead of building system prompt
+                system_prompt = custom_context.strip()
+                self.logger.info(f"✅ Using custom context for personal chat (length: {len(system_prompt)})")
             else:
-                self.logger.warning(f"⚠️ No system prompt built (user_id: {user_id})")
+                # Build system prompt with pre-context
+                system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
+                if system_prompt:
+                    self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
+                else:
+                    self.logger.warning(f"⚠️ No system prompt built (user_id: {user_id})")
             
             # Build messages array with conversation history + current question
             messages = conversation_history.copy() if conversation_history else []
@@ -599,12 +606,19 @@ IMPORTANT: All text will be converted to speech.
                     "max_tokens": max_tokens_override if max_tokens_override is not None else 1024
                 }
             
-            # Build system prompt with pre-context
-            system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
-            if system_prompt:
-                self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
+            # Check for custom context (for personal chat mode)
+            custom_context = input_data.get("custom_context")
+            if custom_context and custom_context.strip():
+                # Use custom context instead of building system prompt
+                system_prompt = custom_context.strip()
+                self.logger.info(f"✅ Using custom context for personal chat (length: {len(system_prompt)})")
             else:
-                self.logger.warning(f"⚠️ No system prompt built (user_id: {user_id})")
+                # Build system prompt with pre-context
+                system_prompt = await self._build_system_prompt_with_pre_context(user_id, is_ai_focus_mode=is_ai_focus_mode)
+                if system_prompt:
+                    self.logger.info(f"✅ Built system prompt with pre-context (length: {len(system_prompt)}), first 200 chars: {system_prompt[:200]}...")
+                else:
+                    self.logger.warning(f"⚠️ No system prompt built (user_id: {user_id})")
             
             # Build messages array with conversation history + current question
             messages = conversation_history.copy() if conversation_history else []
