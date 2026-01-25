@@ -17112,28 +17112,85 @@ async def personal_chat(request: Request):
                 custom_context = config.config_value.get("custom_context", "")
                 max_tokens = config.config_value.get("max_tokens", 4096)
             
-            # Get conversation history FIRST (before saving new message) to get all previous messages
-            # Limit to last 100 messages to avoid hitting context limits (Claude has ~200k token limit)
-            history_result = await session.execute(
+            # Get summaries for this session
+            summaries_result = await session.execute(
+                select(PersonalSummary)
+                .where(PersonalSummary.session_id == session_id)
+                .order_by(PersonalSummary.created_at.asc())  # Oldest summaries first
+            )
+            summaries = summaries_result.scalars().all()
+            
+            # Collect all message IDs that have been summarized
+            summarized_message_ids = set()
+            summary_texts = []
+            for summary in summaries:
+                if summary.message_ids and isinstance(summary.message_ids, list):
+                    summarized_message_ids.update(summary.message_ids)
+                # Add summary text to context
+                if summary.summary:
+                    summary_texts.append(f"[Summary from {summary.start_date.strftime('%Y-%m-%d') if summary.start_date else 'earlier'} to {summary.end_date.strftime('%Y-%m-%d') if summary.end_date else 'later'}]: {summary.summary}")
+            
+            logger.info(f"📚 Personal chat: Found {len(summaries)} summaries covering {len(summarized_message_ids)} messages")
+            
+            # Get all messages to find the last 5 Q&A pairs that haven't been summarized
+            all_history_result = await session.execute(
                 select(PersonalChat)
                 .where(PersonalChat.session_id == session_id)
                 .order_by(PersonalChat.created_at.desc())
-                .limit(100)  # Limit to most recent 100 messages
             )
-            history = history_result.scalars().all()
+            all_history = all_history_result.scalars().all()
             
             # Reverse to get chronological order (oldest first)
-            history = list(reversed(history))
+            all_history = list(reversed(all_history))
             
-            # Convert to message format for AI service
+            # Filter out summarized messages and get last 5 Q&A pairs (10 messages)
+            unsummarized_messages = [msg for msg in all_history if msg.id not in summarized_message_ids]
+            
+            # Get last 5 Q&A pairs (10 messages max)
+            last_pairs = []
+            current_pair = None
+            for msg in reversed(unsummarized_messages):  # Start from most recent
+                if msg.role == 'user':
+                    # Start new pair
+                    if current_pair:
+                        last_pairs.insert(0, current_pair)  # Insert at beginning to maintain order
+                    current_pair = {
+                        "role": msg.role,
+                        "content": msg.message
+                    }
+                elif msg.role == 'assistant' and current_pair:
+                    # Complete the pair
+                    last_pairs.insert(0, {
+                        "role": msg.role,
+                        "content": msg.message
+                    })
+                    if len(last_pairs) >= 10:  # 5 pairs = 10 messages
+                        break
+                    current_pair = None
+            
+            # If we have an incomplete pair, add it
+            if current_pair:
+                last_pairs.insert(0, current_pair)
+            
+            # Build conversation history: summaries first, then last 5 pairs
             conversation_history = []
-            for msg in history:
+            
+            # Add summaries as a system message or user message
+            if summary_texts:
+                summary_context = "\n\n".join(summary_texts)
                 conversation_history.append({
-                    "role": msg.role,
-                    "content": msg.message
+                    "role": "user",
+                    "content": f"[Previous conversation summaries]:\n{summary_context}"
+                })
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": "I understand the previous conversation context. Please continue."
                 })
             
-            logger.info(f"📚 Personal chat: Loaded {len(conversation_history)} previous messages as context (limited to last 100)")
+            # Add last 5 Q&A pairs
+            conversation_history.extend(last_pairs)
+            
+            logger.info(f"📚 Personal chat: Using {len(summaries)} summaries + {len(last_pairs)} recent messages ({len(last_pairs) // 2} Q&A pairs) as context")
             
             # Save user message AFTER loading history
             user_message = PersonalChat(
