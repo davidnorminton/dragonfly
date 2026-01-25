@@ -7,6 +7,7 @@ import { ConversionProgressModal } from '../components/ConversionProgressModal';
 import { VideoConversionModal } from '../components/VideoConversionModal';
 import { CoverArtModal } from '../components/CoverArtModal';
 import { PersonaImageUpload } from '../components/PersonaImageUpload';
+import ScraperProgressModal from '../components/ScraperProgressModal';
 
 function UserManagementPanel({ onNavigate }) {
   const [users, setUsers] = useState([]);
