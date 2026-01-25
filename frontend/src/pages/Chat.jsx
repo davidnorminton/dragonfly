@@ -438,7 +438,8 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           setPersonalMessages(prev => [...prev, assistantMessage]);
           setPendingUserMessage(null);
           
-          // Reload from server in background to get proper IDs
+          // Reload from server in background to get proper IDs and ensure sync
+          // Wait a bit longer to ensure database commit is complete
           setTimeout(async () => {
             try {
               const historyResponse = await fetch(`/api/personal/chat/history?session_id=${PERSONAL_SESSION_ID}`);
@@ -458,12 +459,54 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                     const dateB = new Date(b.created_at || 0).getTime();
                     return dateA - dateB;
                   });
-                setPersonalMessages(formattedMessages);
+                
+                // Only update if we got messages back, otherwise keep current messages
+                // This prevents losing messages if the reload happens too quickly
+                if (formattedMessages.length > 0) {
+                  // Check if our temp messages are in the reloaded messages
+                  // If not, they might not be saved yet, so keep them
+                  const tempUserIds = [tempUserMessage.id];
+                  const tempAssistantIds = [assistantMessage.id];
+                  
+                  // Check if new messages match our temp messages
+                  const hasNewUser = formattedMessages.some(m => 
+                    m.message === tempUserMessage.message && 
+                    m.role === 'user' &&
+                    Math.abs(new Date(m.created_at).getTime() - new Date(tempUserMessage.created_at).getTime()) < 2000
+                  );
+                  const hasNewAssistant = formattedMessages.some(m => 
+                    m.message === assistantMessage.message && 
+                    m.role === 'assistant' &&
+                    Math.abs(new Date(m.created_at).getTime() - new Date(assistantMessage.created_at).getTime()) < 2000
+                  );
+                  
+                  if (hasNewUser && hasNewAssistant) {
+                    // Both messages are in the reloaded history, safe to replace
+                    setPersonalMessages(formattedMessages);
+                  } else {
+                    // Messages not yet in history, merge temp messages with reloaded ones
+                    // Remove temp messages and add real ones from server
+                    const withoutTemps = formattedMessages.filter(m => 
+                      !tempUserIds.includes(m.id) && !tempAssistantIds.includes(m.id)
+                    );
+                    // Add our temp messages if they're not in the server response yet
+                    const merged = [...withoutTemps];
+                    if (!hasNewUser) merged.push(tempUserMessage);
+                    if (!hasNewAssistant) merged.push(assistantMessage);
+                    // Sort by created_at
+                    merged.sort((a, b) => {
+                      const dateA = new Date(a.created_at || 0).getTime();
+                      const dateB = new Date(b.created_at || 0).getTime();
+                      return dateA - dateB;
+                    });
+                    setPersonalMessages(merged);
+                  }
+                }
               }
             } catch (err) {
               console.error('Error reloading personal messages:', err);
             }
-          }, 500);
+          }, 1000); // Increased delay to ensure database commit
         } else {
           // Remove user message on error
           setPersonalMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));

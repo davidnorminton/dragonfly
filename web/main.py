@@ -17287,6 +17287,12 @@ async def personal_chat(request: Request):
             session.add(assistant_message)
             await session.commit()
             
+            # Refresh to get IDs
+            await session.refresh(user_message)
+            await session.refresh(assistant_message)
+            
+            logger.info(f"💾 Personal chat: Saved user message ID {user_message.id} and assistant message ID {assistant_message.id}")
+            
             return {
                 "success": True,
                 "answer": answer
