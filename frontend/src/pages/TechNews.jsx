@@ -676,48 +676,6 @@ export default function TechNews({ searchQuery = '' }) {
             <option value="title-asc" style={{ background: '#1a1a1a' }}>Title (A-Z)</option>
             <option value="title-desc" style={{ background: '#1a1a1a' }}>Title (Z-A)</option>
           </select>
-        </div>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px'
-        }}>
-          <button
-            onClick={() => {
-              const newMode = viewMode === 'card' ? 'list' : 'card';
-              setViewMode(newMode);
-              localStorage.setItem('techNewsViewMode', newMode);
-            }}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '8px',
-              border: '1px solid rgba(255,255,255,0.2)',
-              background: viewMode === 'card' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)',
-              color: '#fff',
-              fontSize: '0.9em',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              transition: 'all 0.2s'
-            }}
-            onMouseEnter={(e) => {
-              if (viewMode !== 'card') {
-                e.target.style.background = 'rgba(255,255,255,0.1)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (viewMode !== 'card') {
-                e.target.style.background = 'rgba(255,255,255,0.05)';
-              }
-            }}
-            title="Card View"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
-            </svg>
-            Cards
-          </button>
           <button
             onClick={() => {
               const newMode = viewMode === 'list' ? 'card' : 'list';
@@ -725,34 +683,41 @@ export default function TechNews({ searchQuery = '' }) {
               localStorage.setItem('techNewsViewMode', newMode);
             }}
             style={{
-              padding: '8px 16px',
+              padding: '8px 12px',
               borderRadius: '8px',
               border: '1px solid rgba(255,255,255,0.2)',
-              background: viewMode === 'list' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)',
+              background: 'rgba(255,255,255,0.05)',
               color: '#fff',
               fontSize: '0.9em',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
+              gap: '6px',
               transition: 'all 0.2s'
             }}
             onMouseEnter={(e) => {
-              if (viewMode !== 'list') {
-                e.target.style.background = 'rgba(255,255,255,0.1)';
-              }
+              e.target.style.background = 'rgba(255,255,255,0.1)';
             }}
             onMouseLeave={(e) => {
-              if (viewMode !== 'list') {
-                e.target.style.background = 'rgba(255,255,255,0.05)';
-              }
+              e.target.style.background = 'rgba(255,255,255,0.05)';
             }}
-            title="List View"
+            title={viewMode === 'list' ? 'Switch to Card View' : 'Switch to List View'}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
-            </svg>
-            List
+            {viewMode === 'list' ? (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
+                </svg>
+                Cards
+              </>
+            ) : (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+                </svg>
+                List
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -1173,31 +1138,35 @@ export default function TechNews({ searchQuery = '' }) {
                   </div>
                 ))}
               </div>
-              
-              {/* Loading More Indicator */}
-              {loadingMore && (
-                <div style={{ 
-                  textAlign: 'center', 
-                  marginTop: '32px', 
-                  paddingBottom: '60px',
-                  color: 'rgba(255,255,255,0.6)'
-                }}>
-                  <div style={{ fontSize: '1.2em', marginBottom: '8px' }}>📰</div>
-                  <div>Loading more articles...</div>
-                </div>
-              )}
-              {!hasMore && articles.length > 0 && !searchQuery && !selectedDomain && (
-                <div style={{ 
-                  textAlign: 'center', 
-                  marginTop: '32px', 
-                  paddingBottom: '60px',
-                  color: 'rgba(255,255,255,0.5)',
-                  fontSize: '0.9em'
-                }}>
-                  ✓ All articles loaded ({totalArticles || 0} total)
-                </div>
-              )}
             </>
+          )}
+          
+          {/* Loading More Indicator - Shared for both views */}
+          {loadingMore && (
+            <div style={{ 
+              textAlign: 'center', 
+              marginTop: '32px', 
+              paddingBottom: '60px',
+              color: 'rgba(255,255,255,0.6)',
+              paddingLeft: '24px',
+              paddingRight: '24px'
+            }}>
+              <div style={{ fontSize: '1.2em', marginBottom: '8px' }}>📰</div>
+              <div>Loading more articles...</div>
+            </div>
+          )}
+          {!hasMore && articles.length > 0 && !searchQuery && !selectedDomain && (
+            <div style={{ 
+              textAlign: 'center', 
+              marginTop: '32px', 
+              paddingBottom: '60px',
+              color: 'rgba(255,255,255,0.5)',
+              fontSize: '0.9em',
+              paddingLeft: '24px',
+              paddingRight: '24px'
+            }}>
+              ✓ All articles loaded ({totalArticles || 0} total)
+            </div>
           )}
         </div>
 
