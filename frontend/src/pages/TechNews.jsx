@@ -652,7 +652,7 @@ export default function TechNews({ searchQuery = '' }) {
           gap: '16px'
         }}>
           <div style={{ fontWeight: '600', color: '#fff', fontSize: '1.1em' }}>
-            Articles ({filteredAndSortedArticles.length}{searchQuery ? ` of ${articles.length}` : ''})
+            Articles ({totalArticles || 0})
           </div>
           <select
             value={sortBy}
@@ -931,7 +931,7 @@ export default function TechNews({ searchQuery = '' }) {
                   color: 'rgba(255,255,255,0.5)',
                   fontSize: '0.9em'
                 }}>
-                  ✓ All articles loaded ({articles.length} total)
+                  ✓ All articles loaded ({totalArticles || 0} total)
                 </div>
               )}
             </>
