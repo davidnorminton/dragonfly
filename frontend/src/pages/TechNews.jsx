@@ -333,7 +333,8 @@ export default function TechNews({ searchQuery = '' }) {
 
   // Lazy load more articles when scrolling near bottom
   const handleScroll = useCallback(() => {
-    if (loadingMore || !hasMore) return;
+    // Don't lazy load if we're filtering/searching - those should show all matching results
+    if (loadingMore || !hasMore || searchQuery || selectedDomain) return;
     
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -346,7 +347,7 @@ export default function TechNews({ searchQuery = '' }) {
     if (scrollHeight - scrollTop - clientHeight < 200) {
       loadArticles(false);
     }
-  }, [articles.length, loadingMore, hasMore]);
+  }, [articles.length, loadingMore, hasMore, searchQuery, selectedDomain]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -741,13 +742,18 @@ export default function TechNews({ searchQuery = '' }) {
           ) : (
             <>
               {/* Articles Grid */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
-                gap: '24px',
-                padding: '24px 24px 24px 24px'
-              }}>
-                {articles.map((article) => (
+              <div 
+                ref={scrollContainerRef}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
+                  gap: '24px',
+                  padding: '24px 24px 24px 24px',
+                  maxHeight: 'calc(100vh - 200px)',
+                  overflowY: 'auto'
+                }}
+              >
+                {filteredAndSortedArticles.map((article) => (
                   <div
                     key={article.id}
                     style={{
