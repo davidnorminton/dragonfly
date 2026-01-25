@@ -36,6 +36,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [deleteError, setDeleteError] = useState(null);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false); // Track if user has manually scrolled away from bottom
   const [personalMode, setPersonalMode] = useState(false);
+  const PERSONAL_SESSION_ID = 'personal-chat'; // Fixed session ID for personal mode
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (baseSessionId && baseSessionId.startsWith('chat-')) {
@@ -94,10 +95,10 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   
   // Load personal chat messages when in personal mode
   useEffect(() => {
-    if (personalMode && currentSessionId) {
+    if (personalMode) {
       const loadPersonalMessages = async () => {
         try {
-          const response = await fetch(`/api/personal/chat/history?session_id=${currentSessionId}`);
+          const response = await fetch(`/api/personal/chat/history?session_id=${PERSONAL_SESSION_ID}`);
           const result = await response.json();
           if (result.success && result.messages) {
             // Convert personal chat messages to the format expected by the UI
@@ -106,13 +107,17 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               role: msg.role,
               message: msg.message,
               created_at: msg.created_at,
-              session_id: currentSessionId
+              session_id: PERSONAL_SESSION_ID
             }));
             // Clear existing messages and set new ones
             setPersonalMessages(formattedMessages);
+          } else {
+            // No messages yet, start with empty array
+            setPersonalMessages([]);
           }
         } catch (err) {
           console.error('Error loading personal chat messages:', err);
+          setPersonalMessages([]);
         }
       };
       loadPersonalMessages();
@@ -120,7 +125,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
       // Reload regular chat messages when switching out of personal mode
       reloadHistory();
     }
-  }, [personalMode, currentSessionId]);
+  }, [personalMode]);
   
   // Get session display name helper function
   const getSessionDisplayName = useCallback((sessionId) => {
@@ -379,13 +384,24 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
   const handleSend = async () => {
     if (personalMode) {
-      // Use personal chat API
-      if (!input.trim() || !currentSessionId) return;
+      // Use personal chat API - always use fixed session ID
+      if (!input.trim()) return;
       
       const userMessage = input.trim();
       setInput('');
+      
+      // Add user message immediately to UI
+      const tempUserMessage = {
+        id: `temp-user-${Date.now()}`,
+        role: 'user',
+        message: userMessage,
+        created_at: new Date().toISOString(),
+        session_id: PERSONAL_SESSION_ID
+      };
+      setPersonalMessages(prev => [...prev, tempUserMessage]);
+      setPendingUserMessage(tempUserMessage);
       setIsWaiting(true);
-      setPendingUserMessage(userMessage);
+      setUserHasScrolledUp(false);
       
       try {
         const response = await fetch('/api/personal/chat', {
@@ -393,32 +409,52 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             question: userMessage,
-            session_id: currentSessionId,
+            session_id: PERSONAL_SESSION_ID,
             user_id: selectedUser?.id
           })
         });
         
         const result = await response.json();
-        if (result.success) {
-          // Reload personal messages to show the new conversation
-          const historyResponse = await fetch(`/api/personal/chat/history?session_id=${currentSessionId}`);
-          const historyResult = await historyResponse.json();
-          if (historyResult.success && historyResult.messages) {
-            const formattedMessages = historyResult.messages.map(msg => ({
-              id: msg.id,
-              role: msg.role,
-              message: msg.message,
-              created_at: msg.created_at,
-              session_id: currentSessionId
-            }));
-            setPersonalMessages(formattedMessages);
-          }
+        if (result.success && result.answer) {
+          // Add assistant message immediately to UI
+          const assistantMessage = {
+            id: `temp-assistant-${Date.now()}`,
+            role: 'assistant',
+            message: result.answer,
+            created_at: new Date().toISOString(),
+            session_id: PERSONAL_SESSION_ID
+          };
+          setPersonalMessages(prev => [...prev, assistantMessage]);
           setPendingUserMessage(null);
+          
+          // Reload from server in background to get proper IDs
+          setTimeout(async () => {
+            try {
+              const historyResponse = await fetch(`/api/personal/chat/history?session_id=${PERSONAL_SESSION_ID}`);
+              const historyResult = await historyResponse.json();
+              if (historyResult.success && historyResult.messages) {
+                const formattedMessages = historyResult.messages.map(msg => ({
+                  id: msg.id,
+                  role: msg.role,
+                  message: msg.message,
+                  created_at: msg.created_at,
+                  session_id: PERSONAL_SESSION_ID
+                }));
+                setPersonalMessages(formattedMessages);
+              }
+            } catch (err) {
+              console.error('Error reloading personal messages:', err);
+            }
+          }, 500);
         } else {
+          // Remove user message on error
+          setPersonalMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
           setPendingUserMessage(null);
           alert(`Error: ${result.error || 'Failed to send message'}`);
         }
       } catch (err) {
+        // Remove user message on error
+        setPersonalMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
         setPendingUserMessage(null);
         alert(`Error: ${err.message}`);
       } finally {
@@ -1163,7 +1199,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
 
         {/* Messages Area */}
         <div className="chatgpt-messages" ref={chatContainerRef}>
-          {!currentSessionId ? (
+          {!personalMode && !currentSessionId ? (
             <div className="chatgpt-empty">
               <div className="chatgpt-empty-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -1172,7 +1208,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               </div>
               <div className="chatgpt-empty-text">Click "New chat" to start a conversation</div>
             </div>
-          ) : loading && allMessages.length === 0 ? (
+          ) : (personalMode ? false : loading) && allMessages.length === 0 ? (
             <div className="chatgpt-empty">Loading...</div>
           ) : allMessages.length === 0 ? (
             <div className="chatgpt-empty">
