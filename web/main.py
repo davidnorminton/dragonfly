@@ -16327,8 +16327,17 @@ async def run_scraper():
         scraper = WebScraperService(images_directory=images_dir)
         
         # Run scraper
-        logger.info("Starting web scraper...")
+        logger.info("=" * 80)
+        logger.info("STARTING WEB SCRAPER")
+        logger.info("=" * 80)
         results = await scraper.scrape_all_sources()
+        logger.info("=" * 80)
+        logger.info("SCRAPER COMPLETE")
+        logger.info("=" * 80)
+        
+        # Log detailed results
+        if results.get("errors"):
+            logger.error(f"Scraper errors: {results['errors']}")
         
         return {
             "success": results["success"],
@@ -16338,6 +16347,56 @@ async def run_scraper():
         
     except Exception as e:
         logger.error(f"Error running scraper: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/scraper/test-source/{source_id}")
+async def test_scraper_source(source_id: int):
+    """Test scraping a single source for debugging."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get the source
+            result = await session.execute(
+                select(ScraperSource).where(ScraperSource.id == source_id)
+            )
+            source = result.scalar_one_or_none()
+            
+            if not source:
+                return {"success": False, "error": f"Source {source_id} not found"}
+            
+            # Get scraper images directory
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "paths")
+            )
+            config = config_result.scalar_one_or_none()
+            
+            images_dir = None
+            if config and config.config_value:
+                images_dir = config.config_value.get("scraper_images_directory")
+            
+            if not images_dir:
+                return {"success": False, "error": "Scraper images directory not configured"}
+            
+            # Initialize scraper service
+            from services.web_scraper_service import WebScraperService
+            scraper = WebScraperService(images_directory=images_dir)
+            
+            # Test scrape this source
+            logger.info(f"Testing source {source_id}: {source.name} ({source.url})")
+            results = await scraper.scrape_source(source, session)
+            
+            return {
+                "success": True,
+                "source": {
+                    "id": source.id,
+                    "name": source.name,
+                    "url": source.url
+                },
+                "results": results
+            }
+            
+    except Exception as e:
+        logger.error(f"Error testing scraper source: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
 

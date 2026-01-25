@@ -136,13 +136,33 @@ class WebScraperService:
             if is_feed:
                 logger.info(f"Detected RSS/Atom feed: {source.url}")
                 article_urls = self._extract_urls_from_feed(response.text)
+                if not article_urls:
+                    logger.warning(f"⚠️  No URLs extracted from RSS feed: {source.url}")
+                    logger.warning(f"   Feed content length: {len(response.text)}")
+                    logger.warning(f"   Content type: {content_type}")
+                    # Try to debug feed parsing
+                    try:
+                        feed = feedparser.parse(response.text)
+                        logger.warning(f"   Feed entries found: {len(feed.entries)}")
+                        if feed.bozo:
+                            logger.warning(f"   Feed parsing error: {feed.bozo_exception}")
+                    except Exception as e:
+                        logger.warning(f"   Feed parsing exception: {e}")
             else:
                 logger.info(f"Detected HTML page: {source.url}")
                 soup = BeautifulSoup(response.text, 'html.parser')
                 article_urls = self._extract_article_urls(soup, source.url)
+                if not article_urls:
+                    logger.warning(f"⚠️  No URLs extracted from HTML page: {source.url}")
+                    logger.warning(f"   Page content length: {len(response.text)}")
+                    logger.warning(f"   Tried {len(soup.select('a[href]'))} total links on page")
             
             results["articles_found"] = len(article_urls)
             logger.info(f"Found {len(article_urls)} article URLs on {source.url}")
+            
+            if len(article_urls) == 0:
+                logger.error(f"❌ Source {source.name} ({source.url}) returned 0 article URLs - check feed/page structure")
+                return results
             
             # Batch check for existing articles to reduce database queries
             existing_urls_result = await session.execute(
@@ -248,13 +268,24 @@ class WebScraperService:
             feed = feedparser.parse(feed_content)
             article_urls = []
             
+            # Check for feed parsing errors
+            if feed.bozo:
+                logger.warning(f"Feed parsing warning: {feed.bozo_exception}")
+            
+            if not feed.entries:
+                logger.warning(f"No entries found in feed. Feed status: {feed.get('status', 'unknown')}")
+                logger.debug(f"Feed keys: {list(feed.keys())}")
+                return []
+            
             for entry in feed.entries:
                 # Get the article URL (link)
                 url = entry.get('link')
                 if url:
                     article_urls.append(url)
+                else:
+                    logger.debug(f"Entry missing 'link': {entry.get('title', 'No title')}")
             
-            logger.info(f"Extracted {len(article_urls)} URLs from RSS/Atom feed")
+            logger.info(f"Extracted {len(article_urls)} URLs from RSS/Atom feed (from {len(feed.entries)} entries)")
             return article_urls
             
         except Exception as e:
