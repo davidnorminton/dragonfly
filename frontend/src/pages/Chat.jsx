@@ -36,6 +36,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [deleteError, setDeleteError] = useState(null);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false); // Track if user has manually scrolled away from bottom
   const [personalMode, setPersonalMode] = useState(false);
+  const [personalMessages, setPersonalMessages] = useState([]);
   const PERSONAL_SESSION_ID = 'personal-chat'; // Fixed session ID for personal mode
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
@@ -91,7 +92,10 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   // Only create a session ID if currentSessionId is set (user has selected/created a chat)
   const sessionId = currentSessionId && currentSessionId.startsWith('chat-') ? currentSessionId : (currentSessionId ? `${currentSessionId}_${mode}_${expertType}` : null);
 
-  const { messages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory, addMessage } = useChat(sessionId, mode, currentPersona);
+  const { messages: regularMessages, loading, hasMore, isLoadingMore, loadMore, sendMessage, reloadHistory, addMessage } = useChat(sessionId, mode, currentPersona);
+  
+  // Use personal messages when in personal mode, otherwise use regular messages
+  const messages = personalMode ? personalMessages : regularMessages;
   
   // Load personal chat messages when in personal mode
   useEffect(() => {
