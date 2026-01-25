@@ -10,6 +10,7 @@ export function PersonalSummariesPage({ onNavigate }) {
   const [editingSummary, setEditingSummary] = useState(false);
   const [editedSummaryText, setEditedSummaryText] = useState('');
   const [savingSummary, setSavingSummary] = useState(false);
+  const [regeneratingSummary, setRegeneratingSummary] = useState(false);
 
   useEffect(() => {
     loadSummaries();
@@ -104,6 +105,34 @@ export function PersonalSummariesPage({ onNavigate }) {
     }
   };
 
+  const handleRegenerateSummary = async () => {
+    if (!selectedSummary) return;
+    
+    if (!confirm('Regenerate this summary using AI? This will replace the current summary.')) return;
+    
+    setRegeneratingSummary(true);
+    try {
+      const response = await fetch(`/api/personal/summaries/${selectedSummary.id}/regenerate`, {
+        method: 'POST'
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        // Update the selected summary with the new regenerated summary
+        setSelectedSummary({ ...selectedSummary, summary: result.summary.summary });
+        setEditedSummaryText(result.summary.summary);
+        await loadSummaries();
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('Error regenerating summary:', err);
+      alert(`Error regenerating summary: ${err.message}`);
+    } finally {
+      setRegeneratingSummary(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="personal-page">
@@ -178,13 +207,23 @@ export function PersonalSummariesPage({ onNavigate }) {
               <h2>{selectedSummary.title || 'Summary'}</h2>
               <div className="summary-header-actions">
                 {!editingSummary ? (
-                  <button
-                    className="btn-edit-summary"
-                    onClick={handleEditSummary}
-                    title="Edit summary"
-                  >
-                    Edit
-                  </button>
+                  <>
+                    <button
+                      className="btn-edit-summary"
+                      onClick={handleEditSummary}
+                      title="Edit summary"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn-regenerate-summary"
+                      onClick={handleRegenerateSummary}
+                      disabled={regeneratingSummary}
+                      title="Regenerate summary with AI"
+                    >
+                      {regeneratingSummary ? 'Regenerating...' : 'Regenerate'}
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button

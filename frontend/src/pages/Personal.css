@@ -249,6 +249,7 @@
 }
 
 .btn-edit-summary,
+.btn-regenerate-summary,
 .btn-save-summary,
 .btn-cancel-edit {
   padding: 6px 12px;
@@ -267,6 +268,20 @@
 
 .btn-edit-summary:hover {
   background: var(--hover-bg);
+}
+
+.btn-regenerate-summary {
+  background: var(--secondary-bg, #1f1f2e);
+  color: var(--text-primary);
+}
+
+.btn-regenerate-summary:hover:not(:disabled) {
+  background: var(--hover-bg, #2a2a3a);
+}
+
+.btn-regenerate-summary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-save-summary {

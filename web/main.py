@@ -17570,6 +17570,148 @@ async def update_personal_summary(summary_id: int, request: Request):
         return {"success": False, "error": str(e)}
 
 
+@app.post("/api/personal/summaries/{summary_id}/regenerate")
+async def regenerate_personal_summary(summary_id: int):
+    """Regenerate a personal chat summary using AI."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get the existing summary
+            result = await session.execute(
+                select(PersonalSummary).where(PersonalSummary.id == summary_id)
+            )
+            summary = result.scalar_one_or_none()
+            
+            if not summary:
+                return {"success": False, "error": "Summary not found"}
+            
+            # Get the messages that were summarized
+            message_ids = summary.message_ids if summary.message_ids else []
+            
+            if not message_ids:
+                return {"success": False, "error": "No message IDs found for this summary"}
+            
+            # Get the messages
+            messages_result = await session.execute(
+                select(PersonalChat)
+                .where(
+                    PersonalChat.session_id == summary.session_id,
+                    PersonalChat.id.in_(message_ids)
+                )
+                .order_by(PersonalChat.created_at.asc())
+            )
+            messages = messages_result.scalars().all()
+            
+            if not messages:
+                return {"success": False, "error": "No messages found to regenerate summary"}
+            
+            # Build conversation text
+            conversation_text = "\n".join([
+                f"{msg.role}: {msg.message}" for msg in messages
+            ])
+            summary_text = conversation_text[:50000] if len(conversation_text) > 50000 else conversation_text
+            
+            # Get all previous summaries for this session (excluding the current one)
+            previous_summaries_result = await session.execute(
+                select(PersonalSummary)
+                .where(
+                    PersonalSummary.session_id == summary.session_id,
+                    PersonalSummary.id != summary_id
+                )
+                .order_by(PersonalSummary.created_at.asc())
+            )
+            previous_summaries = previous_summaries_result.scalars().all()
+            
+            # Build previous summaries context
+            previous_summaries_text = ""
+            if previous_summaries:
+                summaries_list = []
+                for prev_summary in previous_summaries:
+                    date_range = ""
+                    if prev_summary.start_date and prev_summary.end_date:
+                        date_range = f" ({prev_summary.start_date.strftime('%Y-%m-%d')} to {prev_summary.end_date.strftime('%Y-%m-%d')})"
+                    elif prev_summary.start_date:
+                        date_range = f" (from {prev_summary.start_date.strftime('%Y-%m-%d')})"
+                    elif prev_summary.end_date:
+                        date_range = f" (until {prev_summary.end_date.strftime('%Y-%m-%d')})"
+                    
+                    title_part = f"{prev_summary.title}: " if prev_summary.title else ""
+                    summaries_list.append(f"{title_part}{prev_summary.summary}{date_range}")
+                
+                previous_summaries_text = "\n\n".join(summaries_list)
+                logger.info(f"📚 Summary regeneration: Including {len(previous_summaries)} previous summaries as context")
+            
+            # Get summary context from config if available
+            summary_context = ""
+            config_result = await session.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "personal_chat")
+            )
+            config = config_result.scalar_one_or_none()
+            if config and config.config_value:
+                summary_context = config.config_value.get("summary_context", "")
+            
+            # Build prompt with previous summaries, optional summary context, and conversation to summarize
+            base_prompt = """Please provide a concise summary of the following conversation. Focus ONLY on the main facts, key topics, decisions, and important information. Remove any unnecessary details, conversational fluff, or redundant information. Keep it factual and to the point:"""
+            
+            # Build the full prompt with all context
+            prompt_parts = [base_prompt]
+            
+            # Add previous summaries if they exist
+            if previous_summaries_text:
+                prompt_parts.append(f"""Previous conversation summaries (for context):
+{previous_summaries_text}""")
+            
+            # Add summary context from config if available
+            if summary_context:
+                prompt_parts.append(f"""Additional context for summary generation:
+{summary_context}""")
+            
+            # Add the conversation to summarize
+            prompt_parts.append(f"""Conversation to summarize:
+{summary_text}
+
+Provide a clear, structured summary that captures only the essential facts and information.""")
+            
+            summary_prompt = "\n\n".join(prompt_parts)
+            
+            from services.ai_service import AIService
+            ai_service = AIService()
+            await ai_service._load_api_key()
+            
+            summary_result = await ai_service.execute({
+                "question": summary_prompt,
+                "messages": [],
+                "use_system_max_tokens": False,
+                "max_tokens": 2000
+            })
+            
+            final_summary = summary_result.get("answer", "Summary regeneration failed.")
+            
+            # Update the summary
+            summary.summary = final_summary
+            await session.commit()
+            await session.refresh(summary)
+            
+            return {
+                "success": True,
+                "summary": {
+                    "id": summary.id,
+                    "session_id": summary.session_id,
+                    "user_id": summary.user_id,
+                    "title": summary.title,
+                    "summary": summary.summary,
+                    "message_count": summary.message_count,
+                    "message_ids": summary.message_ids,
+                    "start_date": summary.start_date.isoformat() if summary.start_date else None,
+                    "end_date": summary.end_date.isoformat() if summary.end_date else None,
+                    "created_at": summary.created_at.isoformat() if summary.created_at else None,
+                    "updated_at": summary.updated_at.isoformat() if summary.updated_at else None
+                }
+            }
+    except Exception as e:
+        logger.error(f"Error regenerating personal summary: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @app.delete("/api/personal/summaries/{summary_id}")
 async def delete_personal_summary(summary_id: int):
     """Delete a personal chat summary."""
