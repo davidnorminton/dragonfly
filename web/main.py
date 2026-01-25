@@ -17000,12 +17000,13 @@ async def personal_chat(request: Request):
             session.add(user_message)
             await session.flush()
             
-            # Get conversation history for personal chat
+            # Get conversation history for personal chat (all previous messages)
+            # Note: We exclude the current user message we just added above
             history_result = await session.execute(
                 select(PersonalChat)
                 .where(PersonalChat.session_id == session_id)
+                .where(PersonalChat.id != user_message.id)  # Exclude the message we just added
                 .order_by(PersonalChat.created_at.asc())
-                .limit(50)
             )
             history = history_result.scalars().all()
             
@@ -17016,6 +17017,8 @@ async def personal_chat(request: Request):
                     "role": msg.role,
                     "content": msg.message
                 })
+            
+            logger.info(f"📚 Personal chat: Loaded {len(conversation_history)} previous messages as context")
             
             # Use AI service with personal context
             from services.ai_service import AIService
