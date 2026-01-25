@@ -3,7 +3,7 @@ import './Personal.css';
 
 const PERSONAL_SESSION_ID = 'personal-chat';
 
-export function PersonalPage() {
+export function PersonalPage({ onNavigate }) {
   const [messages, setMessages] = useState([]);
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [loading, setLoading] = useState(true);
@@ -240,6 +240,18 @@ export function PersonalPage() {
             <h1>Personal Chat Summaries</h1>
             <div className="personal-actions">
               <button
+                className="btn-view-all"
+                onClick={() => {
+                  if (window.location.hash) {
+                    window.location.hash = 'personal-summaries';
+                  } else if (typeof onNavigate === 'function') {
+                    onNavigate('personal-summaries');
+                  }
+                }}
+              >
+                View All Summaries
+              </button>
+              <button
                 className="btn-select-all"
                 onClick={handleSelectAll}
               >
@@ -265,8 +277,9 @@ export function PersonalPage() {
                 <div
                   key={pair.id}
                   className={`message-item ${selectedItems.has(pair.id) ? 'selected' : ''}`}
+                  onClick={() => handleToggleItem(pair.id)}
                 >
-                  <label className="message-checkbox">
+                  <label className="message-checkbox" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedItems.has(pair.id)}

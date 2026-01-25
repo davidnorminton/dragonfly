@@ -24,6 +24,7 @@ import { SettingsPage } from './pages/Settings';
 import { AlertsPage } from './pages/Alerts';
 import { UsersPage } from './pages/Users';
 import { PersonalPage } from './pages/Personal';
+import { PersonalSummariesPage } from './pages/PersonalSummaries';
 import { AddUserPage } from './pages/AddUser';
 import { EditUserPage } from './pages/EditUser';
 import { AIFocusPage } from './pages/AIFocus';
@@ -58,7 +59,7 @@ function App() {
   const [activePage, setActivePage] = useState(() => {
     // Check URL hash first
     const hash = window.location.hash.slice(1);
-    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'stories', 'create-story', 'edit-story', 'story-view', 'courses', 'course-contents', 'lesson-view', 'settings', 'alerts', 'personal', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
+    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'stories', 'create-story', 'edit-story', 'story-view', 'courses', 'course-contents', 'lesson-view', 'settings', 'alerts', 'personal', 'personal-summaries', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
     } else if (hash && hash.startsWith('games/')) {
       return hash;
     } else if (hash && hash.startsWith('games/')) {
@@ -106,7 +107,7 @@ function App() {
     const handleHashChange = () => {
       const hash = window.location.hash.slice(1);
       // Check for exact matches first
-      if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'personal', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
+      if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'settings', 'alerts', 'personal', 'personal-summaries', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
         setActivePage(hash);
         localStorage.setItem('activePage', hash);
         setSearchOverlayOpen(false);
