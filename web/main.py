@@ -10902,32 +10902,53 @@ async def get_database_tables():
                 if table_name.startswith('_') or table_name.startswith('alembic'):
                     continue
                 
-                # Get row count
-                count_result = await conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
-                row_count = count_result.scalar()
-                
-                # Get columns using inspector
-                columns = await conn.run_sync(lambda sync_conn: get_columns_sync(sync_conn, table_name))
-                
-                # Get primary key constraint
-                pk_constraint = await conn.run_sync(lambda sync_conn: get_pk_constraint_sync(sync_conn, table_name))
-                pk_columns = set(pk_constraint.get("constrained_columns", []) if pk_constraint else [])
-                
-                column_info = [
-                    {
-                        "name": col["name"],
-                        "type": str(col["type"]),
-                        "nullable": col.get("nullable", True),
-                        "primary_key": col["name"] in pk_columns
-                    }
-                    for col in columns
-                ]
-                
-                table_info.append({
-                    "name": table_name,
-                    "row_count": row_count,
-                    "columns": column_info
-                })
+                try:
+                    # Get row count (handle errors gracefully)
+                    try:
+                        count_result = await conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+                        row_count = count_result.scalar()
+                    except Exception as e:
+                        logger.warning(f"Could not get row count for table {table_name}: {e}")
+                        row_count = 0
+                    
+                    # Get columns using inspector
+                    try:
+                        columns = await conn.run_sync(lambda sync_conn: get_columns_sync(sync_conn, table_name))
+                    except Exception as e:
+                        logger.warning(f"Could not get columns for table {table_name}: {e}")
+                        columns = []
+                    
+                    # Get primary key constraint
+                    try:
+                        pk_constraint = await conn.run_sync(lambda sync_conn: get_pk_constraint_sync(sync_conn, table_name))
+                        pk_columns = set(pk_constraint.get("constrained_columns", []) if pk_constraint else [])
+                    except Exception as e:
+                        logger.warning(f"Could not get PK constraint for table {table_name}: {e}")
+                        pk_columns = set()
+                    
+                    column_info = [
+                        {
+                            "name": col["name"],
+                            "type": str(col["type"]),
+                            "nullable": col.get("nullable", True),
+                            "primary_key": col["name"] in pk_columns
+                        }
+                        for col in columns
+                    ]
+                    
+                    table_info.append({
+                        "name": table_name,
+                        "row_count": row_count,
+                        "columns": column_info
+                    })
+                except Exception as e:
+                    # If anything fails for this table, still include it with minimal info
+                    logger.error(f"Error processing table {table_name}: {e}", exc_info=True)
+                    table_info.append({
+                        "name": table_name,
+                        "row_count": 0,
+                        "columns": []
+                    })
             
             return {"success": True, "tables": table_info}
     except Exception as e:
