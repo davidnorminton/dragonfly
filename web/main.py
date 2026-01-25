@@ -17012,12 +17012,17 @@ async def personal_chat(request: Request):
                 max_tokens = config.config_value.get("max_tokens", 4096)
             
             # Get conversation history FIRST (before saving new message) to get all previous messages
+            # Limit to last 100 messages to avoid hitting context limits (Claude has ~200k token limit)
             history_result = await session.execute(
                 select(PersonalChat)
                 .where(PersonalChat.session_id == session_id)
-                .order_by(PersonalChat.created_at.asc())
+                .order_by(PersonalChat.created_at.desc())
+                .limit(100)  # Limit to most recent 100 messages
             )
             history = history_result.scalars().all()
+            
+            # Reverse to get chronological order (oldest first)
+            history = list(reversed(history))
             
             # Convert to message format for AI service
             conversation_history = []
@@ -17027,7 +17032,7 @@ async def personal_chat(request: Request):
                     "content": msg.message
                 })
             
-            logger.info(f"📚 Personal chat: Loaded {len(conversation_history)} previous messages as context")
+            logger.info(f"📚 Personal chat: Loaded {len(conversation_history)} previous messages as context (limited to last 100)")
             
             # Save user message AFTER loading history
             user_message = PersonalChat(
@@ -17076,14 +17081,14 @@ async def personal_chat(request: Request):
 
 
 @app.get("/api/personal/chat/history")
-async def get_personal_chat_history(session_id: str, limit: int = 50):
+async def get_personal_chat_history(session_id: str, limit: int = 200):
     """Get personal chat history."""
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(PersonalChat)
                 .where(PersonalChat.session_id == session_id)
-                .order_by(PersonalChat.created_at.asc())
+                .order_by(PersonalChat.created_at.asc())  # Chronological order (oldest first)
                 .limit(limit)
             )
             messages = result.scalars().all()
