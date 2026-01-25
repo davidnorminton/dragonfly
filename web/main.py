@@ -16361,6 +16361,16 @@ async def get_scraped_articles(limit: int = 200, offset: int = 0):
             )
             articles = result.scalars().all()
             
+            # Get source names for each article
+            source_ids = {article.source_id for article in articles if article.source_id}
+            sources_map = {}
+            if source_ids:
+                sources_result = await session.execute(
+                    select(ScraperSource).where(ScraperSource.id.in_(source_ids))
+                )
+                sources = sources_result.scalars().all()
+                sources_map = {source.id: source.name for source in sources}
+            
             return {
                 "success": True,
                 "total": total,
@@ -16368,6 +16378,7 @@ async def get_scraped_articles(limit: int = 200, offset: int = 0):
                     {
                         "id": article.id,
                         "source_id": article.source_id,
+                        "source_name": sources_map.get(article.source_id, f"Source {article.source_id}"),
                         "url": article.url,
                         "title": article.title,
                         "summary": article.summary,
@@ -16480,6 +16491,90 @@ async def delete_scraped_article(article_id: int):
             return {"success": True}
     except Exception as e:
         logger.error(f"Error deleting scraped article: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/scraper/diagnostics")
+async def get_scraper_diagnostics():
+    """Get diagnostic information about scraper sources and articles."""
+    try:
+        async with AsyncSessionLocal() as session:
+            from datetime import datetime, timedelta
+            
+            # Get all sources
+            sources_result = await session.execute(
+                select(ScraperSource).order_by(ScraperSource.id)
+            )
+            sources = sources_result.scalars().all()
+            
+            # Get article counts by source
+            diagnostics = {
+                "success": True,
+                "sources": [],
+                "articles_by_source": {},
+                "total_articles": 0,
+                "recent_articles": 0
+            }
+            
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            
+            for source in sources:
+                # Count articles for this source
+                total_result = await session.execute(
+                    select(func.count(ScrapedArticle.id))
+                    .where(ScrapedArticle.source_id == source.id)
+                )
+                total = total_result.scalar() or 0
+                
+                recent_result = await session.execute(
+                    select(func.count(ScrapedArticle.id))
+                    .where(
+                        ScrapedArticle.source_id == source.id,
+                        ScrapedArticle.scraped_at >= week_ago
+                    )
+                )
+                recent = recent_result.scalar() or 0
+                
+                # Get latest article date
+                latest_result = await session.execute(
+                    select(ScrapedArticle.scraped_at)
+                    .where(ScrapedArticle.source_id == source.id)
+                    .order_by(desc(ScrapedArticle.scraped_at))
+                    .limit(1)
+                )
+                latest_date = latest_result.scalar_one_or_none()
+                
+                diagnostics["sources"].append({
+                    "id": source.id,
+                    "name": source.name,
+                    "url": source.url,
+                    "is_active": source.is_active,
+                    "last_scraped": source.last_scraped.isoformat() if source.last_scraped else None,
+                    "total_articles": total,
+                    "recent_articles": recent,
+                    "latest_article_date": latest_date.isoformat() if latest_date else None
+                })
+                
+                diagnostics["articles_by_source"][source.id] = {
+                    "name": source.name,
+                    "total": total,
+                    "recent": recent
+                }
+            
+            # Get overall stats
+            total_result = await session.execute(select(func.count(ScrapedArticle.id)))
+            diagnostics["total_articles"] = total_result.scalar() or 0
+            
+            recent_result = await session.execute(
+                select(func.count(ScrapedArticle.id))
+                .where(ScrapedArticle.scraped_at >= week_ago)
+            )
+            diagnostics["recent_articles"] = recent_result.scalar() or 0
+            
+            return diagnostics
+            
+    except Exception as e:
+        logger.error(f"Error getting scraper diagnostics: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
 
