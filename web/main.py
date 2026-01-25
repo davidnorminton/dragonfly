@@ -17252,6 +17252,7 @@ async def personal_chat(request: Request):
             # Log context size for debugging
             total_chars = sum(len(msg.get("content", "")) for msg in conversation_history) + len(question)
             logger.info(f"📊 Personal chat context: {len(conversation_history)} messages, ~{total_chars} characters")
+            logger.info(f"📊 Personal chat context details: summary_present={bool(summary_text)}, last_pairs_count={len(last_pairs)}, conversation_history={[f'{m.get(\"role\", \"?\")}: {len(m.get(\"content\", \"\"))} chars' for m in conversation_history]}")
             
             try:
                 result = await ai_service.execute(input_data)
@@ -17328,38 +17329,45 @@ async def get_personal_chat_history(session_id: str, limit: int = None):
                     .where(PersonalChat.session_id == session_id)
                     .order_by(PersonalChat.created_at.desc())  # Most recent first
                 )
-                all_messages = all_result.scalars().all()
+                all_messages = list(all_result.scalars().all())
                 
                 # Filter out summarized messages
                 unsummarized = [msg for msg in all_messages if msg.id not in summarized_message_ids]
                 
-                # Get last 5 Q&A pairs (10 messages max)
-                last_pairs = []
-                current_pair = []
+                # Get last 5 Q&A pairs (10 messages max) - work backwards from most recent
+                last_pairs_reversed = []
                 pairs_collected = 0
+                current_pair = []
                 
-                for msg in unsummarized:  # Already in reverse order (most recent first)
+                # Iterate from most recent to oldest
+                for msg in unsummarized:
                     if msg.role == 'user':
-                        if len(current_pair) == 2:  # Complete pair
-                            last_pairs.insert(0, current_pair[1])  # Assistant
-                            last_pairs.insert(0, current_pair[0])  # User
+                        # If we have a complete pair, save it (in reverse order since we're going backwards)
+                        if len(current_pair) == 2:  # Complete pair (user + assistant)
+                            last_pairs_reversed.append(current_pair[1])  # Assistant message (most recent first)
+                            last_pairs_reversed.append(current_pair[0])  # User message
                             pairs_collected += 1
-                            if pairs_collected >= 5:
+                            if pairs_collected >= 5:  # Got 5 pairs
                                 break
+                        # Start new pair
                         current_pair = [msg]
                     elif msg.role == 'assistant' and len(current_pair) == 1:
+                        # Complete the pair
                         current_pair.append(msg)
-                        last_pairs.insert(0, current_pair[1])  # Assistant
-                        last_pairs.insert(0, current_pair[0])  # User
+                        # Save the complete pair (in reverse order)
+                        last_pairs_reversed.append(current_pair[1])  # Assistant message
+                        last_pairs_reversed.append(current_pair[0])  # User message
                         pairs_collected += 1
-                        if pairs_collected >= 5:
+                        if pairs_collected >= 5:  # Got 5 pairs
                             break
                         current_pair = []
                 
+                # If we have an incomplete pair (user without assistant), add just the user message
                 if len(current_pair) == 1:
-                    last_pairs.insert(0, current_pair[0])
+                    last_pairs_reversed.append(current_pair[0])
                 
-                messages = last_pairs
+                # Reverse to get chronological order (oldest first)
+                messages = list(reversed(last_pairs_reversed))
             
             logger.info(f"📚 Personal chat history: Returning {len(messages)} messages (filtered from {len(summarized_message_ids)} summarized)")
             
