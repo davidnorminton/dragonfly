@@ -1262,10 +1262,12 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
             }}>
               <input
                 type="checkbox"
-                checked={personalMode}
+                checked={!personalMode}
                 onChange={(e) => {
-                  console.log('[Personal Mode] Toggle clicked, new value:', e.target.checked);
-                  setPersonalMode(e.target.checked);
+                  // Invert the checkbox value - checked means personal mode OFF (show regular), unchecked means ON (show personal)
+                  const newPersonalMode = !e.target.checked;
+                  console.log('[Personal Mode] Toggle clicked, checkbox checked:', e.target.checked, '→ personalMode:', newPersonalMode);
+                  setPersonalMode(newPersonalMode);
                 }}
                 style={{
                   width: '18px',
