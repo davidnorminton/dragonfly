@@ -37,6 +37,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false); // Track if user has manually scrolled away from bottom
   const [personalMode, setPersonalMode] = useState(false);
   const [personalMessages, setPersonalMessages] = useState([]);
+  const [personalLoading, setPersonalLoading] = useState(false);
   const PERSONAL_SESSION_ID = 'personal-chat'; // Fixed session ID for personal mode
   // Initialize with baseSessionId if provided, otherwise null (no auto-creation)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
@@ -97,13 +98,21 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
   // Use personal messages when in personal mode, otherwise use regular messages
   const messages = personalMode ? personalMessages : regularMessages;
   
+  // Debug logging for message source
+  useEffect(() => {
+    console.log('[Chat] personalMode:', personalMode, '| messages source:', personalMode ? 'personalMessages' : 'regularMessages', '| count:', messages.length);
+  }, [personalMode, messages.length]);
+  
   // Load personal chat messages when in personal mode
   useEffect(() => {
     if (personalMode) {
       const loadPersonalMessages = async () => {
+        setPersonalLoading(true);
+        console.log('[Personal Mode] Loading personal chat messages...');
         try {
           const response = await fetch(`/api/personal/chat/history?session_id=${PERSONAL_SESSION_ID}`);
           const result = await response.json();
+          console.log('[Personal Mode] API response:', result);
           if (result.success && result.messages) {
             // Convert personal chat messages to the format expected by the UI
             const formattedMessages = result.messages
@@ -120,20 +129,25 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
                 const dateB = new Date(b.created_at || 0).getTime();
                 return dateA - dateB;
               });
+            console.log('[Personal Mode] Loaded', formattedMessages.length, 'messages');
             // Clear existing messages and set new ones
             setPersonalMessages(formattedMessages);
           } else {
             // No messages yet, start with empty array
+            console.log('[Personal Mode] No messages found');
             setPersonalMessages([]);
           }
         } catch (err) {
-          console.error('Error loading personal chat messages:', err);
+          console.error('[Personal Mode] Error loading personal chat messages:', err);
           setPersonalMessages([]);
+        } finally {
+          setPersonalLoading(false);
         }
       };
       loadPersonalMessages();
     } else if (!personalMode && currentSessionId) {
       // Reload regular chat messages when switching out of personal mode
+      console.log('[Personal Mode] Switching back to regular chat, reloading history');
       reloadHistory();
     }
   }, [personalMode]);
@@ -1249,7 +1263,10 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               <input
                 type="checkbox"
                 checked={personalMode}
-                onChange={(e) => setPersonalMode(e.target.checked)}
+                onChange={(e) => {
+                  console.log('[Personal Mode] Toggle clicked, new value:', e.target.checked);
+                  setPersonalMode(e.target.checked);
+                }}
                 style={{
                   width: '18px',
                   height: '18px',
@@ -1272,7 +1289,7 @@ export function ChatPage({ sessionId: baseSessionId, onMicClick, searchQuery = '
               </div>
               <div className="chatgpt-empty-text">Click "New chat" to start a conversation</div>
             </div>
-          ) : (personalMode ? false : loading) && allMessages.length === 0 ? (
+          ) : (personalMode ? personalLoading : loading) && allMessages.length === 0 ? (
             <div className="chatgpt-empty">Loading...</div>
           ) : allMessages.length === 0 ? (
             <div className="chatgpt-empty">
