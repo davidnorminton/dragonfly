@@ -30,8 +30,95 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   const [deleteConfirmAiFocusSession, setDeleteConfirmAiFocusSession] = useState(null); // Session to delete
   const [showPersonaSelector, setShowPersonaSelector] = useState(false); // Show persona selector popup
   const [showPixelAvatar, setShowPixelAvatar] = useState(false);
+  const [useBrowserSpeech, setUseBrowserSpeech] = useState(() => {
+    // Load from localStorage
+    const saved = localStorage.getItem('aiFocusUseBrowserSpeech');
+    return saved === 'true';
+  }); // Use browser speech synthesis instead of server TTS
+  const [isSpeaking, setIsSpeaking] = useState(false); // Track if speech synthesis is active
+  const speechQueueRef = useRef([]); // Queue of text chunks to speak
+  const currentUtteranceRef = useRef(null); // Current utterance being spoken
   
   const { selectPersona, currentTitle, personas, currentPersona, reload: reloadPersonas } = usePersonas(selectedUser?.id);
+  
+  // Save browser speech preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('aiFocusUseBrowserSpeech', useBrowserSpeech.toString());
+  }, [useBrowserSpeech]);
+  
+  // Browser Speech Synthesis functions
+  const stopBrowserSpeech = () => {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      speechQueueRef.current = [];
+      currentUtteranceRef.current = null;
+      setIsSpeaking(false);
+    }
+  };
+  
+  const speakText = (text) => {
+    if (!window.speechSynthesis || !text.trim()) return;
+    
+    // Split text into sentences for better chunking
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+    
+    sentences.forEach(sentence => {
+      const trimmed = sentence.trim();
+      if (trimmed) {
+        speechQueueRef.current.push(trimmed);
+      }
+    });
+    
+    // Start speaking if not already
+    if (!isSpeaking) {
+      processNextInQueue();
+    }
+  };
+  
+  const processNextInQueue = () => {
+    if (speechQueueRef.current.length === 0) {
+      setIsSpeaking(false);
+      currentUtteranceRef.current = null;
+      return;
+    }
+    
+    setIsSpeaking(true);
+    const nextText = speechQueueRef.current.shift();
+    
+    const utterance = new SpeechSynthesisUtterance(nextText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    // Try to find a good voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => 
+      v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Samantha'))
+    ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+    
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+    
+    utterance.onend = () => {
+      processNextInQueue();
+    };
+    
+    utterance.onerror = (event) => {
+      console.error('[Browser Speech] Error:', event.error);
+      processNextInQueue();
+    };
+    
+    currentUtteranceRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  };
+  
+  // Clean up speech synthesis on unmount
+  useEffect(() => {
+    return () => {
+      stopBrowserSpeech();
+    };
+  }, []);
 
   // Reload personas when selected user changes
   useEffect(() => {
@@ -307,6 +394,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                 }
               }
               stopFillerAudio();
+              stopBrowserSpeech(); // Stop any browser speech synthesis
 
               // Step 1: Stream text from AI and display it
               console.log('[STREAM] Streaming text response with parallel TTS...');
@@ -523,20 +611,27 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                     
                     console.log(`[PARALLEL TTS] Detected complete sentence (${completeSentence.length} chars): "${completeSentence.substring(0, 50)}..."`);
                     
-                    // Add sentence to queue
-                    sentenceQueue.push(completeSentence);
-                    console.log(`[PARALLEL TTS] Added to queue (queue size: ${sentenceQueue.length})`);
-                    
-                    // Initialize audio stream on first sentence and wait for it to be ready
-                    if (!audioStreamStarted) {
-                      initializeAudioStream().then(() => {
-                        console.log('[PARALLEL TTS] Audio stream ready, starting sequential processing');
-                        // Start processing sentence queue
-                        processSentenceQueue();
-                      });
+                    // Use browser speech synthesis if enabled
+                    if (useBrowserSpeech) {
+                      console.log('[Browser Speech] Speaking sentence...');
+                      stopFillerAudio(); // Stop filler audio when speech starts
+                      speakText(completeSentence);
                     } else {
-                      // Audio stream already initialized, process queue
-                      processSentenceQueue();
+                      // Add sentence to server TTS queue
+                      sentenceQueue.push(completeSentence);
+                      console.log(`[PARALLEL TTS] Added to queue (queue size: ${sentenceQueue.length})`);
+                      
+                      // Initialize audio stream on first sentence and wait for it to be ready
+                      if (!audioStreamStarted) {
+                        initializeAudioStream().then(() => {
+                          console.log('[PARALLEL TTS] Audio stream ready, starting sequential processing');
+                          // Start processing sentence queue
+                          processSentenceQueue();
+                        });
+                      } else {
+                        // Audio stream already initialized, process queue
+                        processSentenceQueue();
+                      }
                     }
                   }
                   
@@ -558,10 +653,28 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                   if (accumulatedTextForSentences.trim().length > 0) {
                     console.log(`[PARALLEL TTS] Adding final fragment to queue: "${accumulatedTextForSentences.trim().substring(0, 50)}..."`);
                     
-                    sentenceQueue.push(accumulatedTextForSentences.trim());
-                    
-                    if (!audioStreamStarted) {
-                      initializeAudioStream().then(() => {
+                    // Use browser speech synthesis if enabled
+                    if (useBrowserSpeech) {
+                      console.log('[Browser Speech] Speaking final fragment...');
+                      speakText(accumulatedTextForSentences.trim());
+                    } else {
+                      sentenceQueue.push(accumulatedTextForSentences.trim());
+                      
+                      if (!audioStreamStarted) {
+                        initializeAudioStream().then(() => {
+                          processSentenceQueue().then(() => {
+                            console.log('[PARALLEL TTS] All audio generation complete');
+                            // Close the media source after all audio is generated
+                            setTimeout(() => {
+                              if (mediaSource && mediaSource.readyState === 'open') {
+                                if (audioQueue.length === 0 && !isAppending) {
+                                  mediaSource.endOfStream();
+                                }
+                              }
+                            }, 1000);
+                          });
+                        });
+                      } else {
                         processSentenceQueue().then(() => {
                           console.log('[PARALLEL TTS] All audio generation complete');
                           // Close the media source after all audio is generated
@@ -573,21 +686,9 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                             }
                           }, 1000);
                         });
-                      });
-                    } else {
-                      processSentenceQueue().then(() => {
-                        console.log('[PARALLEL TTS] All audio generation complete');
-                        // Close the media source after all audio is generated
-                        setTimeout(() => {
-                          if (mediaSource && mediaSource.readyState === 'open') {
-                            if (audioQueue.length === 0 && !isAppending) {
-                              mediaSource.endOfStream();
-                            }
-                          }
-                        }, 1000);
-                      });
+                      }
                     }
-                  } else if (audioStreamStarted) {
+                  } else if (audioStreamStarted && !useBrowserSpeech) {
                     // If we've already started audio and there's no remaining text, wait for queue to finish then close
                     console.log('[PARALLEL TTS] No remaining text, waiting for queue to finish');
                     // Wait for current processing to complete
@@ -918,6 +1019,30 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
             <div className="ai-focus-mode-indicator">
               {aiFocusMode === 'question' ? 'Ask' : 'Command'}
             </div>
+            
+            {/* Browser Speech toggle */}
+            <button
+              className={`ai-focus-speech-toggle ${useBrowserSpeech ? 'active' : ''}`}
+              onClick={() => {
+                if (useBrowserSpeech) {
+                  stopBrowserSpeech();
+                }
+                setUseBrowserSpeech(!useBrowserSpeech);
+              }}
+              title={useBrowserSpeech ? 'Browser speech ON - Click to disable' : 'Browser speech OFF - Click to enable'}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                {useBrowserSpeech ? (
+                  <>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                  </>
+                ) : (
+                  <line x1="23" y1="9" x2="17" y2="15"/>
+                )}
+              </svg>
+            </button>
             
             {/* Persona selector icon button */}
             <button

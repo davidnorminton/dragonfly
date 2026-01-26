@@ -556,32 +556,87 @@ export default function TechNews({ searchQuery = '' }) {
       quote.style.fontSize = '1.05em';
     });
     
-    // Ensure all code blocks are properly displayed (re-check after all processing)
-    const allCodeBlocks = temp.querySelectorAll('pre code, code[class*="language-"], code.language-python, code.language-javascript, code.language-json, code.language-bash');
-    allCodeBlocks.forEach(code => {
-      // Ensure code blocks are visible and properly styled
-      code.style.display = 'block';
-      code.style.whiteSpace = 'pre';
-      code.style.overflow = 'auto';
-      code.style.fontFamily = "'Monaco', 'Menlo', 'Ubuntu Mono', monospace";
+    // Ensure all code blocks are properly displayed - handle ALL languages and formats
+    // Match various code block class patterns from different sites/libraries
+    const codeBlockSelectors = [
+      'pre code',                    // Standard: <pre><code>
+      'pre[class*="language-"]',     // Prism.js style
+      'pre[class*="hljs"]',          // Highlight.js style
+      'pre.highlight',               // Jekyll/Rouge style
+      'pre.prettyprint',             // Google Prettify style
+      'pre.sourceCode',              // Pandoc style
+      'code[class*="language-"]',    // Inline with language class
+      'code[class*="hljs"]',         // Highlight.js inline
+      '.highlight pre',              // GitHub style
+      '.codehilite pre',             // Python Markdown style
+      'div.code pre',                // Generic code div
+      'div.sourceCode pre',          // Pandoc style
+    ];
+    
+    const allCodeBlocks = temp.querySelectorAll(codeBlockSelectors.join(', '));
+    allCodeBlocks.forEach(element => {
+      // Style the element
+      const isPreTag = element.tagName === 'PRE';
+      const targetElement = isPreTag ? element : element.closest('pre') || element;
       
-      // Preserve language classes
-      if (!code.className.includes('language-') && code.getAttribute('class')) {
-        const existingClass = code.getAttribute('class');
-        if (existingClass.match(/language-[\w-]+/)) {
-          code.className = `tech-news-code ${existingClass}`;
-        }
+      targetElement.style.background = 'rgba(255,255,255,0.05)';
+      targetElement.style.padding = '16px';
+      targetElement.style.borderRadius = '8px';
+      targetElement.style.overflow = 'auto';
+      targetElement.style.margin = '16px 0';
+      targetElement.style.border = '1px solid rgba(255,255,255,0.1)';
+      targetElement.style.fontFamily = "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace";
+      targetElement.style.fontSize = '0.9em';
+      targetElement.style.lineHeight = '1.5';
+      targetElement.style.whiteSpace = 'pre';
+      targetElement.style.display = 'block';
+      
+      // Style inner code element if exists
+      const innerCode = targetElement.querySelector('code');
+      if (innerCode) {
+        innerCode.style.background = 'transparent';
+        innerCode.style.padding = '0';
+        innerCode.style.display = 'block';
+        innerCode.style.whiteSpace = 'pre';
+        innerCode.style.fontFamily = "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace";
       }
     });
     
-    // Also check for code tags that might have been missed
+    // Handle standalone <pre> tags without code children (plain preformatted text)
+    const standalonePres = temp.querySelectorAll('pre');
+    standalonePres.forEach(pre => {
+      // Only style if not already styled
+      if (!pre.style.background) {
+        pre.style.background = 'rgba(255,255,255,0.05)';
+        pre.style.padding = '16px';
+        pre.style.borderRadius = '8px';
+        pre.style.overflow = 'auto';
+        pre.style.margin = '16px 0';
+        pre.style.border = '1px solid rgba(255,255,255,0.1)';
+        pre.style.fontFamily = "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace";
+        pre.style.fontSize = '0.9em';
+        pre.style.lineHeight = '1.5';
+        pre.style.whiteSpace = 'pre';
+      }
+    });
+    
+    // Handle all code tags - both inline and block
     const allCodeTags = temp.querySelectorAll('code');
     allCodeTags.forEach(code => {
-      // If code has a language class, ensure it's displayed as a block
-      if (code.className && code.className.includes('language-')) {
-        const parentPre = code.closest('pre');
-        if (!parentPre) {
-          // Wrap standalone code with language class in a pre tag
+      const parentPre = code.closest('pre');
+      
+      if (!parentPre) {
+        // Check if this looks like a code block (multi-line or has language class)
+        const hasLanguageClass = code.className && (
+          code.className.includes('language-') || 
+          code.className.includes('hljs') ||
+          code.className.includes('highlight') ||
+          code.className.includes('sourceCode')
+        );
+        const isMultiLine = code.textContent && code.textContent.includes('\n');
+        
+        if (hasLanguageClass || isMultiLine) {
+          // Wrap in a pre tag for block display
           const pre = document.createElement('pre');
           pre.className = 'tech-news-code-block';
           pre.style.background = 'rgba(255,255,255,0.05)';
@@ -590,11 +645,35 @@ export default function TechNews({ searchQuery = '' }) {
           pre.style.overflow = 'auto';
           pre.style.margin = '16px 0';
           pre.style.border = '1px solid rgba(255,255,255,0.1)';
-          code.parentNode.insertBefore(pre, code);
-          pre.appendChild(code);
+          pre.style.fontFamily = "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace";
+          pre.style.fontSize = '0.9em';
+          pre.style.lineHeight = '1.5';
+          
+          if (code.parentNode) {
+            code.parentNode.insertBefore(pre, code);
+            pre.appendChild(code);
+          }
+          
           code.style.display = 'block';
           code.style.whiteSpace = 'pre';
+          code.style.background = 'transparent';
+          code.style.padding = '0';
+        } else {
+          // Inline code - style it
+          code.className = 'tech-news-inline-code';
+          code.style.background = 'rgba(255,255,255,0.1)';
+          code.style.padding = '2px 6px';
+          code.style.borderRadius = '4px';
+          code.style.fontSize = '0.9em';
+          code.style.fontFamily = "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace";
         }
+      } else {
+        // Code inside pre - ensure proper styling
+        code.style.display = 'block';
+        code.style.whiteSpace = 'pre';
+        code.style.background = 'transparent';
+        code.style.padding = '0';
+        code.style.fontFamily = "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace";
       }
     });
     
