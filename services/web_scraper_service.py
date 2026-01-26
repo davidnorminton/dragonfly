@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse, parse_qs, urlencode
 from email.utils import parsedate_to_datetime
 
 import httpx
@@ -41,6 +41,53 @@ class WebScraperService:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
+    
+    @staticmethod
+    def normalize_url(url: str) -> str:
+        """
+        Normalize a URL to prevent duplicate entries from URL variations.
+        
+        - Removes trailing slashes
+        - Removes common tracking parameters (utm_*, fbclid, etc.)
+        - Lowercases the scheme and netloc
+        - Removes fragment identifiers
+        
+        Args:
+            url: URL to normalize
+            
+        Returns:
+            Normalized URL string
+        """
+        try:
+            parsed = urlparse(url)
+            
+            # Lowercase scheme and netloc
+            scheme = parsed.scheme.lower()
+            netloc = parsed.netloc.lower()
+            
+            # Remove trailing slash from path (unless path is just "/")
+            path = parsed.path.rstrip('/') if parsed.path != '/' else parsed.path
+            
+            # Remove tracking parameters
+            tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+                              'fbclid', 'gclid', 'ref', 'source', 'mc_cid', 'mc_eid'}
+            
+            if parsed.query:
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                # Remove tracking params
+                filtered_params = {k: v for k, v in params.items() if k.lower() not in tracking_params}
+                # Sort params for consistent ordering
+                query = urlencode(sorted(filtered_params.items()), doseq=True) if filtered_params else ''
+            else:
+                query = ''
+            
+            # Reconstruct URL without fragment
+            normalized = urlunparse((scheme, netloc, path, '', query, ''))
+            
+            return normalized
+        except Exception as e:
+            logger.warning(f"Error normalizing URL {url}: {e}")
+            return url
     
     async def scrape_all_sources(self) -> Dict[str, Any]:
         """
@@ -151,14 +198,20 @@ class WebScraperService:
                 yield {"type": "error", "message": "No article URLs found"}
                 return
             
-            # Batch check for existing articles
+            # Batch check for existing articles (also check normalized versions of existing URLs)
             existing_urls_result = await session.execute(
                 select(ScrapedArticle.url).where(ScrapedArticle.url.in_(article_urls))
             )
             existing_urls = set(row[0] for row in existing_urls_result.fetchall())
             
-            # Filter out existing articles
-            new_article_urls = [url for url in article_urls if url not in existing_urls]
+            # Also normalize existing URLs for comparison (handles old non-normalized entries)
+            existing_urls_normalized = {self.normalize_url(url) for url in existing_urls}
+            
+            # Filter out existing articles (check both exact and normalized matches)
+            new_article_urls = [
+                url for url in article_urls 
+                if url not in existing_urls and self.normalize_url(url) not in existing_urls_normalized
+            ]
             
             yield {"type": "urls", "urls": article_urls, "new_count": len(new_article_urls), "existing_count": len(existing_urls)}
             
@@ -322,8 +375,14 @@ class WebScraperService:
             )
             existing_urls = set(row[0] for row in existing_urls_result.fetchall())
             
-            # Filter out existing articles
-            new_article_urls = [url for url in article_urls if url not in existing_urls]
+            # Also normalize existing URLs for comparison (handles old non-normalized entries)
+            existing_urls_normalized = {self.normalize_url(url) for url in existing_urls}
+            
+            # Filter out existing articles (check both exact and normalized matches)
+            new_article_urls = [
+                url for url in article_urls 
+                if url not in existing_urls and self.normalize_url(url) not in existing_urls_normalized
+            ]
             skipped_count = len(article_urls) - len(new_article_urls)
             
             if skipped_count > 0:
@@ -445,9 +504,15 @@ class WebScraperService:
                 return [], {}
             
             for entry in feed.entries:
-                # Get the article URL (link)
-                url = entry.get('link')
-                if url:
+                # Get the article URL (link) and normalize it
+                raw_url = entry.get('link')
+                if raw_url:
+                    url = self.normalize_url(raw_url)
+                    
+                    # Skip if we already have this URL (after normalization)
+                    if url in feed_data:
+                        continue
+                    
                     article_urls.append(url)
                     
                     # Store feed entry data for fallback content extraction
@@ -537,9 +602,10 @@ class WebScraperService:
                     # Convert relative URLs to absolute
                     full_url = urljoin(base_url, href)
                     
-                    # Filter out non-article URLs
+                    # Filter out non-article URLs and normalize
                     if self._is_likely_article_url(full_url, base_url):
-                        found_links.add(full_url)
+                        normalized_url = self.normalize_url(full_url)
+                        found_links.add(normalized_url)
         
         return list(found_links)
     
