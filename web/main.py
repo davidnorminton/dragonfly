@@ -16737,9 +16737,10 @@ async def get_scraped_articles(limit: int = 200, offset: int = 0):
             total = count_result.scalar() or 0
             
             # Get articles with pagination (increased default limit to 200)
+            # Order by published_date (article release date) first, fallback to scraped_at if no published_date
             result = await session.execute(
                 select(ScrapedArticle)
-                .order_by(ScrapedArticle.scraped_at.desc())
+                .order_by(func.coalesce(ScrapedArticle.published_date, ScrapedArticle.scraped_at).desc())
                 .limit(limit)
                 .offset(offset)
             )
