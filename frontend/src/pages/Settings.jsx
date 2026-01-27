@@ -2119,6 +2119,29 @@ Return ONLY the Markdown content, no additional text or JSON wrapper.`;
                   )}
                 </div>
 
+                {/* Google Gemini Section */}
+                <div className="config-section">
+                  <h4 
+                    className="config-section-title collapsible" 
+                    onClick={() => toggleSection('api-gemini')}
+                  >
+                    <span className="collapse-icon">{expandedSections['api-gemini'] ? '▼' : '▶'}</span>
+                    Google Gemini
+                  </h4>
+                  {expandedSections['api-gemini'] && (
+                  <div className="form-group">
+                    <label>API Key</label>
+                    <input
+                      type="password"
+                      value={apiKeysFields.google_gemini?.api_key || ''}
+                      onChange={(e) => updateApiKeyField('google_gemini.api_key', e.target.value)}
+                      placeholder="AIza..."
+                    />
+                    <span className="form-help">Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{color: '#4a9eff'}}>Google AI Studio</a></span>
+                  </div>
+                  )}
+                </div>
+
                 {/* Perplexity Section */}
                 <div className="config-section">
                   <h4 
