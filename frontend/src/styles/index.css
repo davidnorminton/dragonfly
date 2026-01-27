@@ -3290,7 +3290,49 @@ body {
   padding: 40px 60px;
   display: flex;
   flex-direction: column;
+  position: relative;
   gap: 24px;
+}
+
+/* Performance Tracking Box */
+.ai-focus-performance-box {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(10, 10, 15, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 200px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.ai-focus-performance-step {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ai-focus-performance-time {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.ai-focus-performance-total {
+  font-weight: 500;
+  color: rgba(59, 130, 246, 0.9);
+}
+
+.ai-focus-performance-step-time {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .ai-focus-empty-state {

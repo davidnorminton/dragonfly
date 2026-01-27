@@ -9262,6 +9262,178 @@ async def get_personas(user_id: Optional[int] = None):
     }
 
 
+@app.post("/api/tts-training/generate")
+async def generate_tts_training_audio(request: Request):
+    """Generate audio for TTS training data using Fish Audio."""
+    try:
+        data = await request.json()
+        text = data.get("text", "").strip()
+        persona_name = data.get("persona_name")
+        
+        if not text:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Text is required"})
+        
+        if not persona_name:
+            return JSONResponse(status_code=400, content={"success": False, "error": "Persona name is required"})
+        
+        # Get voice config for persona
+        from config.voice_loader import get_voice_for_persona
+        voice_config = await get_voice_for_persona(persona_name)
+        
+        if not voice_config:
+            return JSONResponse(status_code=400, content={"success": False, "error": f"No voice configured for persona '{persona_name}'"})
+        
+        voice_id, voice_engine_default = voice_config
+        voice_engine = voice_engine_default or "s1"
+        
+        # Generate audio
+        from services.tts_service import TTSService
+        tts = TTSService()
+        audio_bytes = await tts.generate_audio_simple(text, voice_id, voice_engine)
+        
+        if not audio_bytes:
+            return JSONResponse(status_code=500, content={"success": False, "error": "Failed to generate audio"})
+        
+        # Save audio file
+        from pathlib import Path
+        import hashlib
+        from datetime import datetime
+        
+        training_dir = Path("data/tts_training")
+        training_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename from text hash and timestamp
+        text_hash = hashlib.md5(text.encode()).hexdigest()[:8]
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{persona_name}_{timestamp}_{text_hash}.mp3"
+        audio_path = training_dir / filename
+        
+        # Save audio file
+        audio_path.write_bytes(audio_bytes)
+        
+        # Update JSON tracking file
+        json_file = training_dir / "training_data.json"
+        training_data = []
+        
+        if json_file.exists():
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    training_data = json.load(f)
+            except Exception as e:
+                logger.warning(f"Error reading training data JSON: {e}, starting fresh")
+                training_data = []
+        
+        # Add new entry
+        entry = {
+            "id": len(training_data) + 1,
+            "persona_name": persona_name,
+            "voice_id": voice_id,
+            "voice_engine": voice_engine,
+            "text": text,
+            "audio_file": str(audio_path.relative_to(Path("."))),
+            "created_at": datetime.now().isoformat(),
+            "text_length": len(text),
+            "audio_size_bytes": len(audio_bytes)
+        }
+        
+        training_data.append(entry)
+        
+        # Save JSON file
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(training_data, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Generated TTS training audio: {filename} for persona '{persona_name}' ({len(text)} chars)")
+        
+        return {
+            "success": True,
+            "audio_file": entry["audio_file"],
+            "entry": entry
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating TTS training audio: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.get("/api/tts-training/list")
+async def list_tts_training_data(persona_name: Optional[str] = None):
+    """List all TTS training data entries, optionally filtered by persona."""
+    try:
+        from pathlib import Path
+        json_file = Path("data/tts_training/training_data.json")
+        
+        if not json_file.exists():
+            return {"success": True, "entries": []}
+        
+        with open(json_file, 'r', encoding='utf-8') as f:
+            training_data = json.load(f)
+        
+        # Filter by persona if specified
+        if persona_name:
+            training_data = [entry for entry in training_data if entry.get("persona_name") == persona_name]
+        
+        # Sort by created_at descending (newest first)
+        training_data.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        return {
+            "success": True,
+            "entries": training_data,
+            "total": len(training_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing TTS training data: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/api/tts-training/{entry_id}")
+async def delete_tts_training_entry(entry_id: int):
+    """Delete a TTS training data entry and its audio file."""
+    try:
+        from pathlib import Path
+        
+        json_file = Path("data/tts_training/training_data.json")
+        
+        if not json_file.exists():
+            return JSONResponse(status_code=404, content={"success": False, "error": "Training data file not found"})
+        
+        with open(json_file, 'r', encoding='utf-8') as f:
+            training_data = json.load(f)
+        
+        # Find and remove entry
+        entry_to_delete = None
+        updated_data = []
+        for entry in training_data:
+            if entry.get("id") == entry_id:
+                entry_to_delete = entry
+            else:
+                updated_data.append(entry)
+        
+        if not entry_to_delete:
+            return JSONResponse(status_code=404, content={"success": False, "error": "Entry not found"})
+        
+        # Delete audio file
+        audio_path = Path(entry_to_delete.get("audio_file", ""))
+        if audio_path.exists():
+            try:
+                audio_path.unlink()
+                logger.info(f"Deleted audio file: {audio_path}")
+            except Exception as e:
+                logger.warning(f"Error deleting audio file {audio_path}: {e}")
+        
+        # Update JSON file
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(updated_data, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Deleted TTS training entry {entry_id}")
+        
+        return {"success": True}
+        
+    except Exception as e:
+        logger.error(f"Error deleting TTS training entry: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
 @app.get("/api/expert-types")
 async def get_expert_types_endpoint():
     """Get list of available expert types."""

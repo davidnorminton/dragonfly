@@ -29,7 +29,9 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   const [generatingAiFocusTitle, setGeneratingAiFocusTitle] = useState(null); // Session generating title
   const [deleteConfirmAiFocusSession, setDeleteConfirmAiFocusSession] = useState(null); // Session to delete
   const [showPersonaSelector, setShowPersonaSelector] = useState(false); // Show persona selector popup
-  const [showPixelAvatar, setShowPixelAvatar] = useState(false);
+  const [performanceStep, setPerformanceStep] = useState(null); // Current step in cycle: 'listening' | 'transcribing' | 'ai_processing' | 'tts_generating' | 'complete'
+  const [performanceStartTime, setPerformanceStartTime] = useState(null); // Start time of current cycle
+  const [stepStartTime, setStepStartTime] = useState(null); // Start time of current step
   const [useBrowserSpeech, setUseBrowserSpeech] = useState(() => {
     // Load from localStorage
     const saved = localStorage.getItem('aiFocusUseBrowserSpeech');
@@ -79,6 +81,8 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
     if (speechQueueRef.current.length === 0) {
       setIsSpeaking(false);
       currentUtteranceRef.current = null;
+      // Update performance tracking - complete
+      setPerformanceStep('complete');
       return;
     }
     
@@ -246,6 +250,12 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   const beginListening = () => {
     // Only start if not already capturing/playing
     if (!['listening', 'processing', 'playing'].includes(micStatus)) {
+      // Start performance tracking
+      const now = Date.now();
+      setPerformanceStartTime(now);
+      setStepStartTime(now);
+      setPerformanceStep('listening');
+      
       setMicStatus('listening');
       setMicRestartKey((k) => k + 1);
     }
@@ -334,6 +344,11 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
 
     const sendForTranscription = async (blob) => {
       setMicStatus('thinking');
+      
+      // Update performance tracking - transcribing step
+      setPerformanceStep('transcribing');
+      setStepStartTime(Date.now());
+      
       try {
         const fd = new FormData();
         fd.append('file', blob, 'audio.webm');
@@ -458,9 +473,23 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
               setAiFocusConversations(prev => [...prev, { question: currentQuestion, answer: '', isStreaming: true, messageId: null, persona: personaAtQuestionTime }]);
               setMicStatus('thinking');
               
+              // Update performance tracking - AI processing step
+              setPerformanceStep('ai_processing');
+              setStepStartTime(Date.now());
+              
+              // Track if TTS has started
+              let ttsStarted = false;
+              
               // Function to generate audio for a sentence (called sequentially)
               const generateAudioForSentence = async (sentence) => {
                 try {
+                  // Update performance tracking - TTS generating step (first time only)
+                  if (!ttsStarted) {
+                    setPerformanceStep('tts_generating');
+                    setStepStartTime(Date.now());
+                    ttsStarted = true;
+                  }
+                  
                   console.log(`[PARALLEL TTS] Generating audio for sentence: "${sentence.substring(0, 50)}..."`);
                   const response = await fetch('/api/ai/text-to-audio-stream', {
                     method: 'POST',
@@ -571,6 +600,8 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                     setMicStatus('idle');
                     setAiResponseText('');
                     URL.revokeObjectURL(audioElement.src);
+                    // Update performance tracking - complete
+                    setPerformanceStep('complete');
                   };
                   
                   audioElement.onplay = () => {
@@ -615,6 +646,12 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                     if (useBrowserSpeech) {
                       console.log('[Browser Speech] Speaking sentence...');
                       stopFillerAudio(); // Stop filler audio when speech starts
+                      // Update performance tracking - TTS generating step (first time only)
+                      if (!ttsStarted) {
+                        setPerformanceStep('tts_generating');
+                        setStepStartTime(Date.now());
+                        ttsStarted = true;
+                      }
                       speakText(completeSentence);
                     } else {
                       // Add sentence to server TTS queue
@@ -625,6 +662,12 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                       if (!audioStreamStarted) {
                         initializeAudioStream().then(() => {
                           console.log('[PARALLEL TTS] Audio stream ready, starting sequential processing');
+                          // Update performance tracking - TTS generating step
+                          if (!ttsStarted) {
+                            setPerformanceStep('tts_generating');
+                            setStepStartTime(Date.now());
+                            ttsStarted = true;
+                          }
                           // Start processing sentence queue
                           processSentenceQueue();
                         });
@@ -919,6 +962,49 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
       conversationsRef.current.scrollTop = conversationsRef.current.scrollHeight;
     }
   }, [aiFocusConversations]);
+  
+  // Calculate elapsed time for performance tracking
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [stepElapsedTime, setStepElapsedTime] = useState(0);
+  
+  useEffect(() => {
+    if (!performanceStartTime) {
+      setElapsedTime(0);
+      setStepElapsedTime(0);
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const totalElapsed = now - performanceStartTime;
+      setElapsedTime(totalElapsed);
+      
+      if (stepStartTime) {
+        const stepElapsed = now - stepStartTime;
+        setStepElapsedTime(stepElapsed);
+      }
+    }, 100); // Update every 100ms
+    
+    return () => clearInterval(interval);
+  }, [performanceStartTime, stepStartTime]);
+  
+  // Format time in milliseconds to readable format
+  const formatTime = (ms) => {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
+  
+  // Get step display name
+  const getStepName = (step) => {
+    const stepNames = {
+      'listening': 'Listening',
+      'transcribing': 'Transcribing',
+      'ai_processing': 'AI Processing',
+      'tts_generating': 'TTS Generating',
+      'complete': 'Complete'
+    };
+    return stepNames[step] || step || 'Idle';
+  };
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -1077,28 +1163,9 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                     currentPersona={currentPersona}
                     currentTitle={currentTitle}
                     micStatus={micStatus}
-                    showPixelAvatar={showPixelAvatar}
+                    showPixelAvatar={false}
                   />
                 </div>
-                <button
-                  className="ai-focus-avatar-toggle"
-                  onClick={() => setShowPixelAvatar(prev => !prev)}
-                  title={showPixelAvatar ? 'Show image' : 'Show pixel canvas'}
-                  aria-label={showPixelAvatar ? 'Show image' : 'Show pixel canvas'}
-                  type="button"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="3" y="3" width="6" height="6"/>
-                    <rect x="10.5" y="3" width="4.5" height="4.5"/>
-                    <rect x="16.5" y="3" width="4.5" height="4.5"/>
-                    <rect x="3" y="10.5" width="4.5" height="4.5"/>
-                    <rect x="9" y="9" width="6" height="6"/>
-                    <rect x="16.5" y="10.5" width="4.5" height="4.5"/>
-                    <rect x="3" y="16.5" width="4.5" height="4.5"/>
-                    <rect x="10.5" y="16.5" width="4.5" height="4.5"/>
-                    <rect x="16.5" y="16.5" width="4.5" height="4.5"/>
-                  </svg>
-                </button>
               </div>
             </div>
           </div>
@@ -1836,6 +1903,25 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                 </div>
               );
             })
+          )}
+          
+          {/* Performance Tracking Box - Bottom Left */}
+          {performanceStep && performanceStartTime && (
+            <div className="ai-focus-performance-box">
+              <div className="ai-focus-performance-step">
+                {getStepName(performanceStep)}
+              </div>
+              <div className="ai-focus-performance-time">
+                <div className="ai-focus-performance-total">
+                  Total: {formatTime(elapsedTime)}
+                </div>
+                {stepStartTime && (
+                  <div className="ai-focus-performance-step-time">
+                    Step: {formatTime(stepElapsedTime)}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
