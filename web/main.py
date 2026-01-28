@@ -13256,40 +13256,28 @@ async def gemini_audio(request: Request):
         logger.info(f"[GEMINI AUDIO] Processing audio: {len(audio_content)} bytes")
         
         try:
-            # Initialize Gemini Live API client for native audio
-            client = genai.Client(api_key=gemini_api_key)
-            
-            # Configure for native audio model
-            config = {
-                "response_modalities": ["AUDIO"],
-                "speech_config": {
-                    "voice_config": {"prebuilt_voice_config": {"voice_name": "Puck"}}
-                }
-            }
-            
-            # Create live session
+            # Initialize Gemini model for native audio
             model_name = "models/gemini-2.5-flash-native-audio-preview-12-2025"
-            logger.info(f"[GEMINI AUDIO] Using Live API with model: {model_name}")
+            logger.info(f"[GEMINI AUDIO] Using model: {model_name}")
             
-            # For now, use the standard API with audio input/output since Live API is streaming
-            # We'll send audio and get audio back
             model = genai.GenerativeModel(model_name)
             
             # Convert audio to base64 for inline data
+            import base64
             audio_b64 = base64.b64encode(audio_content).decode('utf-8')
             
-            # Create audio part
+            # Create audio part for inline data
             audio_part = {
                 "inline_data": {
-                    "mime_type": audio_file.content_type or "audio/webm",
+                    "mime_type": "audio/webm",
                     "data": audio_b64
                 }
             }
             
             # Configure generation for audio output
-            generation_config = genai.types.GenerationConfig(
-                response_modalities=["AUDIO"]
-            )
+            generation_config = {
+                "response_modalities": ["AUDIO"]
+            }
             
             # Generate response with audio output
             response = model.generate_content(
