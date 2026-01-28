@@ -13266,9 +13266,9 @@ async def gemini_audio(request: Request):
             logger.info(f"[GEMINI AUDIO] Uploaded audio file: {uploaded_file.name}")
             
             # Initialize Gemini model
-            # Use gemini-1.5-flash which supports audio input
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            logger.info("[GEMINI AUDIO] Using model: gemini-1.5-flash")
+            # Use the native audio model specified by user
+            model = genai.GenerativeModel('gemini-2.5-flash-native-audio-preview-12-2025')
+            logger.info("[GEMINI AUDIO] Using model: gemini-2.5-flash-native-audio-preview-12-2025")
             
             # Generate response from audio
             response = model.generate_content([
