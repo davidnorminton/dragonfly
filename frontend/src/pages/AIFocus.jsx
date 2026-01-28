@@ -37,6 +37,11 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
     const saved = localStorage.getItem('aiFocusUseBrowserSpeech');
     return saved === 'true';
   }); // Use browser speech synthesis instead of server TTS
+  const [useGeminiAudio, setUseGeminiAudio] = useState(() => {
+    // Load from localStorage
+    const saved = localStorage.getItem('aiFocusUseGeminiAudio');
+    return saved === 'true';
+  }); // Use Google Gemini native audio
   const [isSpeaking, setIsSpeaking] = useState(false); // Track if speech synthesis is active
   const speechQueueRef = useRef([]); // Queue of text chunks to speak
   const currentUtteranceRef = useRef(null); // Current utterance being spoken
@@ -47,6 +52,16 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   useEffect(() => {
     localStorage.setItem('aiFocusUseBrowserSpeech', useBrowserSpeech.toString());
   }, [useBrowserSpeech]);
+  
+  // Save Gemini audio preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('aiFocusUseGeminiAudio', useGeminiAudio.toString());
+  }, [useGeminiAudio]);
+  
+  // Save Gemini audio preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('aiFocusUseGeminiAudio', useGeminiAudio.toString());
+  }, [useGeminiAudio]);
   
   // Browser Speech Synthesis functions
   const stopBrowserSpeech = () => {
@@ -350,6 +365,94 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
       setStepStartTime(Date.now());
       
       try {
+        // If Gemini audio is enabled, use Gemini native audio endpoint
+        if (useGeminiAudio) {
+          console.log('[GEMINI AUDIO] Using Gemini native audio model');
+          setPerformanceStep('ai_processing');
+          setStepStartTime(Date.now());
+          
+          const fd = new FormData();
+          fd.append('file', blob, 'audio.webm');
+          
+          const resp = await fetch('/api/gemini-audio', {
+            method: 'POST',
+            body: fd,
+          });
+          
+          const data = await resp.json();
+          console.log('[GEMINI AUDIO] Response:', data);
+          
+          if (data.success) {
+            // Update performance tracking - TTS generating (Gemini returns audio directly)
+            setPerformanceStep('tts_generating');
+            setStepStartTime(Date.now());
+            
+            if (data.mode === 'audio' && data.audio) {
+              // Gemini returned audio directly
+              console.log('[GEMINI AUDIO] Received audio response');
+              
+              // Stop filler audio
+              stopFillerAudio();
+              
+              // Create audio element and play
+              const audioBlob = new Blob([data.audio], { type: 'audio/mpeg' });
+              const audioUrl = URL.createObjectURL(audioBlob);
+              const audio = new Audio(audioUrl);
+              
+              audio.onended = () => {
+                setMicStatus('idle');
+                setAiResponseText('');
+                URL.revokeObjectURL(audioUrl);
+                setPerformanceStep('complete');
+              };
+              
+              audio.onplay = () => {
+                setMicStatus('thinking');
+              };
+              
+              audio.onerror = (err) => {
+                console.error('[GEMINI AUDIO] Error playing audio:', err);
+                setMicStatus('idle');
+                setAiResponseText('');
+                setPerformanceStep('complete');
+              };
+              
+              setAudioObj(audio);
+              await audio.play();
+              
+              // Update conversation
+              setAiFocusConversations(prev => [...prev, {
+                question: '[Audio Input]',
+                answer: '[Audio Response]',
+                isStreaming: false,
+                messageId: null,
+                persona: currentPersona
+              }]);
+              
+              return;
+            } else if (data.text) {
+              // Gemini returned text, convert to audio using TTS
+              console.log('[GEMINI AUDIO] Received text response, converting to audio');
+              const transcript = data.text;
+              // Continue with normal flow but skip transcription
+              // Fall through to process as if we got a transcript
+            } else {
+              console.error('[GEMINI AUDIO] No audio or text in response');
+              setMicStatus('idle');
+              setAiResponseText('');
+              setPerformanceStep(null);
+              return;
+            }
+          } else {
+            console.error('[GEMINI AUDIO] Error:', data.error);
+            setMicStatus('idle');
+            setAiResponseText('');
+            setPerformanceStep(null);
+            return;
+          }
+        }
+        
+        // Normal transcription flow
         const fd = new FormData();
         fd.append('file', blob, 'audio.webm');
         const resp = await fetch('/api/transcribe', {
@@ -1105,6 +1208,24 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
             <div className="ai-focus-mode-indicator">
               {aiFocusMode === 'question' ? 'Ask' : 'Command'}
             </div>
+            
+            {/* Gemini Audio toggle */}
+            <button
+              className={`ai-focus-gemini-toggle ${useGeminiAudio ? 'active' : ''}`}
+              onClick={() => {
+                setUseGeminiAudio(!useGeminiAudio);
+                // Disable browser speech if enabling Gemini
+                if (!useGeminiAudio) {
+                  setUseBrowserSpeech(false);
+                }
+              }}
+              title={useGeminiAudio ? 'Gemini Audio ON - Click to disable' : 'Gemini Audio OFF - Click to enable'}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
+              </svg>
+            </button>
             
             {/* Persona selector icon button */}
             <button
