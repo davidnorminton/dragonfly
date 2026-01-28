@@ -13274,15 +13274,10 @@ async def gemini_audio(request: Request):
                 }
             }
             
-            # Configure generation for audio output
-            generation_config = {
-                "response_modalities": ["AUDIO"]
-            }
-            
-            # Generate response with audio output
+            # Generate response from audio
+            # The native audio model should handle audio input/output automatically
             response = model.generate_content(
-                contents=[audio_part],
-                generation_config=generation_config
+                contents=[audio_part, "Listen to the audio and respond naturally."]
             )
             
             logger.info(f"[GEMINI AUDIO] Got response from Gemini")
