@@ -45,6 +45,9 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   const [isSpeaking, setIsSpeaking] = useState(false); // Track if speech synthesis is active
   const speechQueueRef = useRef([]); // Queue of text chunks to speak
   const currentUtteranceRef = useRef(null); // Current utterance being spoken
+  const geminiWSRef = useRef(null); // WebSocket for Gemini audio streaming
+  const geminiAudioQueueRef = useRef([]); // Queue for Gemini audio responses
+  const geminiMediaRecorderRef = useRef(null); // MediaRecorder for Gemini streaming
   
   const { selectPersona, currentTitle, personas, currentPersona, reload: reloadPersonas } = usePersonas(selectedUser?.id);
   
@@ -295,7 +298,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
     const startMic = async () => {
       setMicError('');
       setTranscript('');
-      setAiResponseText('Listening...');
+      setAiResponseText(useGeminiAudio ? 'Gemini listening...' : 'Listening...');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (cancelled) {
@@ -318,14 +321,19 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
         mediaRecorder.onstop = async () => {
           if (chunks.length === 0) return;
           
-          // Play filler audio immediately while transcription happens
-          playFillerAudio();
+          // For Gemini audio mode, skip filler audio
+          if (!useGeminiAudio) {
+            playFillerAudio();
+          }
           
           const blob = new Blob(chunks, { type: 'audio/webm' });
           await sendForTranscription(blob);
         };
         mediaRecorder.start();
 
+        // For Gemini audio mode, use longer silence detection or manual stop
+        const silenceThreshold = useGeminiAudio ? 2000 : 1200; // Longer pause for Gemini mode
+        
         const detectSilence = () => {
           const buffer = new Uint8Array(analyser.fftSize);
           analyser.getByteTimeDomainData(buffer);
@@ -341,7 +349,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
 
           if (rms < threshold) {
             if (silenceStart === 0) silenceStart = now;
-            if (now - silenceStart > 1200) { // Reduced from 2000ms for faster response
+            if (now - silenceStart > silenceThreshold) {
               stopRecording();
               return;
             }
@@ -404,6 +412,13 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
                 setAiResponseText('');
                 URL.revokeObjectURL(audioUrl);
                 setPerformanceStep('complete');
+                
+                // Auto-restart listening for continuous Gemini mode
+                if (useGeminiAudio) {
+                  setTimeout(() => {
+                    beginListening();
+                  }, 500);
+                }
               };
               
               audio.onplay = () => {
@@ -431,16 +446,40 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
               
               return;
             } else if (data.text) {
-              // Gemini returned text, convert to audio using TTS
-              console.log('[GEMINI AUDIO] Received text response, converting to audio');
-              const transcript = data.text;
-              // Continue with normal flow but skip transcription
-              // Fall through to process as if we got a transcript
+              // Gemini returned text, display it and auto-restart
+              console.log('[GEMINI AUDIO] Received text response:', data.text);
+              setAiResponseText(data.text);
+              setMicStatus('idle');
+              setPerformanceStep('complete');
+              
+              // Update conversation
+              setAiFocusConversations(prev => [...prev, {
+                question: '[Audio Input]',
+                answer: data.text,
+                isStreaming: false,
+                messageId: null,
+                persona: currentPersona
+              }]);
+              
+              // Auto-restart listening for continuous Gemini mode
+              setTimeout(() => {
+                beginListening();
+              }, 1500);
+              
+              return;
             } else {
               console.error('[GEMINI AUDIO] No audio or text in response');
               setMicStatus('idle');
               setAiResponseText('');
               setPerformanceStep(null);
+              
+              // Auto-restart even on error
+              if (useGeminiAudio) {
+                setTimeout(() => {
+                  beginListening();
+                }, 1000);
+              }
+              
               return;
             }
           } else {
@@ -448,6 +487,14 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
             setMicStatus('idle');
             setAiResponseText('');
             setPerformanceStep(null);
+            
+            // Auto-restart even on error
+            if (useGeminiAudio) {
+              setTimeout(() => {
+                beginListening();
+              }, 1000);
+            }
+            
             return;
           }
         }
