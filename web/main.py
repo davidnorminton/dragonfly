@@ -13219,13 +13219,14 @@ async def gemini_audio(request: Request):
     """
     Process audio using Google Gemini Live API with native audio model.
     Direct 2-way audio pipeline using gemini-2.5-flash-native-audio-preview-12-2025.
+    Uses the google-genai SDK with Live API for real-time audio.
     """
     try:
         from config.api_key_loader import load_api_keys
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
         import base64
-        import tempfile
-        import os
+        import io
         
         # Load Gemini API key
         api_keys_config = await load_api_keys()
@@ -13236,9 +13237,6 @@ async def gemini_audio(request: Request):
                 status_code=400,
                 content={"success": False, "error": "Google Gemini API key not configured. Please add it in Settings > API Keys."}
             )
-        
-        # Configure Gemini
-        genai.configure(api_key=gemini_api_key)
         
         # Get audio file from request
         form = await request.form()
@@ -13256,59 +13254,68 @@ async def gemini_audio(request: Request):
         logger.info(f"[GEMINI AUDIO] Processing audio: {len(audio_content)} bytes")
         
         try:
-            # Initialize Gemini model for native audio
-            model_name = "models/gemini-2.5-flash-native-audio-preview-12-2025"
-            logger.info(f"[GEMINI AUDIO] Using model: {model_name}")
+            # Initialize Gemini client with Live API
+            client = genai.Client(api_key=gemini_api_key)
             
-            model = genai.GenerativeModel(model_name)
+            model_name = "gemini-2.5-flash-preview-native-audio-dialog"
+            logger.info(f"[GEMINI AUDIO] Using Live API with model: {model_name}")
             
-            # Convert audio to base64 for inline data
-            import base64
-            audio_b64 = base64.b64encode(audio_content).decode('utf-8')
-            
-            # Create audio part for inline data
-            audio_part = {
-                "inline_data": {
-                    "mime_type": "audio/webm",
-                    "data": audio_b64
-                }
+            # Configure for audio response
+            config = {
+                "response_modalities": ["AUDIO"],
             }
             
-            # Generate response from audio
-            # The native audio model should handle audio input/output automatically
-            response = model.generate_content(
-                contents=[audio_part, "Listen to the audio and respond naturally."]
-            )
+            # Collect audio response chunks
+            audio_chunks = []
+            text_response = ""
             
-            logger.info(f"[GEMINI AUDIO] Got response from Gemini")
-            
-            # Check for audio in response
-            if hasattr(response, 'parts'):
-                for part in response.parts:
-                    if hasattr(part, 'inline_data'):
-                        if part.inline_data.mime_type.startswith('audio/'):
-                            audio_data = part.inline_data.data
-                            logger.info(f"[GEMINI AUDIO] Got audio response: {len(audio_data)} bytes")
-                            
-                            # Decode base64 if needed
-                            try:
-                                audio_bytes = base64.b64decode(audio_data)
-                            except:
-                                audio_bytes = audio_data if isinstance(audio_data, bytes) else audio_data.encode()
-                            
-                            # Return audio response
-                            return Response(
-                                content=audio_bytes,
-                                media_type=part.inline_data.mime_type,
-                                headers={"X-Response-Mode": "audio"}
-                            )
-            
-            # Fallback: try to get text and convert to audio
-            if hasattr(response, 'text') and response.text:
-                response_text = response.text
-                logger.info(f"[GEMINI AUDIO] Got text response, converting to audio: {len(response_text)} chars")
+            # Use Live API session
+            async with client.aio.live.connect(model=model_name, config=config) as session:
+                # Send audio as a blob
+                audio_blob = types.Blob(data=audio_content, mime_type="audio/webm")
+                await session.send_realtime_input(audio=audio_blob)
                 
-                # Generate audio from text using TTS
+                # Signal end of input
+                await session.send_client_content(
+                    turns=[types.Content(parts=[types.Part(text=".")])],
+                    turn_complete=True
+                )
+                
+                # Receive response
+                async for response in session.receive():
+                    if response.server_content:
+                        if response.server_content.model_turn:
+                            for part in response.server_content.model_turn.parts:
+                                if hasattr(part, 'inline_data') and part.inline_data:
+                                    # Audio data
+                                    audio_chunks.append(part.inline_data.data)
+                                    logger.info(f"[GEMINI AUDIO] Received audio chunk: {len(part.inline_data.data)} bytes")
+                                elif hasattr(part, 'text') and part.text:
+                                    text_response += part.text
+                        
+                        # Check if turn is complete
+                        if response.server_content.turn_complete:
+                            logger.info(f"[GEMINI AUDIO] Turn complete")
+                            break
+            
+            # Combine audio chunks
+            if audio_chunks:
+                combined_audio = b''.join(audio_chunks)
+                logger.info(f"[GEMINI AUDIO] Got audio response: {len(combined_audio)} bytes total")
+                
+                return Response(
+                    content=combined_audio,
+                    media_type="audio/pcm",
+                    headers={
+                        "X-Response-Mode": "audio",
+                        "X-Audio-Sample-Rate": "24000"
+                    }
+                )
+            
+            # Fallback: text response - convert to audio via TTS
+            if text_response:
+                logger.info(f"[GEMINI AUDIO] Got text response, converting to audio: {len(text_response)} chars")
+                
                 from services.tts_service import TTSService
                 from config.voice_loader import get_voice_for_persona
                 from config.persona_loader import get_current_persona_name
@@ -13321,29 +13328,28 @@ async def gemini_audio(request: Request):
                     voice_engine = voice_engine_default or "s1"
                     
                     tts = TTSService()
-                    audio_bytes = await tts.generate_audio_simple(response_text, voice_id, voice_engine)
+                    audio_bytes = await tts.generate_audio_simple(text_response, voice_id, voice_engine)
                     
                     if audio_bytes:
                         return Response(
                             content=audio_bytes,
                             media_type="audio/mpeg",
                             headers={
-                                "X-Response-Text": base64.b64encode(response_text.encode()).decode(),
+                                "X-Response-Text": base64.b64encode(text_response.encode()).decode(),
                                 "X-Response-Mode": "text-to-audio"
                             }
                         )
                 
-                # No TTS available, return text only
                 return {
                     "success": True,
-                    "text": response_text,
+                    "text": text_response,
                     "audio": None,
                     "mode": "text"
                 }
             
             return JSONResponse(
                 status_code=500,
-                content={"success": False, "error": "No audio or text response from Gemini"}
+                content={"success": False, "error": "No audio or text response from Gemini Live API"}
             )
             
         except Exception as inner_e:
