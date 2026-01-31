@@ -940,6 +940,9 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
   const currentViewAllList = viewMode === 'movies' ? viewAllMoviesList : viewAllTVList;
   const hasMoreToLoad = viewAllVisibleCount < currentViewAllList.length;
 
+  // Only load more when user has scrolled (not when sentinel is in view because grid is short)
+  const MIN_SCROLL_BEFORE_LOAD_MORE = 150;
+
   useEffect(() => {
     if (!hasMoreToLoad || !mainContentRef.current) return;
     const root = mainContentRef.current;
@@ -949,9 +952,9 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
     const observer = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
-        if (entry?.isIntersecting) {
-          setViewAllVisibleCount((prev) => Math.min(prev + VIEW_ALL_PAGE_SIZE, listLength));
-        }
+        if (!entry?.isIntersecting) return;
+        if (root.scrollTop < MIN_SCROLL_BEFORE_LOAD_MORE) return;
+        setViewAllVisibleCount((prev) => Math.min(prev + VIEW_ALL_PAGE_SIZE, listLength));
       },
       { root, rootMargin: '200px', threshold: 0 }
     );

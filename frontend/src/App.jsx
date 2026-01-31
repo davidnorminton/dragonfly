@@ -55,21 +55,21 @@ function App() {
     localStorage.setItem('chatSessionId', newId);
     return newId;
   });
-  // Initialize activePage from URL or localStorage
+  // Initialize activePage from URL or localStorage (so reload restores where you were)
   const [activePage, setActivePage] = useState(() => {
-    // Check URL hash first
     const hash = window.location.hash.slice(1);
-    if (hash && ['dashboard', 'chat', 'music', 'videos', 'news', 'stories', 'create-story', 'edit-story', 'story-view', 'courses', 'course-contents', 'lesson-view', 'settings', 'alerts', 'personal', 'personal-summaries', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games'].includes(hash)) {
-    } else if (hash && hash.startsWith('games/')) {
-      return hash;
-    } else if (hash && hash.startsWith('games/')) {
-      // Handle nested game routes
-      return hash;
-    }
-    // Fallback to localStorage
+    const validPages = ['dashboard', 'chat', 'music', 'videos', 'news', 'stories', 'create-story', 'edit-story', 'story-view', 'courses', 'course-contents', 'lesson-view', 'settings', 'alerts', 'personal', 'personal-summaries', 'users', 'add-user', 'edit-user', 'analytics', 'music-editor', 'ai-focus', 'games', 'tech-news'];
+    if (hash && validPages.includes(hash)) return hash;
+    if (hash && hash.startsWith('games/')) return hash;
     const stored = localStorage.getItem('activePage');
     return stored || 'dashboard';
   });
+
+  // When load has no hash, set URL from localStorage so reload/bookmark restores correctly
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash && activePage) window.location.hash = activePage;
+  }, []);
   const [pageData, setPageData] = useState(null); // For passing data to pages like edit-user
   const [searchOverlayOpen, setSearchOverlayOpen] = useState(false);
   const [showLeft, setShowLeft] = useState(true);
