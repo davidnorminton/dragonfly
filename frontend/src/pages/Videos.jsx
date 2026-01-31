@@ -12,6 +12,8 @@ const SORT_OPTIONS = [
   { value: 'rating_asc', label: 'Rating (low)' },
 ];
 
+const VIEW_ALL_PAGE_SIZE = 25;
+
 // Cast and Crew Component
 function CastAndCrew({ movieTitle, movieYear, showTitle, showYear, isMovie = true }) {
   const [castCrew, setCastCrew] = useState(null);
@@ -646,11 +648,13 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
   const [recentlyPlayed, setRecentlyPlayed] = useState([]);
   const [recentlyAdded, setRecentlyAdded] = useState([]);
   const [carouselVisibleCounts, setCarouselVisibleCounts] = useState({});
+  const [viewAllVisibleCount, setViewAllVisibleCount] = useState(VIEW_ALL_PAGE_SIZE);
   
   const { castAvailable, castVideo } = useChromecast();
   
   const heroRef = useRef(null);
   const mainContentRef = useRef(null);
+  const loadMoreSentinelRef = useRef(null);
 
   const loadLibrary = async () => {
     setLoading(true);
@@ -926,6 +930,32 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [filteredTVShows]);
+
+  // Reset lazy-load count when entering View All or when sort/genre/viewMode changes
+  useEffect(() => {
+    setViewAllVisibleCount(VIEW_ALL_PAGE_SIZE);
+  }, [viewAllMovies, viewAllTV, viewMode, movieSort, tvSort, selectedMovieGenre, selectedTVGenre]);
+
+  // Infinite scroll: load next 25 when sentinel is visible
+  const currentViewAllList = viewMode === 'movies' ? viewAllMoviesList : viewAllTVList;
+  const hasMoreToLoad = viewAllVisibleCount < currentViewAllList.length;
+
+  useEffect(() => {
+    if (!hasMoreToLoad || !loadMoreSentinelRef.current || !mainContentRef.current) return;
+    const sentinel = loadMoreSentinelRef.current;
+    const listLength = currentViewAllList.length;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry?.isIntersecting) {
+          setViewAllVisibleCount((prev) => Math.min(prev + VIEW_ALL_PAGE_SIZE, listLength));
+        }
+      },
+      { root: mainContentRef.current, rootMargin: '200px', threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreToLoad, currentViewAllList.length]);
 
   // Filter episodes across all TV shows
   const filteredEpisodes = useMemo(() => {
@@ -1573,7 +1603,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                 {!loading && viewMode === 'tvshows' && viewAllTVList.length === 0 && (
                   <div className="video-empty">{selectedTVGenre ? 'No TV shows in this genre.' : 'No TV shows in library yet.'}</div>
                 )}
-                {viewMode === 'movies' && viewAllMoviesList.map((movie) => (
+                {viewMode === 'movies' && viewAllMoviesList.slice(0, viewAllVisibleCount).map((movie) => (
                   <div
                     key={movie.id}
                     className="video-view-all-card"
@@ -1596,7 +1626,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                     {movie.year && <div className="video-view-all-card-meta">{movie.year}</div>}
                   </div>
                 ))}
-                {viewMode === 'tvshows' && viewAllTVList.map((show) => (
+                {viewMode === 'tvshows' && viewAllTVList.slice(0, viewAllVisibleCount).map((show) => (
                   <div
                     key={show.id}
                     className="video-view-all-card"
@@ -1622,6 +1652,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                     )}
                   </div>
                 ))}
+                {hasMoreToLoad && <div ref={loadMoreSentinelRef} className="video-view-all-sentinel" aria-hidden="true" />}
               </div>
             </div>
           )}

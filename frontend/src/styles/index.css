@@ -4535,6 +4535,13 @@ body {
   gap: 20px;
 }
 
+.video-view-all-sentinel {
+  grid-column: 1 / -1;
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
 .video-view-all-card {
   cursor: pointer;
   border-radius: 10px;
