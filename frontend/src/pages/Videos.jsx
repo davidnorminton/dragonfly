@@ -3,6 +3,15 @@ import { videoAPI } from '../services/api';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { useChromecast } from '../hooks/useChromecast';
 
+const SORT_OPTIONS = [
+  { value: 'title_asc', label: 'Title (A–Z)' },
+  { value: 'title_desc', label: 'Title (Z–A)' },
+  { value: 'year_desc', label: 'Year (newest)' },
+  { value: 'year_asc', label: 'Year (oldest)' },
+  { value: 'rating_desc', label: 'Rating (high)' },
+  { value: 'rating_asc', label: 'Rating (low)' },
+];
+
 // Cast and Crew Component
 function CastAndCrew({ movieTitle, movieYear, showTitle, showYear, isMovie = true }) {
   const [castCrew, setCastCrew] = useState(null);
@@ -623,6 +632,12 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [viewMode, setViewMode] = useState('movies'); // 'movies' or 'tvshows'
+  const [viewAllMovies, setViewAllMovies] = useState(false);
+  const [viewAllTV, setViewAllTV] = useState(false);
+  const [movieSort, setMovieSort] = useState('title_asc');
+  const [tvSort, setTVSort] = useState('title_asc');
+  const [selectedMovieGenre, setSelectedMovieGenre] = useState(null);
+  const [selectedTVGenre, setSelectedTVGenre] = useState(null);
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [selectedShow, setSelectedShow] = useState(null);
   const [selectedSeason, setSelectedSeason] = useState(null);
@@ -825,6 +840,92 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
     
     return allShows;
   }, [library.tvShows, searchQuery]);
+
+  // Normalize genre for comparison (item can be string or { name }))
+  const getItemGenres = (item, isMovie) => {
+    const raw = isMovie
+      ? (item.extra_metadata?.genres || item.metadata?.genres || [])
+      : (item.extra_metadata?.genres || []);
+    return (Array.isArray(raw) ? raw : []).map(g =>
+      (typeof g === 'string' ? g : g?.name || '').trim()
+    ).filter(Boolean);
+  };
+
+  const matchesGenre = (item, genreName, isMovie) => {
+    if (!genreName) return true;
+    const genres = getItemGenres(item, isMovie);
+    const norm = genreName.toLowerCase().trim();
+    return genres.some(g => g.toLowerCase() === norm || g.toLowerCase().includes(norm));
+  };
+
+  // View All: movies filtered by genre and sorted
+  const viewAllMoviesList = useMemo(() => {
+    let list = filteredMovies.filter(m => matchesGenre(m, selectedMovieGenre, true));
+    const opt = SORT_OPTIONS.find(o => o.value === movieSort) || SORT_OPTIONS[0];
+    const copy = [...list];
+    if (opt.value === 'title_asc') copy.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    else if (opt.value === 'title_desc') copy.sort((a, b) => (b.title || '').localeCompare(a.title || ''));
+    else if (opt.value === 'year_desc') copy.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
+    else if (opt.value === 'year_asc') copy.sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+    else if (opt.value === 'rating_desc') copy.sort((a, b) => {
+      const ra = a.extra_metadata?.vote_average ?? a.metadata?.vote_average ?? 0;
+      const rb = b.extra_metadata?.vote_average ?? b.metadata?.vote_average ?? 0;
+      return rb - ra;
+    });
+    else if (opt.value === 'rating_asc') copy.sort((a, b) => {
+      const ra = a.extra_metadata?.vote_average ?? a.metadata?.vote_average ?? 0;
+      const rb = b.extra_metadata?.vote_average ?? b.metadata?.vote_average ?? 0;
+      return ra - rb;
+    });
+    return copy;
+  }, [filteredMovies, selectedMovieGenre, movieSort]);
+
+  // View All: TV shows filtered by genre and sorted
+  const viewAllTVList = useMemo(() => {
+    let list = filteredTVShows.filter(s => matchesGenre(s, selectedTVGenre, false));
+    const opt = SORT_OPTIONS.find(o => o.value === tvSort) || SORT_OPTIONS[0];
+    const copy = [...list];
+    if (opt.value === 'title_asc') copy.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    else if (opt.value === 'title_desc') copy.sort((a, b) => (b.title || '').localeCompare(a.title || ''));
+    else if (opt.value === 'year_desc') copy.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
+    else if (opt.value === 'year_asc') copy.sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+    else if (opt.value === 'rating_desc') copy.sort((a, b) => {
+      const ra = a.extra_metadata?.vote_average ?? 0;
+      const rb = b.extra_metadata?.vote_average ?? 0;
+      return rb - ra;
+    });
+    else if (opt.value === 'rating_asc') copy.sort((a, b) => {
+      const ra = a.extra_metadata?.vote_average ?? 0;
+      const rb = b.extra_metadata?.vote_average ?? 0;
+      return ra - rb;
+    });
+    return copy;
+  }, [filteredTVShows, selectedTVGenre, tvSort]);
+
+  // Genres that actually exist in the library (only show pills for these)
+  const genresInMovies = useMemo(() => {
+    const set = new Set();
+    filteredMovies.forEach((movie) => {
+      const raw = movie.extra_metadata?.genres || movie.metadata?.genres || [];
+      (Array.isArray(raw) ? raw : []).forEach((g) => {
+        const name = (typeof g === 'string' ? g : g?.name || '').trim();
+        if (name) set.add(name);
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [filteredMovies]);
+
+  const genresInTVShows = useMemo(() => {
+    const set = new Set();
+    filteredTVShows.forEach((show) => {
+      const raw = show.extra_metadata?.genres || [];
+      (Array.isArray(raw) ? raw : []).forEach((g) => {
+        const name = (typeof g === 'string' ? g : g?.name || '').trim();
+        if (name) set.add(name);
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [filteredTVShows]);
 
   // Filter episodes across all TV shows
   const filteredEpisodes = useMemo(() => {
@@ -1060,103 +1161,42 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
     backgroundRepeat: 'no-repeat',
   };
 
+  const inViewAll = viewMode === 'movies' ? viewAllMovies : viewAllTV;
+  const setViewAll = viewMode === 'movies' ? setViewAllMovies : setViewAllTV;
+
   return (
     <div className="video-page">
       {error && <div className="video-error">{error}</div>}
 
-      <div className="video-layout">
-        {/* Sidebar */}
-        <div className="video-sidebar">
-          <div className="video-filters">
-            <button
-              className={`filter-pill ${viewMode === 'movies' ? 'active' : ''}`}
-              onClick={() => {
-                setViewMode('movies');
-                setSelectedMovie(null);
-                setSelectedShow(null);
-                setSelectedSeason(null);
-              }}
-            >
-              Movies
-            </button>
-            <button
-              className={`filter-pill ${viewMode === 'tvshows' ? 'active' : ''}`}
-              onClick={() => {
-                setViewMode('tvshows');
-                setSelectedMovie(null);
-                setSelectedShow(null);
-                setSelectedSeason(null);
-              }}
-            >
-              TV Shows
-            </button>
-          </div>
-
-          <div className="video-library">
-            {loading && <div className="video-empty">Loading...</div>}
-            {!loading && viewMode === 'movies' && filteredMovies.length === 0 && (
-              <div className="video-empty">{searchQuery ? 'No movies found' : 'No movies in library yet.'}</div>
-            )}
-            {!loading && viewMode === 'tvshows' && filteredTVShows.length === 0 && (
-              <div className="video-empty">{searchQuery ? 'No TV shows found' : 'No TV shows in library yet.'}</div>
-            )}
-
-            {/* Movies List */}
-            {viewMode === 'movies' &&
-              filteredMovies.map((movie) => (
-                <div
-                  key={movie.id}
-                  className={`video-row artist-only ${selectedMovie?.id === movie.id ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedMovie(movie);
-                    setSelectedShow(null);
-                    setSelectedSeason(null);
-                  }}
-                >
-                  {movie.poster_path && (
-                    <img
-                      src={movie.poster_path}
-                      alt={movie.title}
-                      className="artist-thumb"
-                      style={{ borderRadius: '4px' }}
-                    />
-                  )}
-                  <div>
-                    <strong>{movie.title}</strong>
-                    {movie.year && <div className="video-row-sub">{movie.year}</div>}
-                  </div>
-                </div>
-              ))}
-
-            {/* TV Shows List */}
-            {viewMode === 'tvshows' &&
-              filteredTVShows.map((show) => (
-                <div
-                  key={show.id}
-                  className={`video-row artist-only ${selectedShow?.id === show.id ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedShow(show);
-                    setSelectedMovie(null);
-                    setSelectedSeason(null);
-                  }}
-                >
-                  {show.poster_path && (
-                    <img
-                      src={show.poster_path}
-                      alt={show.title}
-                      className="artist-thumb"
-                      style={{ borderRadius: '4px' }}
-                    />
-                  )}
-                  <div>
-                    <strong>{show.title}</strong>
-                    {show.seasons && <div className="video-row-sub">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>}
-                  </div>
-                </div>
-              ))}
-          </div>
+      {/* Centered header: Movies | TV */}
+      <header className="video-page-header">
+        <div className="video-page-header-inner">
+          <button
+            className={`video-page-header-tab ${viewMode === 'movies' ? 'active' : ''}`}
+            onClick={() => {
+              setViewMode('movies');
+              setSelectedMovie(null);
+              setSelectedShow(null);
+              setSelectedSeason(null);
+            }}
+          >
+            Movies
+          </button>
+          <button
+            className={`video-page-header-tab ${viewMode === 'tvshows' ? 'active' : ''}`}
+            onClick={() => {
+              setViewMode('tvshows');
+              setSelectedMovie(null);
+              setSelectedShow(null);
+              setSelectedSeason(null);
+            }}
+          >
+            TV
+          </button>
         </div>
+      </header>
 
+      <div className="video-layout video-layout-full">
         {/* Main Content */}
         <div className="video-main" ref={mainContentRef}>
           {/* Minimal sticky hero - shows when scrolled */}
@@ -1318,6 +1358,14 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                 {heroTitle}
               </h1>
               <div className="album-artist">{heroSub}</div>
+              {!selectedMovie && !selectedShow && (
+                <button
+                  className="video-view-all-btn"
+                  onClick={() => setViewAll(true)}
+                >
+                  View All {viewMode === 'movies' ? 'Movies' : 'TV Shows'}
+                </button>
+              )}
               
               {/* Genres under title for movies */}
               {selectedMovie && (
@@ -1465,6 +1513,134 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
               )}
             </div>
           </div>
+
+          {/* View All: grid with sorter and genre pills */}
+          {inViewAll && ((viewMode === 'movies' && !selectedMovie) || (viewMode === 'tvshows' && !selectedShow)) && (
+            <div className="video-view-all-panel">
+              <div className="video-view-all-toolbar">
+                <button
+                  className="video-view-all-back"
+                  onClick={() => {
+                    setViewAll(false);
+                    setSelectedMovie(null);
+                    setSelectedShow(null);
+                    setSelectedSeason(null);
+                  }}
+                >
+                  ← Back
+                </button>
+                <div className="video-view-all-sort">
+                  <label htmlFor="video-sort">Sort:</label>
+                  <select
+                    id="video-sort"
+                    value={viewMode === 'movies' ? movieSort : tvSort}
+                    onChange={(e) => viewMode === 'movies' ? setMovieSort(e.target.value) : setTVSort(e.target.value)}
+                    className="video-sort-select"
+                  >
+                    {SORT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {(viewMode === 'movies' ? genresInMovies : genresInTVShows).length > 0 && (
+                <div className="video-view-all-genres">
+                  {(viewMode === 'movies' ? genresInMovies : genresInTVShows).map((genre) => {
+                    const selected = viewMode === 'movies' ? selectedMovieGenre === genre : selectedTVGenre === genre;
+                    return (
+                      <button
+                        key={genre}
+                        className={`video-genre-pill ${selected ? 'active' : ''}`}
+                        onClick={() => {
+                          if (viewMode === 'movies') {
+                            setSelectedMovieGenre(selected ? null : genre);
+                          } else {
+                            setSelectedTVGenre(selected ? null : genre);
+                          }
+                        }}
+                      >
+                        {genre}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="video-view-all-grid">
+                {loading && <div className="video-empty">Loading...</div>}
+                {!loading && viewMode === 'movies' && viewAllMoviesList.length === 0 && (
+                  <div className="video-empty">{selectedMovieGenre ? 'No movies in this genre.' : 'No movies in library yet.'}</div>
+                )}
+                {!loading && viewMode === 'tvshows' && viewAllTVList.length === 0 && (
+                  <div className="video-empty">{selectedTVGenre ? 'No TV shows in this genre.' : 'No TV shows in library yet.'}</div>
+                )}
+                {viewMode === 'movies' && viewAllMoviesList.map((movie) => (
+                  <div
+                    key={movie.id}
+                    className="video-view-all-card"
+                    onClick={() => {
+                      setSelectedMovie(movie);
+                      setSelectedShow(null);
+                      setSelectedSeason(null);
+                    }}
+                  >
+                    {movie.poster_path ? (
+                      <img src={movie.poster_path} alt={movie.title} className="video-view-all-card-poster" />
+                    ) : (
+                      <div className="video-view-all-card-placeholder">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                        </svg>
+                      </div>
+                    )}
+                    <div className="video-view-all-card-title">{movie.title}</div>
+                    {movie.year && <div className="video-view-all-card-meta">{movie.year}</div>}
+                  </div>
+                ))}
+                {viewMode === 'tvshows' && viewAllTVList.map((show) => (
+                  <div
+                    key={show.id}
+                    className="video-view-all-card"
+                    onClick={() => {
+                      setSelectedShow(show);
+                      setSelectedMovie(null);
+                      setSelectedSeason(null);
+                    }}
+                  >
+                    {show.poster_path ? (
+                      <img src={show.poster_path} alt={show.title} className="video-view-all-card-poster" />
+                    ) : (
+                      <div className="video-view-all-card-placeholder">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                        </svg>
+                      </div>
+                    )}
+                    <div className="video-view-all-card-title">{show.title}</div>
+                    {show.year && <div className="video-view-all-card-meta">{show.year}</div>}
+                    {show.seasons && (
+                      <div className="video-view-all-card-meta">{show.seasons.length} {show.seasons.length === 1 ? 'season' : 'seasons'}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Back to list when in View All with selection */}
+          {inViewAll && (selectedMovie || selectedShow) && (
+            <div className="video-view-all-back-bar">
+              <button
+                className="video-view-all-back"
+                onClick={() => {
+                  if (viewMode === 'movies') setSelectedMovie(null);
+                  else setSelectedShow(null);
+                  setSelectedSeason(null);
+                }}
+              >
+                ← Back to list
+              </button>
+            </div>
+          )}
 
           {/* Content Area */}
           <div className="video-tracklist">
@@ -1663,8 +1839,8 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                 </div>
               )}
 
-              {/* Empty State - Recently Played */}
-              {!selectedMovie && !selectedShow && (
+              {/* Empty State - Recently Played (hide when in View All grid) */}
+              {!selectedMovie && !selectedShow && !inViewAll && (
                 <div className="album-section">
                   {(() => {
                     // Filter recently played based on current view mode
@@ -1762,7 +1938,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                       }
                     });
 
-                    return !selectedMovie && !selectedShow && filteredAdded.length > 0 ? (
+                    return !selectedMovie && !selectedShow && !inViewAll && filteredAdded.length > 0 ? (
                       <div className="recently-played-section" style={{ marginTop: recentlyPlayed.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'episode').length > 0 ? '40px' : '0' }}>
                         <div className="recently-played-title">
                           Recently Added
@@ -1821,7 +1997,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                   })()}
                   
                   {/* Genre Carousels */}
-                  {!selectedMovie && !selectedShow && (() => {
+                  {!selectedMovie && !selectedShow && !inViewAll && (() => {
                     // Helper function to get kids-friendly items (U, PG)
                     const getKidsItems = () => {
                       const items = [];
@@ -1982,7 +2158,7 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
                   })()}
                   
                   {/* Empty State */}
-                  {!selectedMovie && !selectedShow && recentlyPlayed.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'episode').length === 0 && recentlyAdded.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'tvshow').length === 0 && (
+                  {!selectedMovie && !selectedShow && !inViewAll && recentlyPlayed.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'episode').length === 0 && recentlyAdded.filter(item => viewMode === 'movies' ? item.type === 'movie' : item.type === 'tvshow').length === 0 && (
                     <div className="video-empty">
                       {viewMode === 'movies' 
                         ? filteredMovies.length > 0 

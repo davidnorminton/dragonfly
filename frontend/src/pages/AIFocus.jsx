@@ -45,9 +45,14 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   const [isSpeaking, setIsSpeaking] = useState(false); // Track if speech synthesis is active
   const speechQueueRef = useRef([]); // Queue of text chunks to speak
   const currentUtteranceRef = useRef(null); // Current utterance being spoken
-  const geminiWSRef = useRef(null); // WebSocket for Gemini audio streaming
-  const geminiAudioQueueRef = useRef([]); // Queue for Gemini audio responses
-  const geminiMediaRecorderRef = useRef(null); // MediaRecorder for Gemini streaming
+  const geminiWSRef = useRef(null); // WebSocket for Gemini Live streaming
+  const geminiLiveActiveRef = useRef(false); // True while Gemini Live session is active
+  const geminiStoppingRef = useRef(false); // True while stopping (avoids double-close / send on closed)
+  const geminiStreamRef = useRef(null); // Mic stream for Gemini Live
+  const geminiAudioContextRef = useRef(null); // AudioContext for PCM capture
+  const geminiWorkletNodeRef = useRef(null); // AudioWorkletNode for raw PCM (replaces deprecated ScriptProcessorNode)
+  const geminiAudioQueueRef = useRef([]); // Queue for playing back Gemini audio
+  const geminiNextPlayTimeRef = useRef(0); // For gapless playback
   
   const { selectPersona, currentTitle, personas, currentPersona, reload: reloadPersonas } = usePersonas(selectedUser?.id);
   
@@ -139,6 +144,13 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
   useEffect(() => {
     return () => {
       stopBrowserSpeech();
+    };
+  }, []);
+
+  // Clean up Gemini Live on unmount
+  useEffect(() => {
+    return () => {
+      stopGeminiLive();
     };
   }, []);
 
@@ -265,28 +277,210 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
     }
   };
 
+  // --- Separate Gemini Live flow (mic stays on until user clicks again) ---
+  const startGeminiLive = async () => {
+    if (geminiLiveActiveRef.current) return;
+    geminiLiveActiveRef.current = true;
+    geminiStoppingRef.current = false;
+    setMicError('');
+    setTranscript('');
+    setAiResponseText('Connecting to Gemini Live...');
+    setPerformanceStep('listening');
+    setStepStartTime(Date.now());
+    setPerformanceStartTime(Date.now());
+    setMicStatus('listening');
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/api/gemini-live`;
+    const ws = new WebSocket(wsUrl);
+    geminiWSRef.current = ws;
+
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = async () => {
+      setAiResponseText('Gemini Live: listening...');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (!geminiLiveActiveRef.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        geminiStreamRef.current = stream;
+        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        geminiAudioContextRef.current = ctx;
+        // Inline AudioWorklet (no separate file, no ScriptProcessorNode deprecation)
+        const workletCode = `
+          class GeminiLiveProcessor extends AudioWorkletProcessor {
+            process(inputs) {
+              const input = inputs[0];
+              if (!input?.[0]?.length) return true;
+              const channel = input[0];
+              const pcm = new Int16Array(channel.length);
+              for (let i = 0; i < channel.length; i++) {
+                const s = Math.max(-1, Math.min(1, channel[i]));
+                pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              }
+              this.port.postMessage(pcm.buffer, [pcm.buffer]);
+              return true;
+            }
+          }
+          registerProcessor('gemini-live-processor', GeminiLiveProcessor);
+        `;
+        const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
+        const workletUrl = URL.createObjectURL(workletBlob);
+        try {
+          await ctx.audioWorklet.addModule(workletUrl);
+        } finally {
+          URL.revokeObjectURL(workletUrl);
+        }
+        const workletNode = new AudioWorkletNode(ctx, 'gemini-live-processor', { numberOfInputs: 1, numberOfOutputs: 1 });
+        geminiWorkletNodeRef.current = workletNode;
+        workletNode.port.onmessage = (e) => {
+          if (!geminiLiveActiveRef.current || !e.data) return;
+          if (ws.readyState !== WebSocket.OPEN) return;
+          try {
+            ws.send(e.data);
+          } catch (_) {}
+        };
+        const source = ctx.createMediaStreamSource(stream);
+        source.connect(workletNode);
+        workletNode.connect(ctx.destination);
+      } catch (err) {
+        setMicStatus('error');
+        setMicError(err?.message || 'Microphone access denied');
+        geminiLiveActiveRef.current = false;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+      }
+    };
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'error') {
+            setMicError(msg.error || 'Gemini Live error');
+            setAiResponseText('');
+          } else if (msg.type === 'connected') {
+            setAiResponseText('Gemini Live: speak now');
+          } else if (msg.type === 'text') {
+            setAiResponseText(msg.text || '');
+          } else if (msg.type === 'turn_complete') {
+            setPerformanceStep('complete');
+          }
+        } catch (_) {}
+        return;
+      }
+      if (event.data instanceof ArrayBuffer && event.data.byteLength > 0) {
+        setPerformanceStep('tts_generating');
+        setStepStartTime(Date.now());
+        const pcm = new Int16Array(event.data);
+        const ctx = geminiAudioContextRef.current;
+        if (!ctx) return;
+        const sampleRate = 24000;
+        const buffer = ctx.createBuffer(1, pcm.length, sampleRate);
+        const channel = buffer.getChannelData(0);
+        for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / (pcm[i] < 0 ? 0x8000 : 0x7FFF);
+        const gain = ctx.createGain();
+        gain.gain.value = 1;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(gain);
+        gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        const start = Math.max(now, geminiNextPlayTimeRef.current);
+        source.start(start);
+        source.stop(start + buffer.duration);
+        geminiNextPlayTimeRef.current = start + buffer.duration;
+      }
+    };
+
+    ws.onerror = () => {
+      if (!geminiStoppingRef.current) {
+        setMicError('Gemini Live connection error');
+        setMicStatus('idle');
+        setAiResponseText('');
+        setPerformanceStep(null);
+      }
+    };
+    ws.onclose = () => {
+      // Only run cleanup if we didn't initiate the close (avoids double-close / send on closed)
+      if (!geminiStoppingRef.current) {
+        stopGeminiLive();
+      }
+    };
+  };
+
+  const stopGeminiLive = () => {
+    if (geminiStoppingRef.current) return;
+    geminiStoppingRef.current = true;
+    geminiLiveActiveRef.current = false;
+    const ws = geminiWSRef.current;
+    geminiWSRef.current = null;
+    if (ws) {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'close' }));
+        } catch (_) {}
+        try {
+          ws.close();
+        } catch (_) {}
+      }
+      // Never call close() when state is CONNECTING/CLOSING/CLOSED - avoids "already CLOSING or CLOSED" error
+    }
+    if (geminiStreamRef.current) {
+      geminiStreamRef.current.getTracks().forEach((t) => t.stop());
+      geminiStreamRef.current = null;
+    }
+    if (geminiWorkletNodeRef.current && geminiAudioContextRef.current) {
+      try {
+        geminiWorkletNodeRef.current.disconnect();
+      } catch (_) {}
+      geminiWorkletNodeRef.current = null;
+    }
+    if (geminiAudioContextRef.current) {
+      geminiAudioContextRef.current.close().catch(() => {});
+      geminiAudioContextRef.current = null;
+    }
+    setMicStatus('idle');
+    setAiResponseText('');
+    setMicStream(null);
+    setPerformanceStep(null);
+  };
+
   const beginListening = () => {
-    // Only start if not already capturing/playing
+    if (useGeminiAudio) {
+      if (geminiLiveActiveRef.current) {
+        stopGeminiLive();
+        return;
+      }
+      startGeminiLive();
+      return;
+    }
+    // Normal mode: toggle on/off
+    if (micStatus === 'listening') {
+      // User clicked again while listening - stop recording
+      setMicStatus('idle');
+      setMicRestartKey((k) => k + 1); // Trigger cleanup
+      return;
+    }
     if (!['listening', 'processing', 'playing'].includes(micStatus)) {
-      // Start performance tracking
       const now = Date.now();
       setPerformanceStartTime(now);
       setStepStartTime(now);
       setPerformanceStep('listening');
-      
       setMicStatus('listening');
       setMicRestartKey((k) => k + 1);
     }
   };
 
-  // Manage microphone capture in AI focus mode
+  // Manage microphone capture in AI focus mode (skipped when Gemini Live is used)
   useEffect(() => {
+    if (useGeminiAudio) return;
     let cancelled = false;
     let mediaRecorder;
     let analyser;
     let audioContext;
-    let silenceStart = 0;
-    let silenceTimer;
     let chunks = [];
 
     const stopRecording = async () => {
@@ -331,34 +525,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
         };
         mediaRecorder.start();
 
-        // For Gemini audio mode, use longer silence detection or manual stop
-        const silenceThreshold = useGeminiAudio ? 2000 : 1200; // Longer pause for Gemini mode
-        
-        const detectSilence = () => {
-          const buffer = new Uint8Array(analyser.fftSize);
-          analyser.getByteTimeDomainData(buffer);
-          let sum = 0;
-          for (let i = 0; i < buffer.length; i++) {
-            const v = (buffer[i] - 128) / 128;
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / buffer.length);
-          // Increase threshold slightly to ignore more background noise
-          const threshold = 0.04; // silence threshold
-          const now = performance.now();
-
-          if (rms < threshold) {
-            if (silenceStart === 0) silenceStart = now;
-            if (now - silenceStart > silenceThreshold) {
-              stopRecording();
-              return;
-            }
-          } else {
-            silenceStart = 0;
-          }
-          silenceTimer = requestAnimationFrame(detectSilence);
-        };
-        silenceTimer = requestAnimationFrame(detectSilence);
+        // Mic stays on until user clicks again - no silence detection
       } catch (err) {
         setMicStatus('error');
         setMicError(err?.message || 'Microphone access denied');
@@ -373,133 +540,7 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
       setStepStartTime(Date.now());
       
       try {
-        // If Gemini audio is enabled, use Gemini native audio endpoint
-        if (useGeminiAudio) {
-          console.log('[GEMINI AUDIO] Using Gemini native audio model');
-          setPerformanceStep('ai_processing');
-          setStepStartTime(Date.now());
-          
-          const fd = new FormData();
-          fd.append('file', blob, 'audio.webm');
-          
-          const resp = await fetch('/api/gemini-audio', {
-            method: 'POST',
-            body: fd,
-          });
-          
-          const data = await resp.json();
-          console.log('[GEMINI AUDIO] Response:', data);
-          
-          if (data.success) {
-            // Update performance tracking - TTS generating (Gemini returns audio directly)
-            setPerformanceStep('tts_generating');
-            setStepStartTime(Date.now());
-            
-            if (data.mode === 'audio' && data.audio) {
-              // Gemini returned audio directly
-              console.log('[GEMINI AUDIO] Received audio response');
-              
-              // Stop filler audio
-              stopFillerAudio();
-              
-              // Create audio element and play
-              const audioBlob = new Blob([data.audio], { type: 'audio/mpeg' });
-              const audioUrl = URL.createObjectURL(audioBlob);
-              const audio = new Audio(audioUrl);
-              
-              audio.onended = () => {
-                setMicStatus('idle');
-                setAiResponseText('');
-                URL.revokeObjectURL(audioUrl);
-                setPerformanceStep('complete');
-                
-                // Auto-restart listening for continuous Gemini mode
-                if (useGeminiAudio) {
-                  setTimeout(() => {
-                    beginListening();
-                  }, 500);
-                }
-              };
-              
-              audio.onplay = () => {
-                setMicStatus('thinking');
-              };
-              
-              audio.onerror = (err) => {
-                console.error('[GEMINI AUDIO] Error playing audio:', err);
-                setMicStatus('idle');
-                setAiResponseText('');
-                setPerformanceStep('complete');
-              };
-              
-              setAudioObj(audio);
-              await audio.play();
-              
-              // Update conversation
-              setAiFocusConversations(prev => [...prev, {
-                question: '[Audio Input]',
-                answer: '[Audio Response]',
-                isStreaming: false,
-                messageId: null,
-                persona: currentPersona
-              }]);
-              
-              return;
-            } else if (data.text) {
-              // Gemini returned text, display it and auto-restart
-              console.log('[GEMINI AUDIO] Received text response:', data.text);
-              setAiResponseText(data.text);
-              setMicStatus('idle');
-              setPerformanceStep('complete');
-              
-              // Update conversation
-              setAiFocusConversations(prev => [...prev, {
-                question: '[Audio Input]',
-                answer: data.text,
-                isStreaming: false,
-                messageId: null,
-                persona: currentPersona
-              }]);
-              
-              // Auto-restart listening for continuous Gemini mode
-              setTimeout(() => {
-                beginListening();
-              }, 1500);
-              
-              return;
-            } else {
-              console.error('[GEMINI AUDIO] No audio or text in response');
-              setMicStatus('idle');
-              setAiResponseText('');
-              setPerformanceStep(null);
-              
-              // Auto-restart even on error
-              if (useGeminiAudio) {
-                setTimeout(() => {
-                  beginListening();
-                }, 1000);
-              }
-              
-              return;
-            }
-          } else {
-            console.error('[GEMINI AUDIO] Error:', data.error);
-            setMicStatus('idle');
-            setAiResponseText('');
-            setPerformanceStep(null);
-            
-            // Auto-restart even on error
-            if (useGeminiAudio) {
-              setTimeout(() => {
-                beginListening();
-              }, 1000);
-            }
-            
-            return;
-          }
-        }
-        
-        // Normal transcription flow
+        // Normal transcription flow (Gemini Live is handled separately)
         const fd = new FormData();
         fd.append('file', blob, 'audio.webm');
         const resp = await fetch('/api/transcribe', {
@@ -1087,7 +1128,6 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
       setMicError('');
       setTranscript('');
       setRouterText('');
-      if (silenceTimer) cancelAnimationFrame(silenceTimer);
       if (audioContext) audioContext.close().catch(() => {});
     }
 
@@ -1096,14 +1136,13 @@ export function AIFocusPage({ selectedUser, onNavigate }) {
       if (micStream) {
         micStream.getTracks().forEach((t) => t.stop());
       }
-      if (silenceTimer) cancelAnimationFrame(silenceTimer);
       if (audioContext) audioContext.close().catch(() => {});
       if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
       }
     };
-    // Depend on micRestartKey to allow restarting listening after retries
-  }, [micRestartKey, micStatus, aiFocusMode, currentPersona, selectedUser?.id, currentAiFocusSessionId, aiFocusTitle, aiFocusConversations]);
+    // Depend on micRestartKey to allow restarting listening after retries; skip when Gemini Live is used
+  }, [useGeminiAudio, micRestartKey, micStatus, aiFocusMode, currentPersona, selectedUser?.id, currentAiFocusSessionId, aiFocusTitle, aiFocusConversations]);
 
   // Auto-scroll conversations to bottom when new messages are added
   const conversationsRef = useRef(null);

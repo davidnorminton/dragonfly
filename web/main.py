@@ -13218,15 +13218,24 @@ async def summarize_article(request: Request):
 async def gemini_audio(request: Request):
     """
     Process audio using Google Gemini Live API with native audio model.
-    Direct 2-way audio pipeline using gemini-2.5-flash-native-audio-preview-12-2025.
+    Direct 2-way audio pipeline using gemini-2.5-flash-preview-native-audio-dialog.
     Uses the google-genai SDK with Live API for real-time audio.
+    
+    Install: pip install google-genai
     """
     try:
         from config.api_key_loader import load_api_keys
-        from google import genai
-        from google.genai import types
         import base64
-        import io
+        
+        # Try to import google-genai (new SDK with Live API)
+        try:
+            from google import genai
+            from google.genai import types
+            HAS_GENAI = True
+            logger.info("[GEMINI AUDIO] Using google-genai SDK with Live API")
+        except ImportError:
+            HAS_GENAI = False
+            logger.warning("[GEMINI AUDIO] google-genai not installed. Install with: pip install google-genai")
         
         # Load Gemini API key
         api_keys_config = await load_api_keys()
@@ -13253,17 +13262,26 @@ async def gemini_audio(request: Request):
         
         logger.info(f"[GEMINI AUDIO] Processing audio: {len(audio_content)} bytes")
         
+        if not HAS_GENAI:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "success": False, 
+                    "error": "google-genai package not installed. Run on server: pip install google-genai"
+                }
+            )
+        
         try:
             # Initialize Gemini client with Live API
             client = genai.Client(api_key=gemini_api_key)
             
-            model_name = "gemini-2.5-flash-preview-native-audio-dialog"
+            model_name = "gemini-2.5-flash-native-audio-preview-12-2025"
             logger.info(f"[GEMINI AUDIO] Using Live API with model: {model_name}")
             
             # Configure for audio response
-            config = {
-                "response_modalities": ["AUDIO"],
-            }
+            config = types.LiveConnectConfig(
+                response_modalities=["AUDIO"],
+            )
             
             # Collect audio response chunks
             audio_chunks = []
@@ -13275,9 +13293,9 @@ async def gemini_audio(request: Request):
                 audio_blob = types.Blob(data=audio_content, mime_type="audio/webm")
                 await session.send_realtime_input(audio=audio_blob)
                 
-                # Signal end of input
+                # Signal end of input and request response
                 await session.send_client_content(
-                    turns=[types.Content(parts=[types.Part(text=".")])],
+                    turns=[types.Content(parts=[types.Part(text="Please respond to the audio.")])],
                     turn_complete=True
                 )
                 
@@ -13362,6 +13380,186 @@ async def gemini_audio(request: Request):
             status_code=500,
             content={"success": False, "error": str(e)}
         )
+
+
+@app.websocket("/api/gemini-live")
+async def gemini_live_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for Gemini Live API streaming.
+    Streams PCM audio chunks bidirectionally between client and Gemini Live API.
+    This is a completely separate flow from the existing transcription/TTS system.
+    """
+    await websocket.accept()
+    
+    try:
+        from config.api_key_loader import load_api_keys
+        
+        # Try to import google-genai (new SDK with Live API)
+        try:
+            from google import genai
+            from google.genai import types
+            HAS_GENAI = True
+        except ImportError:
+            HAS_GENAI = False
+            await websocket.send_json({
+                "type": "error",
+                "error": "google-genai package not installed. Run: pip install google-genai"
+            })
+            await websocket.close()
+            return
+        
+        # Load Gemini API key
+        api_keys_config = await load_api_keys()
+        gemini_api_key = api_keys_config.get("google_gemini", {}).get("api_key")
+        
+        if not gemini_api_key:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Google Gemini API key not configured. Please add it in Settings > API Keys."
+            })
+            await websocket.close()
+            return
+        
+        # Initialize Gemini client with Live API
+        client = genai.Client(api_key=gemini_api_key)
+        model_name = "gemini-2.5-flash-native-audio-preview-12-2025"
+        logger.info(f"[GEMINI LIVE] Starting Live API session with model: {model_name}")
+        
+        # Configure for audio response
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+        )
+        
+        # Use Live API session
+        async with client.aio.live.connect(model=model_name, config=config) as session:
+            logger.info("[GEMINI LIVE] Session connected")
+            
+            # Send connection confirmation
+            await websocket.send_json({"type": "connected"})
+            
+            # Task to forward audio from client to Gemini
+            async def forward_audio_to_gemini():
+                try:
+                    while True:
+                        # Receive audio chunk from client
+                        data = await websocket.receive()
+                        
+                        if data.get("type") == "websocket.disconnect":
+                            break
+                        
+                        if "bytes" in data:
+                            # PCM audio chunk from client
+                            audio_chunk = data["bytes"]
+                            logger.debug(f"[GEMINI LIVE] Received audio chunk: {len(audio_chunk)} bytes")
+                            
+                            # Send to Gemini Live API
+                            audio_blob = types.Blob(
+                                data=audio_chunk,
+                                mime_type="audio/pcm;rate=16000"
+                            )
+                            await session.send_realtime_input(audio=audio_blob)
+                        
+                        elif "text" in data:
+                            # JSON message from client
+                            try:
+                                message = json.loads(data["text"])
+                                if message.get("type") == "end_input":
+                                    # Client signals end of input
+                                    await session.send_client_content(
+                                        turns=[types.Content(parts=[types.Part(text=".")])],
+                                        turn_complete=True
+                                    )
+                                elif message.get("type") == "close":
+                                    break
+                            except json.JSONDecodeError:
+                                pass
+                
+                except Exception as e:
+                    logger.error(f"[GEMINI LIVE] Error forwarding audio: {e}", exc_info=True)
+            
+            # Task to forward audio from Gemini to client
+            # Keep session open for continuous conversation
+            async def forward_audio_from_gemini():
+                try:
+                    # The session.receive() iterator should continue as long as session is open
+                    # It will yield responses as they come, including after turn_complete
+                    async for response in session.receive():
+                        if not response or not hasattr(response, 'server_content'):
+                            continue
+                            
+                        if response.server_content:
+                            if response.server_content.model_turn:
+                                for part in response.server_content.model_turn.parts:
+                                    if hasattr(part, 'inline_data') and part.inline_data:
+                                        # Audio data from Gemini
+                                        audio_data = part.inline_data.data
+                                        logger.debug(f"[GEMINI LIVE] Received audio from Gemini: {len(audio_data)} bytes")
+                                        
+                                        # Send to client as binary
+                                        try:
+                                            await websocket.send_bytes(audio_data)
+                                        except Exception as send_err:
+                                            logger.warning(f"[GEMINI LIVE] Failed to send audio to client: {send_err}")
+                                            break
+                                    
+                                    elif hasattr(part, 'text') and part.text:
+                                        # Text response (fallback)
+                                        try:
+                                            await websocket.send_json({
+                                                "type": "text",
+                                                "text": part.text
+                                            })
+                                        except Exception as send_err:
+                                            logger.warning(f"[GEMINI LIVE] Failed to send text to client: {send_err}")
+                                            break
+                            
+                            if response.server_content.turn_complete:
+                                logger.info("[GEMINI LIVE] Turn complete - session continues listening")
+                                try:
+                                    await websocket.send_json({"type": "turn_complete"})
+                                except Exception as send_err:
+                                    logger.warning(f"[GEMINI LIVE] Failed to send turn_complete: {send_err}")
+                                # Continue the loop - session stays open for next turn
+                    
+                    # If we exit the loop, log why
+                    logger.info("[GEMINI LIVE] Exited receive loop - session may have closed")
+                
+                except StopAsyncIteration:
+                    # Iterator ended - session closed by Gemini
+                    logger.info("[GEMINI LIVE] Session receive iterator ended (session closed by Gemini)")
+                except Exception as e:
+                    logger.error(f"[GEMINI LIVE] Error receiving from Gemini: {e}", exc_info=True)
+            
+            # Run both tasks; when one exits (e.g. client close), cancel the other
+            try:
+                t1 = asyncio.create_task(forward_audio_to_gemini())
+                t2 = asyncio.create_task(forward_audio_from_gemini())
+                done, pending = await asyncio.wait(
+                    [t1, t2], return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in pending:
+                    t.cancel()
+                    try:
+                        await t
+                    except asyncio.CancelledError:
+                        pass
+            except Exception as e:
+                logger.error(f"[GEMINI LIVE] Session error: {e}", exc_info=True)
+            finally:
+                logger.info("[GEMINI LIVE] Session closed")
+    
+    except WebSocketDisconnect:
+        logger.info("[GEMINI LIVE] Client disconnected")
+    except Exception as e:
+        logger.error(f"[GEMINI LIVE] WebSocket error: {e}", exc_info=True)
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": str(e)
+            })
+        except:
+            pass
+        await websocket.close()
 
 
 @app.post("/api/transcribe")
