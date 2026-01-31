@@ -941,9 +941,11 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
   const hasMoreToLoad = viewAllVisibleCount < currentViewAllList.length;
 
   useEffect(() => {
-    if (!hasMoreToLoad || !loadMoreSentinelRef.current || !mainContentRef.current) return;
-    const sentinel = loadMoreSentinelRef.current;
+    if (!hasMoreToLoad || !mainContentRef.current) return;
+    const root = mainContentRef.current;
     const listLength = currentViewAllList.length;
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel) return;
     const observer = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
@@ -951,11 +953,12 @@ export function VideosPage({ searchQuery = '', onSearchResultsChange, onGenreCli
           setViewAllVisibleCount((prev) => Math.min(prev + VIEW_ALL_PAGE_SIZE, listLength));
         }
       },
-      { root: mainContentRef.current, rootMargin: '200px', threshold: 0 }
+      { root, rootMargin: '200px', threshold: 0 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMoreToLoad, currentViewAllList.length]);
+    // Re-run when visible count or list changes so we re-attach to the current sentinel (e.g. after sort/genre change)
+  }, [hasMoreToLoad, currentViewAllList.length, viewAllVisibleCount]);
 
   // Filter episodes across all TV shows
   const filteredEpisodes = useMemo(() => {
